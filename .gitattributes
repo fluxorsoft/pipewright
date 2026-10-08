@@ -1,0 +1,6 @@
+# Store text files with LF line endings for every contributor; shell scripts must stay LF to run in CI.
+* text=auto eol=lf
+*.sh text eol=lf
+*.csv text eol=lf
+*.png binary
+*.whl binary

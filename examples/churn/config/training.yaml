@@ -1,0 +1,21 @@
+# Training: defaults, reproducibility, experiment tracking and hyperparameter search.
+training:
+  hyperparameters:
+    hidden_units: 32
+    epochs: 40
+    batch_size: 128
+    learning_rate: 0.003
+    dropout: 0.1
+    weight_decay: 0.0001
+  seed: 42
+  # experiment: { name: churn }          # Agent Platform Experiment; defaults to the use case name
+  tuning:
+    enabled: true
+    metric: auc
+    goal: maximize
+    max_trials: 6                        # the first trial is always the defaults above
+    parallel_trials: 3
+    search_space:
+      learning_rate: { type: double, min: 0.0005, max: 0.02, scale: log }
+      hidden_units:  { type: discrete, values: [16, 32, 64] }
+      dropout:       { type: double, min: 0.0, max: 0.3 }

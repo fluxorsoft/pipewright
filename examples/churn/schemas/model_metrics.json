@@ -1,0 +1,127 @@
+[
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_uri",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "model_display_name",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "auc",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "accuracy",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "f1",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "auc_threshold",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "decision",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "train_rows",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "test_rows",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "evaluated_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "pr_auc",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "precision",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "recall",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "log_loss",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "brier",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "calibration_error",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "primary_metric",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "primary_value",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "champion_version",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "champion_value",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "decision_reasons",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "metrics_json",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "hyperparameters_json",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "environment",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  }
+]

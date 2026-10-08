@@ -1,0 +1,40 @@
+# {{usecase}}: created from the Pipewright churn example (pipewright new-usecase --from churn).
+# This folder now belongs to {{owner}}. Reference: CONTEXT.md in the Pipewright repository.
+#
+# This file says what the use case is and who governs it. Everything else is in config/, one concern per file:
+#   config/triggers.yaml    what starts a run (landing files, schedules, API)
+#   config/runtime.yaml     pipeline parameters, compute per step, the test command
+#   config/tables.yaml      BigQuery tables the use case owns
+#   config/data.yaml        data contract, label, split, features, personal data
+#   config/training.yaml    hyperparameters, experiment, tuning
+#   config/evaluation.yaml  metrics, gates, champion, slices, explainability, model card
+#   config/operations.yaml  inference, monitoring, retraining
+#   environments/<env>.yaml per-environment overrides
+# `pipewright resolve --env <env>` shows the merged result.
+apiVersion: pipewright/v1
+kind: UseCase
+metadata:
+  name: {{usecase}}
+  owner: {{owner}}
+  description: Predicts which customers are likely to cancel in the next month.
+  objective: Rank customers by churn risk so the retention team can contact the riskiest first.
+  labels: { product: churn, data-classification: confidential }
+
+spec:
+  tenant: {{tenant}}                      # given to you by the platform team
+  include: [config/*.yaml]
+
+  pipelines:
+    training:  { file: training_pipeline.py,  function: churn_training_pipeline }
+    inference: { file: inference_pipeline.py, function: churn_inference_pipeline }
+  components: { dir: components/, requirements: components/requirements.txt }
+  framework:  pytorch
+
+  model:
+    name: {{model_name}}
+    promotion: model
+    serving: { enabled: false, target: vertex, machine: n1-standard-2, canary_percent: 10 }
+
+  approvals:
+    promote_model: manual                # a passing model is a candidate until `pipewright model approve`
+    deploy_model: manual

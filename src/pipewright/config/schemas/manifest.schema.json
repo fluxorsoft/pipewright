@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pipewright.dev/schemas/v1/manifest.schema.json",
+  "title": "Pipewright environment manifest (written by the platform side, read by the ML side)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "environment",
+    "blueprint",
+    "orchestrator",
+    "project",
+    "region",
+    "artifact_registry",
+    "artifacts_bucket",
+    "landing_bucket",
+    "launcher",
+    "tenants"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "pipewright/v1"
+    },
+    "environment": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,30}$"
+    },
+    "blueprint": {
+      "type": "string",
+      "pattern": "^(poc|private-managed|private-gke)(@[0-9]+\\.[0-9]+\\.[0-9]+)?$"
+    },
+    "orchestrator": {
+      "enum": [
+        "vertex",
+        "kfp"
+      ]
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "region": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "docker",
+        "kfp"
+      ],
+      "properties": {
+        "docker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kfp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python": {
+          "type": "string"
+        }
+      }
+    },
+    "artifacts_bucket": {
+      "type": "string",
+      "minLength": 1
+    },
+    "landing_bucket": {
+      "type": "string",
+      "minLength": 1
+    },
+    "launcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service_account"
+      ],
+      "properties": {
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_account": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subscription": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_requests_topic": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[^/]+/topics/[^/]+$",
+          "description": "Pub/Sub topic for run requests from inside the perimeter (pushed to the launcher's /pubsub/run); used instead of calling /run when set"
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deploy_model": {
+          "enum": [
+            "manual",
+            "auto"
+          ]
+        },
+        "promote_model": {
+          "enum": [
+            "manual",
+            "auto"
+          ]
+        },
+        "retraining": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "platform limits on retrain decisions in this environment",
+          "properties": {
+            "allowed_modes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "enum": [
+                  "off",
+                  "propose",
+                  "candidate"
+                ]
+              }
+            },
+            "required_approvers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,30}$"
+              },
+              "description": "approver groups every use case must include (e.g. model risk)"
+            },
+            "max_snooze_days": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "tenants": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]{0,30}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runner_service_account",
+          "bigquery_dataset"
+        ],
+        "properties": {
+          "runner_service_account": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bigquery_dataset": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,1023}$"
+          },
+          "landing_prefix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "online_serving": {
+            "type": "boolean"
+          },
+          "namespace": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputs_uri": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^gs://[^/]+/.*/$",
+            "description": "where use cases of this tenant may write GCS outputs (ends with /)"
+          },
+          "decision_feed": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^projects/[^/]+/subscriptions/[^/]+$",
+            "description": "subscription with this tenant's retrain decision events (use cases opt in with retraining.decisions.publish)"
+          }
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events_topic": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[^/]+/topics/[^/]+$",
+          "description": "Pub/Sub topic for Pipewright lifecycle events"
+        },
+        "log_sinks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "informational: where the platform routes logs (e.g. dynatrace)"
+        },
+        "otlp_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_dataset": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,1023}$",
+          "description": "BigQuery dataset with lifecycle events and audit logs (evidence packs)"
+        },
+        "evidence_uri": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^gs://[^/]+/.*/$",
+          "description": "write-once location for evidence packs (ends with /)"
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "private profiles: applied by Pipewright to every pipeline job, model and endpoint it creates",
+      "properties": {
+        "kms_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$",
+          "description": "CMEK key for pipeline jobs, models and endpoints"
+        },
+        "network": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[0-9]+/global/networks/[^/]+$",
+          "description": "VPC that pipeline jobs peer with (projects/<number>/global/networks/<name>)"
+        },
+        "reserved_ip_ranges": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Private Services Access ranges for pipeline jobs"
+        },
+        "perimeter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "informational: the VPC Service Controls perimeter"
+        },
+        "bigquery_kms_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$",
+          "description": "CMEK key for BigQuery query results (required when the CMEK organization policy covers BigQuery)"
+        }
+      }
+    },
+    "approver_groups": {
+      "type": "object",
+      "description": "registered approver groups: a member approves by publishing to the group's topic, so IAM on the topic decides who belongs (any Google group, user or service account)",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,30}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "subscription"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "pattern": "^projects/[^/]+/topics/[^/]+$"
+          },
+          "subscription": {
+            "type": "string",
+            "pattern": "^projects/[^/]+/subscriptions/[^/]+$",
+            "description": "push subscription to the launcher's /retraining/decide"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

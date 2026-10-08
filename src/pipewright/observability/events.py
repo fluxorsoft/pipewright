@@ -1,0 +1,69 @@
+"""Lifecycle events from the launcher and the CLI.
+
+An event is one structured log line (Cloud Logging reads JSON on stdout) and, when the environment manifest sets
+observability.events_topic, a Pub/Sub message. The platform routes both to its tools (Dynatrace, Datadog, Splunk,
+PagerDuty, Slack, BigQuery); Pipewright has no vendor code. Components emit the same shape through
+pipewright_runtime.emit_event.
+
+Event types: run.submitted, run.duplicate, release.live, release.rolled_back, model.registered, model.approved,
+model.deployed, training.evaluated, monitoring.recorded, monitoring.alert, retrain.requested, data.erased; retrain
+decisions (pipewright.retraining): retrain.proposed, retrain.approval, retrain.approved, retrain.declined,
+retrain.snoozed, retrain.reopened, retrain.escalated, retrain.digest.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+
+log = logging.getLogger("pipewright.events")
+
+
+def event(event_type: str, usecase: str | None, environment: str | None, tenant: str | None = None,
+          release: str | None = None, run_id: str | None = None, **data) -> dict:
+    return {"event_type": event_type, "time": datetime.now(timezone.utc).isoformat(), "usecase": usecase,
+            "environment": environment, "tenant": tenant, "release": release, "run_id": run_id, "data": data}
+
+
+def _labels(e: dict) -> dict:
+    keys = {"usecase": "pipewright-usecase", "tenant": "pipewright-tenant", "environment": "pipewright-environment",
+            "release": "pipewright-release", "run_id": "run-id"}
+    return {label: str(e[k]) for k, label in keys.items() if e.get(k)}
+
+
+def publish_url(topic: str, region: str | None = None) -> str:
+    """The environment's regional Pub/Sub endpoint: topics that enforce message storage in transit (private
+    profiles) accept publishes only there, and it works for every other topic too."""
+    host = f"{region}-pubsub.googleapis.com" if region else "pubsub.googleapis.com"
+    return f"https://{host}/v1/{topic}:publish"
+
+
+def emit(e: dict, topic: str | None = None, gcp=None, stream=None, region: str | None = None,
+         attributes: dict | None = None) -> bool:
+    """Writes the log line; publishes when a topic is set. Returns whether it was published. Never raises.
+    attributes: extra Pub/Sub attributes for subscription filters (e.g. decision_feed)."""
+    entry = {"severity": "NOTICE", "message": f"pipewright event {e['event_type']}",
+             "logging.googleapis.com/labels": _labels(e), "pipewright_event": e}
+    print(json.dumps(entry, default=str), file=stream or sys.stdout, flush=True)
+    topic = topic or os.environ.get("PIPEWRIGHT_EVENTS_TOPIC")
+    if not topic:
+        return False
+    try:
+        if gcp is None:
+            from pipewright.gcp import Gcp
+
+            gcp = Gcp()
+        attributes = {**{k: str(v) for k, v in (attributes or {}).items()},
+                      **{k: str(e[k]) for k in ("event_type", "usecase", "environment", "tenant") if e.get(k)}}
+        message = {"data": base64.b64encode(json.dumps(e, default=str).encode()).decode(), "attributes": attributes}
+        r = gcp.post(publish_url(topic, region), {"messages": [message]})
+        if not r.ok:
+            log.warning("event %s not published to %s: %s", e["event_type"], topic, r.status)
+        return r.ok
+    except Exception as ex:  # noqa: BLE001 - events must never break a release or a launch
+        log.warning("event %s not published: %s", e["event_type"], ex)
+        return False

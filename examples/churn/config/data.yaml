@@ -1,0 +1,32 @@
+# Data: what the pipelines accept, how training data is split, which columns the model uses.
+data:
+  contract:                              # checked by validate-data in both pipelines
+    columns:
+      - { name: customer_id,            type: string,  required: true, max_null_fraction: 0 }
+      - { name: snapshot_date,          type: date,    required: true, max_null_fraction: 0 }
+      - { name: tenure_months,          type: integer, min: 0, max: 1000 }
+      - { name: monthly_charges,        type: float,   min: 0, max: 10000 }
+      - { name: total_charges,          type: float,   min: 0, max: 1000000 }
+      - { name: contract_length_months, type: integer, allowed: [1, 12, 24, 36] }
+      - { name: num_support_tickets,    type: integer, min: 0, max: 1000 }
+      - { name: num_products,           type: integer, min: 1, max: 20 }
+      - { name: has_paperless_billing,  type: integer, allowed: [0, 1] }
+      - { name: avg_monthly_usage_gb,   type: float,   min: 0, max: 100000 }
+      - { name: churned,                type: integer, allowed: [0, 1] }
+    min_rows: 500
+    max_null_fraction: 0.05
+    unique: [customer_id]
+    allow_extra_columns: true
+  label: { column: churned, values: [0, 1], positive: 1 }
+  split:
+    strategy: time                       # train on the past, test on the latest months
+    time_column: snapshot_date
+    test_fraction: 0.2
+    validation_fraction: 0.15            # tuning trials are scored here
+
+features:
+  exclude: []                            # default: every contract column except label, time and personal data
+
+data_protection:
+  personal_data_columns: [customer_id]   # never a feature; erased by `pipewright data erase`
+  erasure: { key_column: customer_id }

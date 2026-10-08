@@ -1,0 +1,31 @@
+# Evaluation: when a model is good enough to register, and how it is described.
+evaluation:
+  primary_metric: auc
+  decision_threshold: 0.5
+  metrics: [auc, pr_auc, accuracy, f1, precision, recall, log_loss, brier, calibration_error]
+  gates:                                 # every gate must pass
+    - { metric: auc, min: 0.75 }
+    - { metric: calibration_error, max: 0.1 }
+  champion:                              # must also beat the current default version
+    enabled: true
+    metric: auc
+    min_improvement: 0.0
+  slices: [contract_length_months]       # metrics per value, in the evaluation report
+  slice_gates:
+    # Within-slice AUC is naturally lower when the slice column is itself a strong feature (contract length is
+    # the strongest here), so the gap allowed is wide: it catches a slice the model fails on, not the usual dip.
+    - { metric: auc, max_gap: 0.25, min_rows: 100 }
+
+explainability:
+  enabled: true
+  method: permutation
+  top_k: 8
+
+# registry.set_default follows approvals.promote_model (usecase.yaml): auto -> a version that passes evaluation
+# becomes the default at once; manual -> it is a candidate until `pipewright model approve --version N`.
+
+model_card:
+  intended_use: Weekly prioritisation of retention calls for existing customers.
+  out_of_scope: Pricing, credit or any decision made about a customer without human review.
+  limitations: Trained on synthetic data; customers with under one month of tenure are rare in training.
+  ethical_considerations: No protected attributes are used; customer_id is personal data and never a feature.

@@ -1,0 +1,10 @@
+# Triggers: what starts a run, and which pipeline it starts.
+triggers:
+  landing: { suffixes: [.csv], pipeline: training }   # a CSV under your landing prefix retrains
+  api: true                              # POST /run {"usecase", "pipeline", "source_uri"} (scoring, retrains)
+  schedules:
+    - name: daily-scoring
+      cron: "0 6 * * *"
+      timezone: Europe/London
+      pipeline: inference
+      source_uri: gs://${buckets.landing}/samples/{{usecase}}/scoring_customers.csv

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_uri",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "model_name",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "model_version_id",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "rows_scored",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "max_feature_psi",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "drifted_features",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "prediction_psi",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "performance_metric",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "performance_value",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "labelled_rows",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "alert",
+    "type": "BOOLEAN",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "triggers",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "retrain_status",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "details_json",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "monitored_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  }
+]

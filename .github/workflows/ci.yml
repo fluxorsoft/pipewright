@@ -1,0 +1,64 @@
+# Pipewright product CI: every pull request and push to main, and the first stage of release.yml.
+# Lint and tests, the example's tests, the wheel (contents checked, installed fresh, smoke tested), the launcher
+# image built from that wheel (not pushed). The wheel is kept as the `dist` artifact for release.yml.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - name: Example use case tests
+        run: uv run --no-project --with-requirements examples/churn/tests/requirements.txt python -m pytest examples/churn/tests -q
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel and sdist
+        run: uv build --out-dir dist
+      - name: Check wheel contents
+        run: uv run --no-project python scripts/check_package.py dist
+      - name: Install the wheel in a fresh environment and smoke test it
+        run: |
+          python3 -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/pip" install "$(ls dist/pipewright-*-py3-none-any.whl)[gcp]"
+          bash scripts/smoke_test.sh "$RUNNER_TEMP/smoke/bin/pipewright"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  launcher-image:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Build the launcher image from the wheel (not pushed)
+        run: |
+          rm -f dist/*.tar.gz
+          docker build -f images/launcher.Dockerfile -t pipewright-launcher:ci .

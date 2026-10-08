@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pipewright.dev/schemas/v1/environment.schema.json",
+  "title": "Pipewright Environment (ML persona)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "pipewright/v1" },
+    "kind": { "const": "Environment" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "manifest": {
+          "type": "string",
+          "description": "gs:// URI or a path relative to this file. Fills the names below when they are omitted."
+        },
+        "project": { "type": "string", "minLength": 1 },
+        "region": { "type": "string", "minLength": 1 },
+        "artifact_registry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["docker", "kfp"],
+          "properties": {
+            "docker": { "type": "string", "minLength": 1 },
+            "kfp": { "type": "string", "minLength": 1 }
+          }
+        },
+        "artifacts_bucket": { "type": "string", "minLength": 1 },
+        "promotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from"],
+          "properties": { "from": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" } }
+        }
+      },
+      "anyOf": [
+        { "required": ["manifest"] },
+        { "required": ["project", "region", "artifact_registry", "artifacts_bucket"] }
+      ]
+    }
+  }
+}

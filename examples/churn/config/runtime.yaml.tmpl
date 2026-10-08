@@ -1,0 +1,14 @@
+# Runtime: values passed to the pipelines, compute per step, and how to test the code.
+parameters:                              # passed to every pipeline that declares them
+  bq_dataset: ${resources.bigquery_dataset}
+  model_display_name: ${model.name}
+  raw_table: {{table_prefix}}raw_customers
+  metrics_table: {{table_prefix}}model_metrics
+
+steps:                                   # applied to the compiled pipelines; no pipeline code change
+  train-model: { cpu: 4, memory: 8G }
+  tune-trial:  { cpu: 2, memory: 4G, retries: 1 }
+  evaluate-model: { cpu: 2, memory: 4G }
+
+tests:
+  command: uv run --no-project --with-requirements tests/requirements.txt python -m pytest tests -q

@@ -1,0 +1,277 @@
+"""UseCase (+ include files + environment overrides) + Environment -> ResolvedUseCase."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pipewright.config.document import discover_usecases, load_usecase_document
+from pipewright.config.environment import Environment, load_environment, load_manifest
+from pipewright.config.merge import deep_merge
+from pipewright.config.ml import resolve_ml
+from pipewright.config.models import PipelineRef, ResolvedUseCase, Table
+from pipewright.config.references import interpolate, interpolate_tree
+from pipewright.config.schema import validate
+from pipewright.errors import ConfigError
+from pipewright.runs import sources
+
+__all__ = ["Environment", "ResolvedUseCase", "Table", "deep_merge", "discover_usecases", "interpolate",
+           "load_environment", "load_manifest", "resolve_usecase"]
+
+_SERVING_DEFAULTS = {"enabled": False, "target": "vertex", "machine": "n1-standard-2", "replicas": {"min": 1, "max": 1}}
+_APPROVAL_DEFAULTS = {"promote_model": "manual", "deploy_model": "manual", "approvers": []}
+_CRON = re.compile(r"^\S+(\s+\S+){4}$")
+
+
+def _load_table_schema(path: Path, problems: list[str], label: str) -> list:
+    if not path.is_file():
+        problems.append(f"{label}: schema file not found: {path.name}")
+        return []
+    try:
+        fields = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        problems.append(f"{label}: {path.name} is not valid JSON ({e})")
+        return []
+    if not isinstance(fields, list) or not all(isinstance(f, dict) and "name" in f and "type" in f for f in fields):
+        problems.append(f"{label}: {path.name} must be a BigQuery schema: a list of {{name, type, mode}} fields")
+        return []
+    return fields
+
+
+def _resources(tenant: str, explicit: dict, env: Environment, problems: list[str]) -> dict:
+    resources: dict[str, Any] = {}
+    if env.tenants:
+        if tenant not in env.tenants:
+            problems.append(f"tenant {tenant!r} is not in environment {env.name!r}: ask the platform team to add it")
+            return resources
+        from_manifest = env.tenants[tenant]
+        for key in ("runner_service_account", "bigquery_dataset", "landing_prefix", "outputs_uri"):
+            mv, ev = from_manifest.get(key), explicit.get(key)
+            if ev is not None and mv is not None and ev != mv:
+                problems.append(f"spec.resources.{key} is {ev!r} but the manifest says {mv!r}")
+            resources[key] = ev if ev is not None else mv
+        resources["online_serving"] = from_manifest.get("online_serving", False)
+        if from_manifest.get("namespace"):
+            resources["namespace"] = from_manifest["namespace"]
+        return resources
+    resources = {**explicit, "online_serving": True}
+    for key in ("runner_service_account", "bigquery_dataset"):
+        if key not in resources:
+            problems.append(f"spec.resources.{key} is required when the environment has no manifest")
+    return resources
+
+
+def _pipelines(eff: dict, directory: Path, problems: list[str]) -> dict[str, PipelineRef]:
+    refs = dict(eff.get("pipelines") or {})
+    if "pipeline" in eff:
+        if "training" in refs:
+            problems.append("set either spec.pipeline or spec.pipelines.training, not both")
+        refs["training"] = eff["pipeline"]
+    out = {}
+    for name, ref in refs.items():
+        f = (directory / ref["file"]).resolve()
+        if not f.is_file():
+            problems.append(f"pipelines.{name}.file not found: {ref['file']}")
+        out[name] = PipelineRef(name, f, ref["function"])
+    return out
+
+
+def _triggers(eff: dict, resources: dict, tenant: str, pipelines: dict, problems: list[str]) -> dict:
+    triggers = {"landing": None, "schedules": [], "api": False, **eff.get("triggers", {})}
+    if triggers["landing"]:
+        triggers["landing"] = {"pipeline": "training", **triggers["landing"]}
+        if not resources.get("landing_prefix"):
+            problems.append(f"triggers.landing is set but tenant {tenant!r} has no landing prefix: "
+                            "remove it or ask the platform team for one")
+        if triggers["landing"]["pipeline"] not in pipelines:
+            problems.append(f"triggers.landing.pipeline {triggers['landing']['pipeline']!r} is not in pipelines")
+    names = [s["name"] for s in triggers["schedules"]]
+    if len(names) != len(set(names)):
+        problems.append("triggers.schedules: schedule names must be unique")
+    for s in triggers["schedules"]:
+        s.setdefault("pipeline", "training")
+        if s["pipeline"] not in pipelines:
+            problems.append(f"triggers.schedules[{s['name']}].pipeline {s['pipeline']!r} is not in pipelines")
+        if not _CRON.match(s["cron"].strip()):
+            problems.append(f"triggers.schedules[{s['name']}]: cron {s['cron']!r} must have 5 fields")
+        try:
+            ZoneInfo(s["timezone"])
+        except (ZoneInfoNotFoundError, ValueError):
+            problems.append(f"triggers.schedules[{s['name']}]: time zone {s['timezone']!r} is not valid "
+                            "(e.g. Europe/London)")
+    return triggers
+
+
+def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
+    assembled = load_usecase_document(Path(path))
+    doc, path = assembled.doc, assembled.path
+    validate(doc, "usecase", str(path))
+    meta, spec = doc["metadata"], doc["spec"]
+    directory = path.parent.resolve()
+    problems: list[str] = []
+
+    if meta["name"] != path.parent.name:
+        problems.append(f"metadata.name is {meta['name']!r} but the folder is {path.parent.name!r}")
+
+    # Per-environment overrides: deep merge, lists replace.
+    overrides = spec.get("environments", {}).get(env.name, {})
+    base = {k: v for k, v in spec.items() if k not in ("environments", "include")}
+    eff = deep_merge(base, overrides)
+
+    tenant = eff["tenant"]
+    resources = _resources(tenant, eff.get("resources", {}), env, problems)
+    pipelines = _pipelines(eff, directory, problems)
+    triggers = _triggers(eff, resources, tenant, pipelines, problems)
+
+    # Model, serving, approvals, policies.
+    model = {"promotion": "model", **eff["model"]}
+    model["serving"] = deep_merge(_SERVING_DEFAULTS, eff["model"].get("serving", {}))
+    serving = model["serving"]
+    if serving["replicas"]["min"] > serving["replicas"]["max"]:
+        problems.append("model.serving.replicas: min is greater than max")
+    if serving["enabled"]:
+        if serving["target"] == "kserve" and env.orchestrator != "kfp":
+            problems.append(f"model.serving.target kserve is only available on private-gke (this is {env.blueprint})")
+        if not resources.get("online_serving", False):
+            problems.append(f"tenant {tenant!r} is not enabled for online serving in {env.name!r}")
+
+    approvals = deep_merge(_APPROVAL_DEFAULTS, eff.get("approvals", {}))
+    for key, minimum in env.policies.items():
+        if key in _APPROVAL_DEFAULTS and minimum == "manual" and approvals.get(key) == "auto":
+            problems.append(f"approvals.{key}: auto is not allowed in {env.name} (platform policy)")
+
+    # Components.
+    components_dir = (directory / eff["components"]["dir"]).resolve()
+    if not components_dir.is_dir():
+        problems.append(f"components.dir not found: {eff['components']['dir']}")
+    requirements = None
+    if eff["components"].get("requirements"):
+        requirements = (directory / eff["components"]["requirements"]).resolve()
+        if not requirements.is_file():
+            problems.append(f"components.requirements not found: {eff['components']['requirements']}")
+
+    # Tables.
+    tables: dict[str, Table] = {}
+    bq = eff.get("outputs", {}).get("bigquery", {})
+    for tname, tdef in bq.get("tables", {}).items():
+        tdef = {"schema": tdef} if isinstance(tdef, str) else tdef
+        label = f"outputs.bigquery.tables.{tname}"
+        schema_path = (directory / tdef["schema"]).resolve()
+        fields = _load_table_schema(schema_path, problems, label)
+        columns = {f["name"] for f in fields}
+        partition = tdef.get("partition")
+        if fields and partition and partition["field"] not in columns:
+            problems.append(f"{label}: partition field {partition['field']!r} is not a column")
+        for c in tdef.get("cluster", []):
+            if fields and c not in columns:
+                problems.append(f"{label}: cluster field {c!r} is not a column")
+        tables[tname] = Table(tname, schema_path, fields, partition, tdef.get("cluster", []), tdef.get("description"))
+
+    # ${...} references: parameters, schedule sources, ML sections.
+    ctx = {
+        "usecase": meta["name"], "tenant": tenant, "environment": env.name, "project": env.project,
+        "region": env.region, "resources": {k: v for k, v in resources.items() if isinstance(v, str)},
+        "model": {"name": model["name"]},
+        "buckets": {"artifacts": env.artifacts_bucket, "landing": env.landing_bucket or ""},
+    }
+    parameters = {k: interpolate(v, ctx, f"parameters.{k}", problems) for k, v in eff.get("parameters", {}).items()}
+    for s in triggers["schedules"]:
+        if "source_uri" in s:
+            s["source_uri"] = interpolate(s["source_uri"], ctx, f"triggers.schedules[{s['name']}].source_uri",
+                                          problems)
+            if "${" not in s["source_uri"] and sources.problem(s["source_uri"]):
+                problems.append(f"triggers.schedules[{s['name']}].source_uri: {sources.problem(s['source_uri'])}")
+    ml_spec = interpolate_tree({k: eff[k] for k in eff if k in _ml_keys()}, ctx, "spec", problems)
+    ml = resolve_ml(ml_spec, meta["name"], "inference" in pipelines, set(tables), problems)
+    retrain_source = ml["retraining"].get("source_uri")
+    if retrain_source and "${" not in retrain_source and sources.problem(retrain_source):
+        problems.append(f"retraining.source_uri: {sources.problem(retrain_source)}")
+    _retraining_policy(ml["retraining"], approvals, env, problems)
+    # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
+    registry = ml["registry"]
+    if registry["set_default"] is None:
+        registry["set_default"] = "on_approval" if approvals.get("promote_model") == "auto" else "manual"
+    elif registry["set_default"] == "on_approval" and approvals.get("promote_model") != "auto":
+        problems.append(f"registry.set_default on_approval lets the pipeline promote models, but "
+                        f"approvals.promote_model is {approvals.get('promote_model')} in {env.name}: remove "
+                        "registry.set_default (it then follows the approval) or set promote_model: auto")
+
+    steps = deep_merge(eff.get("resources_per_step", {}), eff.get("steps", {}))
+
+    # Where tables are written (section 7.4): BigQuery, Parquet on GCS, or both.
+    outputs_cfg = eff.get("outputs", {})
+    store = outputs_cfg.get("store", "bigquery")
+    gcs_cfg = {"format": "parquet", "external_tables": True, **outputs_cfg.get("gcs", {})}
+    gcs_uri = None
+    if store in ("gcs", "both"):
+        if not resources.get("outputs_uri"):
+            problems.append(f"outputs.store {store} needs an outputs location: tenant {tenant!r} has no outputs_uri "
+                            "in the manifest (ask the platform team)")
+        else:
+            gcs_uri = f"{resources['outputs_uri']}{meta['name']}/"
+    sql_reads = [what for what, on in (("monitoring.performance", ml["monitoring"]["performance"]["enabled"]),
+                                       ("retraining cooldown", ml["retraining"]["enabled"]),
+                                       ("pipewright monitor status", bool(ml["monitoring"]["output_table"])))
+                 if on]
+    if store == "gcs" and not gcs_cfg["external_tables"] and sql_reads:
+        problems.append(f"outputs.gcs.external_tables is false, but {', '.join(sql_reads)} read tables with SQL: "
+                        "keep external tables on, or use store: both")
+    outputs = {"store": store, "gcs": {**gcs_cfg, "uri": gcs_uri},
+               "tables": {n: [{"name": f["name"], "type": f["type"].upper(),
+                               "mode": (f.get("mode") or "NULLABLE").upper()} for f in t.fields]
+                          for n, t in tables.items()}}
+
+    if problems:
+        raise ConfigError(problems, source=f"{path} ({env.name})")
+
+    return ResolvedUseCase(
+        name=meta["name"], environment=env.name, owner=meta["owner"], tenant=tenant, resources=resources,
+        directory=directory, pipelines=pipelines, components_dir=components_dir, requirements=requirements,
+        framework=eff.get("framework", "pytorch"), triggers=triggers, parameters=parameters, steps=steps,
+        tables=tables, retention_days=bq.get("retention_days"), model=model, approvals=approvals,
+        labels=meta.get("labels", {}), contacts=meta.get("contacts", []), source=str(path),
+        description=meta.get("description", ""), objective=meta.get("objective", ""), ml=ml,
+        tests_command=(eff.get("tests") or {}).get("command"), sources=assembled.sources,
+        platform={"project": env.project, "region": env.region, "launcher_url": env.launcher.get("url"),
+                  "bigquery_dataset": resources.get("bigquery_dataset"), "tenant": tenant,
+                  "events_topic": env.observability.get("events_topic"),
+                  "run_requests_topic": env.launcher.get("run_requests_topic"),
+                  "kms_key": env.security.get("kms_key"),
+                  "bigquery_kms_key": env.security.get("bigquery_kms_key")},
+        outputs=outputs,
+    )
+
+
+def _retraining_policy(retraining: dict, approvals: dict, env: Environment, problems: list[str]) -> None:
+    """Retrain decisions against the platform: allowed modes, required approver groups, the snooze cap."""
+    policy = env.policies.get("retraining") or {}
+    mode = retraining["mode"]
+    allowed = policy.get("allowed_modes")
+    if allowed and mode not in allowed:
+        problems.append(f"retraining.mode {mode} is not allowed in {env.name} (platform policy: {', '.join(allowed)})")
+    required = list(dict.fromkeys([*policy.get("required_approvers", []), *retraining["approvals"]["required"]]))
+    retraining["approvals"]["required"] = required
+    if mode == "off":
+        return
+    if env.manifest_source:
+        for group in required:
+            if group not in env.approver_groups:
+                known = ", ".join(sorted(env.approver_groups)) or "none"
+                problems.append(f"retraining.approvals.required: {group!r} is not an approver group in {env.name} "
+                                f"(registered: {known})")
+    cap = policy.get("max_snooze_days")
+    if cap and retraining["snooze"]["max_days"] > cap:
+        problems.append(f"retraining.snooze.max_days {retraining['snooze']['max_days']} is above the {env.name} "
+                        f"limit of {cap} days")
+    if mode == "candidate" and approvals.get("promote_model") != "manual":
+        problems.append("retraining.mode candidate trains without a decision, so a person must promote: set "
+                        "approvals.promote_model: manual")
+
+
+def _ml_keys() -> tuple[str, ...]:
+    from pipewright.config.ml import SECTIONS
+
+    return SECTIONS

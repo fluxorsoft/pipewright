@@ -1,0 +1,33 @@
+# Operations: scoring new data, watching the model in use, and when to retrain.
+inference:
+  output_table: {{table_prefix}}predictions
+  decision_threshold: 0.5
+
+monitoring:
+  output_table: {{table_prefix}}model_monitoring
+  alerts:                                 # `pipewright alerts sync` turns these into email alerts
+    notify: []                            # e.g. [team-ml@yourcompany.com, ml-oncall@yourcompany.com] (lists work)
+    events: [monitoring.alert, training.rejected]   # also: model.registered, training.evaluated
+    severity: WARNING
+  drift: { enabled: true, method: psi, threshold: 0.2 }     # features default to the model's features
+  prediction_drift: { enabled: true, threshold: 0.2 }
+  performance:                            # once outcomes arrive: join predictions to observed churn
+    enabled: true
+    labels: { table: {{table_prefix}}churn_outcomes, key: customer_id, label: churned }
+    metric: auc
+    min: 0.7
+
+retraining:                             # drift or a performance drop opens a case; a person decides
+  mode: propose                         # off (alerts only) | propose | candidate (trains, never promotes)
+  when: [drift, performance]            # what opens a case
+  cooldown_days: 7                      # after an approved retrain, alerts are recorded but open no new case
+  source_uri: gs://${buckets.landing}/samples/{{usecase}}/customers.csv   # default data; approvers may choose
+  decisions:
+    notify: []                          # emailed the case summary and ID; email never approves
+    publish: false                      # true: also on your team's decision feed (Pub/Sub), for your own apps
+    escalate_after_days: 3
+    escalate_notify: []
+  approvals:
+    required: []                        # approver groups the platform registered, e.g. [ml-leads, model-risk]
+    separate_from_requester: true
+  snooze: { max_days: 30, reopen_when_worse_by: 0.1 }

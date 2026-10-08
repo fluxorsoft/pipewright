@@ -1,0 +1,8 @@
+# Overrides for dev (deep merge; lists replace). Only some keys may vary per environment: CONTEXT.md lists them.
+training:
+  hyperparameters: { epochs: 5 }
+  tuning: { max_trials: 2, parallel_trials: 2 }
+triggers:
+  schedules: []
+retraining:
+  mode: "off"                           # quoted: YAML reads a bare off as false (also accepted)

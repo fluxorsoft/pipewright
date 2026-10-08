@@ -1,0 +1,28 @@
+# Tables: created and evolved by `pipewright tables sync` (additive changes only). Schemas are in schemas/.
+outputs:
+  # Where the tables live:
+  #   bigquery  BigQuery tables (default)
+  #   gcs       Parquet files under your tenant's outputs location, gs://.../<table>/dt=YYYY-MM-DD/run=<run_id>/,
+  #             plus BigQuery external tables of the same names so SQL keeps working
+  #   both      both of the above (e.g. while moving to the lake)
+  store: bigquery
+  gcs: { format: parquet, external_tables: true }
+  bigquery:
+    tables:
+      {{table_prefix}}raw_customers:
+        schema: schemas/raw_customers.json
+        partition: { field: ingested_at, type: DAY }
+      {{table_prefix}}predictions:
+        schema: schemas/predictions.json
+        partition: { field: scored_at, type: DAY }
+        cluster: [customer_id]
+      {{table_prefix}}model_metrics:
+        schema: schemas/model_metrics.json
+        partition: { field: evaluated_at, type: DAY }
+      {{table_prefix}}model_monitoring:
+        schema: schemas/model_monitoring.json
+        partition: { field: monitored_at, type: DAY }
+      {{table_prefix}}churn_outcomes:
+        schema: schemas/churn_outcomes.json
+        description: observed churn, joined to predictions for performance monitoring
+    retention_days: 400

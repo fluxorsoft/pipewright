@@ -1,0 +1,80 @@
+"""pipewright model list / approve: the Model Registry versions of a use case's model.
+
+The default version is the champion: inference pipelines score with it and training compares challengers to it.
+With registry.set_default: manual, training registers candidates and `model approve` makes one the default,
+following approvals.promote_model (manual needs --approve, and a listed user approver).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from pipewright.config import Environment, ResolvedUseCase
+from pipewright.errors import ConfigError
+from pipewright.models.deploy import check_approval
+
+
+@dataclass
+class Version:
+    version_id: str
+    default: bool
+    aliases: list[str]
+    description: str
+    created: str
+    labels: dict
+
+
+def _registry(uc: ResolvedUseCase, env: Environment, creds):
+    from google.cloud import aiplatform
+    from google.cloud.aiplatform.models import ModelRegistry
+
+    aiplatform.init(project=env.project, location=env.region, credentials=creds)
+    models = aiplatform.Model.list(filter=f'display_name="{uc.model["name"]}"')
+    if not models:
+        raise ConfigError(f"no model {uc.model['name']!r} in the registry yet: run the training pipeline first")
+    return ModelRegistry(model=models[0].resource_name)
+
+
+def versions(uc: ResolvedUseCase, env: Environment, creds) -> list[Version]:
+    out = []
+    for v in _registry(uc, env, creds).list_versions():
+        aliases = list(v.version_aliases or [])
+        out.append(Version(str(v.version_id), "default" in aliases, [a for a in aliases if a != "default"],
+                           v.version_description or "", str(v.version_create_time)[:19],
+                           dict(getattr(v, "labels", None) or {})))
+    return sorted(out, key=lambda v: int(v.version_id) if v.version_id.isdigit() else 0, reverse=True)
+
+
+def render(uc: ResolvedUseCase, rows: list[Version]) -> str:
+    lines = [f"{uc.model['name']} ({uc.environment})"]
+    for v in rows:
+        status = "DEFAULT" if v.default else v.labels.get("status", "")
+        lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}")
+    return "\n".join(lines)
+
+
+def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity: str | None, approved: bool,
+            log=print) -> None:
+    check_approval(uc, identity, approved, key="promote_model")
+    registry = _registry(uc, env, creds)
+    known = {str(v.version_id): v for v in registry.list_versions()}
+    version = version.removeprefix("v")
+    if version not in known:
+        raise ConfigError(f"{uc.model['name']} has no version {version} (versions: {', '.join(sorted(known))})")
+    if "default" in (known[version].version_aliases or []):
+        log(f"v{version} of {uc.model['name']} is already the default")
+        return
+    previous = next((k for k, v in known.items() if "default" in (v.version_aliases or [])), None)
+    # Moving the `default` alias is what makes a version the default.
+    registry.add_version_aliases(new_aliases=["default"], version=version)
+    import io
+
+    from pipewright.gcp import Gcp
+    from pipewright.observability import events
+
+    events.emit(events.event("model.approved", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
+                             version=version, previous=previous, by=identity),
+                env.observability.get("events_topic"), Gcp(creds), stream=io.StringIO(), region=env.region)
+    log(f"{uc.model['name']}: default v{previous} -> v{version}"
+        + (f" (approved by {identity})" if identity else "")
+        + ". Inference uses it from the next run; `pipewright deploy-model` serves it online.")

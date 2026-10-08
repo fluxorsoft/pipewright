@@ -1,0 +1,136 @@
+# Pipewright release: push a tag v<version> (the version in pyproject.toml) to publish that version.
+#
+#   ci             the whole of ci.yml: tests, wheel, smoke test, launcher image build
+#   version        the tag must equal v<pyproject version>
+#   publish-wheel  the wheel and sdist -> Artifact Registry Python repository (app teams: pip install pipewright==X)
+#   publish-launcher  the launcher image, built from that same wheel -> Artifact Registry Docker repository,
+#                  tagged <version>; platform teams pin its digest in Terraform
+#   github-release the GitHub release with the files and the image digest
+#
+# GitHub environment `release` (add required reviewers): GCP_WIF_PROVIDER, PIPEWRIGHT_RELEASE_SERVICE_ACCOUNT
+# (roles/artifactregistry.writer on both repositories), PYTHON_REPOSITORY_URL
+# (https://<region>-python.pkg.dev/<project>/<repo>/), DOCKER_REPOSITORY (<region>-docker.pkg.dev/<project>/<repo>).
+# A version is published once: Artifact Registry refuses to replace a Python package version, and the Docker
+# repository should have immutable tags.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match pyproject.toml version $version (expected v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  publish-wheel:
+    needs: [ci, version]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.PIPEWRIGHT_RELEASE_SERVICE_ACCOUNT }}
+      - name: Upload to Artifact Registry
+        env:
+          REPO_URL: ${{ vars.PYTHON_REPOSITORY_URL }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/twine"
+          "$RUNNER_TEMP/twine/bin/pip" install twine keyrings.google-artifactregistry-auth
+          "$RUNNER_TEMP/twine/bin/twine" upload --non-interactive --repository-url "$REPO_URL" dist/*
+          echo "Published pipewright ${{ needs.version.outputs.version }} to $REPO_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-launcher:
+    needs: [ci, version]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.PIPEWRIGHT_RELEASE_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - name: Build from the released wheel and push
+        id: push
+        env:
+          REPO: ${{ vars.DOCKER_REPOSITORY }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          rm -f dist/*.tar.gz
+          echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${REPO%%/*}"
+          docker build -f images/launcher.Dockerfile --build-arg VERSION="$VERSION" -t "$REPO/pipewright-launcher:$VERSION" .
+          docker push "$REPO/pipewright-launcher:$VERSION"
+          image="$(docker inspect --format='{{index .RepoDigests 0}}' "$REPO/pipewright-launcher:$VERSION")"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Launcher image: \`$image\`" >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    needs: [version, publish-wheel, publish-launcher]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          IMAGE: ${{ needs.publish-launcher.outputs.image }}
+        run: |
+          cat > notes.md <<EOF
+          Pipewright $VERSION
+
+          - Python package: \`pip install "pipewright[gcp]==$VERSION"\` from the Artifact Registry Python repository
+          - Launcher image (pin this digest in the platform's Terraform):
+            \`$IMAGE\`
+          EOF
+          prerelease=""
+          case "$VERSION" in *dev*|*a*|*b*|*rc*) prerelease="--prerelease" ;; esac
+          gh release create "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "Pipewright $VERSION" \
+            --notes-file notes.md $prerelease

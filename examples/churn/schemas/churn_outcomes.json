@@ -1,0 +1,17 @@
+[
+  {
+    "name": "customer_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "churned",
+    "type": "INTEGER",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "observed_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  }
+]

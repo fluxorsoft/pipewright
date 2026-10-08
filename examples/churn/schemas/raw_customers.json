@@ -1,0 +1,72 @@
+[
+  {
+    "name": "customer_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "snapshot_date",
+    "type": "DATE",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "tenure_months",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "monthly_charges",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "total_charges",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "contract_length_months",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "num_support_tickets",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "num_products",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "has_paperless_billing",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "avg_monthly_usage_gb",
+    "type": "FLOAT",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "churned",
+    "type": "INTEGER",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_uri",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "ingested_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  }
+]

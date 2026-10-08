@@ -1,0 +1,494 @@
+"""pipewright doctor: read-only checks that ML config matches the live environment.
+
+Nothing here creates or changes resources.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from pipewright.build.compile import ML_CONFIG_PARAMETER, check_parameters, compile_all
+from pipewright.config import Environment, ResolvedUseCase
+from pipewright.errors import ConfigError
+from pipewright.gcp import Gcp, error_text
+from pipewright.tables.plan import plan_table
+
+OK, INFO, WARN, FAIL = "OK", "INFO", "WARN", "FAIL"
+
+CRM = "https://cloudresourcemanager.googleapis.com/v3"
+GCS = "https://storage.googleapis.com/storage/v1"
+AR = "https://artifactregistry.googleapis.com/v1"
+IAM = "https://iam.googleapis.com/v1"
+RUN = "https://run.googleapis.com/v2"
+PUBSUB = "https://pubsub.googleapis.com/v1"
+BQ = "https://bigquery.googleapis.com/bigquery/v2"
+KMS = "https://cloudkms.googleapis.com/v1"
+
+
+@dataclass
+class Result:
+    status: str
+    check: str
+    detail: str = ""
+    hint: str = ""
+
+
+@dataclass
+class Report:
+    sections: dict[str, list[Result]] = field(default_factory=dict)
+
+    def add(self, section: str, result: Result) -> None:
+        self.sections.setdefault(section, []).append(result)
+
+    @property
+    def failed(self) -> int:
+        return sum(r.status == FAIL for rs in self.sections.values() for r in rs)
+
+    @property
+    def warnings(self) -> int:
+        return sum(r.status == WARN for rs in self.sections.values() for r in rs)
+
+    def render(self) -> str:
+        lines = []
+        for section, results in self.sections.items():
+            lines.append(f"\n{section}")
+            for r in results:
+                line = f"  {r.status:<4}  {r.check}"
+                if r.detail:
+                    line += f": {r.detail}"
+                lines.append(line)
+                if r.hint:
+                    lines.append(f"        -> {r.hint}")
+        lines.append(f"\n{self.failed} failed, {self.warnings} warnings")
+        return "\n".join(lines)
+
+
+def _repo_path(url: str, kind: str) -> tuple[str, str, str] | None:
+    """(location, project, repository) from an Artifact Registry docker or KFP URL."""
+    m = re.match(rf"^(?:https://)?([a-z0-9-]+)-{kind}\.pkg\.dev/([^/]+)/([^/]+)/?$", url)
+    return m.groups() if m else None
+
+
+def _exists(gcp: Gcp, report: Report, section: str, check: str, url: str, hint: str, detail_fn=None):
+    resp = gcp.get(url)
+    if resp.ok:
+        report.add(section, Result(OK, check, detail_fn(resp.body) if detail_fn else ""))
+        return resp.body
+    status = FAIL
+    detail = "not found" if resp.status == 404 else ("no permission to read it" if resp.status == 403 else
+                                                    error_text(resp))
+    report.add(section, Result(status, check, detail, hint))
+    return None
+
+
+def _test_permissions(gcp: Gcp, url: str, permissions: list[str], body_style: bool = True) -> set[str] | None:
+    resp = gcp.post(url, {"permissions": permissions}) if body_style else gcp.get(url, permissions=permissions)
+    if not resp.ok:
+        return None
+    return set(resp.body.get("permissions", []))
+
+
+# ---------------------------------------------------------- environment --
+
+def check_environment(env: Environment, gcp: Gcp, report: Report) -> None:
+    s = f"Environment {env.name} ({env.blueprint or 'no blueprint'}, project {env.project})"
+    platform = "ask the platform team"
+
+    who = gcp.identity()
+    report.add(s, Result(INFO, "running as", who or "unknown identity"))
+    if env.manifest_source:
+        report.add(s, Result(OK, "manifest", env.manifest_source))
+
+    _exists(gcp, report, s, "project", f"{CRM}/projects/{env.project}", "check the project ID and your access",
+            lambda b: b.get("state", ""))
+    _exists(gcp, report, s, f"artifacts bucket {env.artifacts_bucket}", f"{GCS}/b/{env.artifacts_bucket}", platform,
+            lambda b: b.get("location", "").lower())
+    if env.landing_bucket:
+        _exists(gcp, report, s, f"landing bucket {env.landing_bucket}", f"{GCS}/b/{env.landing_bucket}", platform,
+                lambda b: b.get("location", "").lower())
+
+    for kind, url in (("docker", env.artifact_registry["docker"]), ("kfp", env.artifact_registry["kfp"])):
+        parts = _repo_path(url, kind)
+        if not parts:
+            report.add(s, Result(FAIL, f"{kind} repository", f"cannot parse {url}", "expected <region>-"
+                                 f"{kind}.pkg.dev/<project>/<repository>"))
+            continue
+        loc, project, repo = parts
+        _exists(gcp, report, s, f"{kind} repository {repo}",
+                f"{AR}/projects/{project}/locations/{loc}/repositories/{repo}", platform,
+                lambda b: b.get("format", ""))
+
+    launcher = env.launcher or {}
+    if launcher.get("service_account"):
+        _exists(gcp, report, s, "launcher service account",
+                f"{IAM}/projects/-/serviceAccounts/{launcher['service_account']}", platform,
+                lambda b: b.get("email", ""))
+    if launcher.get("service"):
+        _exists(gcp, report, s, f"launcher service {launcher['service']}",
+                f"{RUN}/projects/{env.project}/locations/{env.region}/services/{launcher['service']}", platform,
+                lambda b: b.get("uri", ""))
+    if launcher.get("subscription"):
+        sub = _exists(gcp, report, s, f"subscription {launcher['subscription']}",
+                      f"{PUBSUB}/projects/{env.project}/subscriptions/{launcher['subscription']}", platform,
+                      lambda b: "push to " + b["pushConfig"]["pushEndpoint"] if b.get("pushConfig", {}).get(
+                          "pushEndpoint") else "pull")
+        if sub is not None and launcher.get("url"):
+            endpoint = sub.get("pushConfig", {}).get("pushEndpoint", "")
+            if endpoint and not endpoint.startswith(launcher["url"].rstrip("/")):
+                report.add(s, Result(WARN, "subscription target", f"pushes to {endpoint}, not the launcher URL "
+                                     f"{launcher['url']}", "the launcher may have moved; ask the platform team"))
+
+    if launcher.get("run_requests_topic"):
+        _exists(gcp, report, s, "run requests topic", f"{PUBSUB}/{launcher['run_requests_topic']}", platform,
+                lambda b: b["name"].rsplit("/", 1)[-1])
+    check_security(env, gcp, report)
+
+
+def check_security(env: Environment, gcp: Gcp, report: Report) -> None:
+    """Private profiles: the CMEK key and network that every job, model and endpoint gets."""
+    sec = env.security or {}
+    if not sec:
+        return
+    s = f"Security ({env.name})"
+    platform = "ask the platform team"
+    key = sec.get("kms_key")
+    if key:
+        location = key.split("/")[3]
+        if location != env.region:
+            report.add(s, Result(FAIL, "CMEK key location", f"{location}, but the environment is in {env.region}",
+                                 "jobs fail with a CMEK key from another location: " + platform))
+        resp = gcp.get(f"{KMS}/{key}")
+        if resp.ok:
+            state = resp.body.get("primary", {}).get("state", "no primary version")
+            report.add(s, Result(OK if state == "ENABLED" else FAIL, "CMEK key", f"{key.rsplit('/', 1)[-1]}: {state}",
+                                 "" if state == "ENABLED" else "jobs cannot encrypt with it: " + platform))
+        elif resp.status == 403:
+            report.add(s, Result(WARN, "CMEK key", "cannot read it (needs cloudkms.cryptoKeys.get); jobs still use it"))
+        else:
+            report.add(s, Result(FAIL, "CMEK key", "not found" if resp.status == 404 else error_text(resp), platform))
+        bucket = _exists(gcp, report, s, "artifacts bucket encryption", f"{GCS}/b/{env.artifacts_bucket}", platform,
+                         lambda b: b.get("encryption", {}).get("defaultKmsKeyName", "Google-managed"))
+        if bucket is not None and not bucket.get("encryption", {}).get("defaultKmsKeyName"):
+            report.add(s, Result(WARN, "artifacts bucket CMEK", "the bucket has no default CMEK key", platform))
+    else:
+        report.add(s, Result(INFO, "CMEK", "not set: Google-managed encryption"))
+    network = sec.get("network")
+    report.add(s, Result(OK if network else INFO, "pipeline job network", network or "not peered (Google network)"))
+    if network and not sec.get("reserved_ip_ranges"):
+        report.add(s, Result(INFO, "reserved IP ranges", "any range of the Private Services Access connection"))
+    if sec.get("perimeter"):
+        report.add(s, Result(INFO, "VPC Service Controls perimeter", sec["perimeter"]))
+
+
+# ------------------------------------------------------------- use case --
+
+def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, compile_check: bool = True):
+    s = f"Use case {uc.name} (tenant {uc.tenant})"
+    platform = "ask the platform team"
+    res = uc.resources
+
+    _exists(gcp, report, s, "runner service account", f"{IAM}/projects/-/serviceAccounts/"
+            f"{res['runner_service_account']}", platform, lambda b: b.get("email", ""))
+    dataset = res["bigquery_dataset"]
+    ds = _exists(gcp, report, s, f"dataset {dataset}", f"{BQ}/projects/{env.project}/datasets/{dataset}", platform,
+                 lambda b: b.get("location", ""))
+
+    if uc.triggers.get("landing") and env.landing_bucket:
+        resp = gcp.get(f"{GCS}/b/{env.landing_bucket}/notificationConfigs")
+        prefix = res.get("landing_prefix") or ""
+        if resp.ok:
+            hits = [n for n in resp.body.get("items", [])
+                    if prefix.startswith(n.get("object_name_prefix", "")) and
+                    "OBJECT_FINALIZE" in n.get("event_types", ["OBJECT_FINALIZE"])]
+            if hits:
+                report.add(s, Result(OK, f"landing events for gs://{env.landing_bucket}/{prefix}",
+                                     hits[0].get("topic", "").rsplit("/", 1)[-1]))
+            else:
+                report.add(s, Result(FAIL, f"landing events for gs://{env.landing_bucket}/{prefix}",
+                                     "no notification covers this prefix", platform))
+        else:
+            report.add(s, Result(WARN, "landing notifications", error_text(resp)))
+
+    if uc.triggers["schedules"]:
+        r = gcp.get(f"https://serviceusage.googleapis.com/v1/projects/{env.project}/services/"
+                    "cloudscheduler.googleapis.com")
+        enabled = r.ok and r.body.get("state") == "ENABLED"
+        report.add(s, Result(OK if enabled else FAIL, "Cloud Scheduler API",
+                             "enabled" if enabled else "not enabled: schedules cannot be created",
+                             "" if enabled else "ask the platform team to enable cloudscheduler.googleapis.com"))
+
+    if compile_check:
+        _check_template(uc, report)
+    if ds is not None:
+        _check_tables(uc, env, gcp, report)
+    _check_ml(uc, env, gcp, report)
+    _check_permissions(uc, env, gcp, report)
+
+
+def _check_template(uc: ResolvedUseCase, report: Report) -> None:
+    from pipewright.checks import kfp_version
+
+    s = f"Pipelines of {uc.name} ({', '.join(uc.pipelines)})"
+    pin = kfp_version.check(uc)
+    report.add(s, Result(INFO if pin.skipped else (OK if pin.ok else FAIL), "kfp version", pin.message))
+    try:
+        infos = compile_all(uc)          # also applies `steps`: an unknown step name fails here
+    except ConfigError as e:
+        report.add(s, Result(FAIL, "compiles", str(e)))
+        return
+    for name, info in infos.items():
+        ml = "takes ml_config" if ML_CONFIG_PARAMETER in info.parameters else "no ml_config parameter"
+        report.add(s, Result(OK, f"{name} compiles", f"{info.name}, {len(info.parameters)} parameters, {ml}"))
+    if uc.steps:
+        report.add(s, Result(OK, "steps", f"{', '.join(uc.steps)} applied"))
+    problems, notes = check_parameters(uc, infos)
+    for p in problems:
+        report.add(s, Result(FAIL, "parameters", p))
+    if not problems:
+        report.add(s, Result(OK, "launcher parameters", "project, region, source_uri, run_id accepted"))
+    for n in notes:
+        report.add(s, Result(INFO, "default", n))
+
+
+def _launcher_service(env: Environment, gcp: Gcp) -> str | None:
+    """Resource name of the Cloud Run service behind the manifest's launcher URL."""
+    url = (env.launcher.get("url") or "").rstrip("/")
+    resp = gcp.get(f"{RUN}/projects/{env.project}/locations/{env.region}/services")
+    if not resp.ok:
+        return None
+    for svc in resp.body.get("services", []):
+        if url and url in [svc.get("uri", "").rstrip("/"), *[u.rstrip("/") for u in svc.get("urls", [])]]:
+            return svc["name"]
+    return None
+
+
+def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    s = f"ML lifecycle of {uc.name}"
+    ml = uc.ml
+    if not ml:
+        return
+    mon, retrain = ml["monitoring"], ml["retraining"]
+    on = [k for k in ("drift", "prediction_drift", "performance") if mon[k]["enabled"]]
+    report.add(s, Result(INFO, "pipelines", ", ".join(uc.pipelines)
+                         + (f"; monitoring {', '.join(on)} -> {mon['output_table']}" if on else "; no monitoring")))
+    if ml["registry"]["set_default"] == "manual":
+        report.add(s, Result(INFO, "registry", "new versions are candidates: `pipewright model approve` makes one "
+                             "the default"))
+    erasure = ml["data_protection"].get("erasure")
+    if erasure:
+        covered = [n for n, t in uc.tables.items() if any(f["name"] == erasure["key_column"] for f in t.fields)]
+        report.add(s, Result(OK if covered else WARN, "erasure",
+                             f"{erasure['key_column']} in {', '.join(covered)}" if covered else
+                             f"no table has {erasure['key_column']}: `pipewright data erase` has nothing to do"))
+    report.add(s, Result(INFO if uc.tests_command else WARN, "tests",
+                         uc.tests_command or "no tests.command: `pipewright test` skips this use case"))
+
+    # BigQuery sources named in configuration (schedules, retrain source) must exist and be readable.
+    from pipewright.runs import sources
+
+    named = [(f"schedule {s['name']}", s.get("source_uri")) for s in uc.triggers["schedules"]]
+    named.append(("retraining.source_uri", retrain.get("source_uri")))
+    for where, uri in named:
+        if not uri or not uri.startswith("bq://") or sources.problem(uri):
+            continue
+        project, dataset, table = sources.bq_table(uri, env.project).split(".")
+        resp = gcp.get(f"{BQ}/projects/{project}/datasets/{dataset}/tables/{table}")
+        if resp.ok:
+            rows = resp.body.get("numRows")
+            report.add(s, Result(OK, f"source for {where}", f"{project}.{dataset}.{table} ({resp.body.get('type', '')}"
+                                 + (f", {rows} rows" if rows else "") + ")"))
+        else:
+            report.add(s, Result(FAIL, f"source for {where}", f"{project}.{dataset}.{table}: {error_text(resp)}",
+                                 "check the name, and that the runner service account may read it "
+                                 "(roles/bigquery.dataViewer on the dataset)"))
+
+    _check_retraining(uc, env, gcp, report)
+    requests_retrain = retrain["enabled"] and {"drift", "performance"} & set(retrain["when"])
+    if not requests_retrain or env.launcher.get("run_requests_topic"):
+        return      # over the run requests topic, proposals need no call to the launcher
+    runner = uc.resources["runner_service_account"]
+    if not env.launcher.get("url"):
+        report.add(s, Result(FAIL, "retrain requests", "the manifest has no launcher.url",
+                             "ask the platform team"))
+        return
+    service = _launcher_service(env, gcp)
+    if service is None:
+        report.add(s, Result(WARN, "retrain requests", f"could not find the Cloud Run service for "
+                             f"{env.launcher['url']} to check who may call it"))
+        return
+    resp = gcp.get(f"{RUN}/{service}:getIamPolicy")
+    if not resp.ok:
+        report.add(s, Result(WARN, "retrain requests", f"cannot read the launcher's IAM policy: {error_text(resp)}"))
+        return
+    members = {m for b in resp.body.get("bindings", []) if b.get("role") in ("roles/run.invoker", "roles/run.admin")
+               for m in b.get("members", [])}
+    ok = f"serviceAccount:{runner}" in members or "allUsers" in members
+    report.add(s, Result(OK if ok else WARN, "retrain requests (runner may call the launcher's /run)",
+                         "roles/run.invoker granted" if ok else
+                         f"{runner} lacks roles/run.invoker on {service.rsplit('/', 1)[-1]}: retrain requests "
+                         "will be recorded as failed",
+                         "" if ok else "ask the platform team to grant roles/run.invoker on the launcher to the "
+                         "tenant's runner service account"))
+
+
+def _check_retraining(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    """Retrain decisions: mode, approver groups, who is emailed, the decision feed."""
+    s = f"Retrain decisions of {uc.name}"
+    r = uc.ml["retraining"]
+    if r.get("mode_source") == "enabled":
+        report.add(s, Result(WARN, "retraining.enabled", f"the older switch (now mode {r['mode']})",
+                             f"set retraining.mode: {r['mode']} instead"))
+    if r["mode"] == "off":
+        report.add(s, Result(INFO, "mode", "off: drift and performance alerts only, no decision cases"))
+        return
+    dec, required = r["decisions"], r["approvals"]["required"]
+    report.add(s, Result(INFO, "mode", f"{r['mode']}: {', '.join(r['when'])} opens a case; "
+                         + ("nothing trains until approved" if r["mode"] == "propose" else
+                            "a candidate trains at once and is never promoted without a person")))
+    if not required:
+        report.add(s, Result(WARN, "approver groups", "none: anyone allowed to call the launcher can approve",
+                             "list registered groups in retraining.approvals.required"))
+    for group in required:
+        topic = (env.approver_groups.get(group) or {}).get("topic")
+        if not topic:
+            continue      # resolve already failed on unregistered groups
+        resp = gcp.get(f"https://pubsub.googleapis.com/v1/{topic}")
+        report.add(s, Result(OK if resp.ok else FAIL, f"approver group {group}",
+                             topic.rsplit("/", 1)[-1] if resp.ok else f"{topic}: {error_text(resp)}",
+                             "" if resp.ok else "ask the platform team"))
+    if required:
+        broad = _project_publishers(env, gcp)
+        if broad:
+            report.add(s, Result(WARN, "approver group membership",
+                                 f"project-wide roles let {', '.join(broad[:4])}"
+                                 + (f" and {len(broad) - 4} more" if len(broad) > 4 else "")
+                                 + " publish to every approver group's topic, so they count as members of every group",
+                                 "in production, grant Pub/Sub publish per topic only, not owner, editor or "
+                                 "pubsub roles on the project"))
+    report.add(s, Result(OK if dec["notify"] else WARN, "decision emails",
+                         ", ".join(dec["notify"]) if dec["notify"] else "nobody: set retraining.decisions.notify",
+                         "then `pipewright alerts sync`" if dec["notify"] else ""))
+    if dec["publish"]:
+        feed = (env.tenants.get(uc.tenant) or {}).get("decision_feed")
+        if not feed:
+            report.add(s, Result(WARN, "decision feed", f"decisions.publish is true, but tenant {uc.tenant} has no "
+                                 "decision_feed in the manifest", "ask the platform team to provision it"))
+        else:
+            resp = gcp.get(f"https://pubsub.googleapis.com/v1/{feed}")
+            report.add(s, Result(OK if resp.ok else WARN, "decision feed",
+                                 feed if resp.ok else f"{feed}: {error_text(resp)}"))
+    try:
+        from pipewright.retraining.store import CaseStore
+
+        case = CaseStore(gcp, env.artifacts_bucket).current(uc.name)
+        report.add(s, Result(INFO, "open case", f"{case['case_id']} {case['state']}" if case else "none"))
+    except Exception as e:  # noqa: BLE001
+        report.add(s, Result(WARN, "open case", f"cannot read cases: {e}"[:200]))
+
+
+BROAD_PUBLISH_ROLES = ("roles/owner", "roles/editor", "roles/pubsub.admin", "roles/pubsub.editor",
+                       "roles/pubsub.publisher")
+
+
+def _project_publishers(env: Environment, gcp: Gcp) -> list[str]:
+    """People and service accounts whose project-level roles include publishing to any topic (Google's own service
+    agents left out). Empty when the policy is unreadable."""
+    resp = gcp.post(f"https://cloudresourcemanager.googleapis.com/v1/projects/{env.project}:getIamPolicy", {})
+    if not resp.ok:
+        return []
+
+    def counts(member: str) -> bool:
+        kind, _, email = member.partition(":")
+        if kind not in ("user", "group", "serviceAccount", "domain"):
+            return False                     # projectOwner:, deleted:, allUsers is reported elsewhere
+        return not (kind == "serviceAccount" and not email.endswith(".iam.gserviceaccount.com")
+                    or "@gcp-sa-" in email)
+
+    return sorted({m for b in resp.body.get("bindings", []) if b.get("role") in BROAD_PUBLISH_ROLES
+                   and not b.get("condition") for m in b.get("members", []) if counts(m)})
+
+
+def _check_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    s = f"Tables in {uc.resources['bigquery_dataset']} (plan for `pipewright tables sync`)"
+    base = f"{BQ}/projects/{env.project}/datasets/{uc.resources['bigquery_dataset']}/tables"
+    for table in uc.tables.values():
+        resp = gcp.get(f"{base}/{table.name}")
+        if resp.status == 404:
+            live = None
+        elif resp.ok:
+            live = resp.body
+        else:
+            report.add(s, Result(WARN, table.name, error_text(resp)))
+            continue
+        plan = plan_table(table, live, uc.retention_days)
+        if plan.action == "none":
+            report.add(s, Result(OK, table.name, "matches the schema file"))
+        elif plan.action == "blocked":
+            report.add(s, Result(FAIL, table.name, "; ".join(plan.blockers[:-1]), plan.blockers[-1]))
+        else:
+            report.add(s, Result(INFO, table.name, f"{plan.action}: " + "; ".join(plan.changes)))
+
+    resp = gcp.get(base, maxResults=1000)
+    if resp.ok:
+        managed = set(uc.tables)
+        others = sorted(t["tableReference"]["tableId"] for t in resp.body.get("tables", [])
+                        if t["tableReference"]["tableId"] not in managed)
+        if others:
+            report.add(s, Result(INFO, "not managed by this use case", ", ".join(others)))
+
+
+def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    s = "Permissions of the identity running doctor (what `release` will need)"
+    wanted = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload"]
+    if uc.model["serving"]["enabled"]:
+        wanted += ["aiplatform.endpoints.deploy"]
+    if uc.triggers["schedules"]:
+        wanted += ["cloudscheduler.jobs.create", "cloudscheduler.jobs.update"]
+    if uc.ml and uc.ml["monitoring"]["alerts"]["notify"]:
+        wanted += ["monitoring.alertPolicies.create", "monitoring.notificationChannels.create"]
+    granted = _test_permissions(gcp, f"{CRM}/projects/{env.project}:testIamPermissions", wanted)
+    if granted is None:
+        report.add(s, Result(WARN, "project permissions", "could not test"))
+    else:
+        missing = [p for p in wanted if p not in granted]
+        report.add(s, Result(FAIL if missing else OK, "project", ("missing " + ", ".join(missing)) if missing else
+                             ", ".join(wanted), "ask the platform team to grant the MLOps CI identity" if missing
+                             else ""))
+
+    bucket_perms = ["storage.objects.create", "storage.objects.get"]
+    granted = _test_permissions(gcp, f"{GCS}/b/{env.artifacts_bucket}/iam/testPermissions", bucket_perms, False)
+    if granted is not None:
+        missing = [p for p in bucket_perms if p not in granted]
+        report.add(s, Result(FAIL if missing else OK, "artifacts bucket", ("missing " + ", ".join(missing)) if
+                             missing else "write contracts and pointers"))
+
+    for kind in ("docker", "kfp"):
+        parts = _repo_path(env.artifact_registry[kind], kind)
+        if not parts:
+            continue
+        loc, project, repo = parts
+        granted = _test_permissions(gcp, f"{AR}/projects/{project}/locations/{loc}/repositories/{repo}"
+                                    ":testIamPermissions", ["artifactregistry.repositories.uploadArtifacts"])
+        if granted is not None:
+            ok = "artifactregistry.repositories.uploadArtifacts" in granted
+            report.add(s, Result(OK if ok else FAIL, f"{kind} repository {repo}",
+                                 "upload" if ok else "cannot upload"))
+
+    if uc.triggers["schedules"] and env.launcher.get("service_account"):
+        granted = _test_permissions(gcp, f"{IAM}/projects/-/serviceAccounts/{env.launcher['service_account']}"
+                                    ":testIamPermissions", ["iam.serviceAccounts.actAs"])
+        ok = granted is not None and "iam.serviceAccounts.actAs" in granted
+        report.add(s, Result(OK if ok else FAIL, "act as launcher SA (schedules call /run as it)",
+                             "" if ok else "missing iam.serviceAccounts.actAs"))
+    report.add(s, Result(INFO, "BigQuery table permissions", "checked when `tables sync` runs (dataset-level IAM)"))
+
+
+def run(env: Environment, usecases: list[ResolvedUseCase], gcp: Gcp | None = None,
+        compile_check: bool = True) -> Report:
+    gcp = gcp or Gcp()
+    report = Report()
+    check_environment(env, gcp, report)
+    for uc in usecases:
+        check_usecase(uc, env, gcp, report, compile_check)
+    return report

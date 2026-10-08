@@ -1,0 +1,4 @@
+# What tests/ needs (the ML helpers are plain numpy and pandas).
+numpy==2.1.3
+pandas==2.2.3
+pytest>=8

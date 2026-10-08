@@ -1,0 +1,5 @@
+# The launcher image copies only the built wheel (images/launcher.Dockerfile: COPY dist/). Send nothing else to the
+# build context, so local files (credentials, .env, .git, virtual environments) can never reach an image.
+*
+!dist/
+dist/*.tar.gz

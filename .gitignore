@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build output. Anchored: src/pipewright/build/ is a package and must stay tracked.
+/dist/
+/build/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Pipewright's per-use-case build output (compiled templates, image contexts)
+.pipewright/
+
+# Local settings and secrets: never commit credentials, tokens or CA bundles
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+*-key.json
+service-account*.json
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
