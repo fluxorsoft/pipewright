@@ -29,7 +29,7 @@ def _require_gcp():
         import google.auth  # noqa: F401
         import google.auth.transport.requests  # noqa: F401
     except ImportError:
-        raise ConfigError("this command needs the GCP extra: pip install 'pipewright[gcp]'") from None
+        raise ConfigError("this command needs the GCP extra: pip install 'pipewright-mlops[gcp]'") from None
 
 
 def credentials():

@@ -52,4 +52,14 @@ def submit(contract: ReleaseContract, target: PipelineTarget, parameters: dict, 
                    experiment=_experiment(contract, target))
     except gexc.AlreadyExists as e:
         raise AlreadySubmitted(job_id) from e
+    except RuntimeError as e:
+        # The SDK creates the job, then joins it to the experiment; joining can fail (for example in a new project
+        # whose experiment is not ready yet). The run is already going: report it, never fail it (retrying would only
+        # meet AlreadyExists).
+        try:
+            name = job.resource_name
+        except Exception:  # noqa: BLE001 - the job was not created: the original error stands
+            raise e from None
+        log.warning("%s submitted, but not joined to experiment %s: %s", name, target.experiment, e)
+        return name
     return job.resource_name

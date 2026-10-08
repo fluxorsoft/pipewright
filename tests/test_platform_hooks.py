@@ -77,6 +77,34 @@ def test_vertex_adapter_applies_cmek_and_network(monkeypatch):
     assert seen["init"]["encryption_spec_key_name"] is None and seen["submit"]["network"] is None
 
 
+def test_a_job_that_cannot_join_its_experiment_still_counts_as_submitted(monkeypatch):
+    class FakeJob:
+        created = True
+
+        def __init__(self, **kw):
+            self._name = None
+
+        @property
+        def resource_name(self):
+            if self._name is None:
+                raise RuntimeError("resource has not been created")
+            return self._name
+
+        def submit(self, **kw):
+            if FakeJob.created:
+                self._name = "projects/p/locations/r/pipelineJobs/j"
+            raise RuntimeError("could not be associated with Experiment churn")
+
+    monkeypatch.setitem(sys.modules, "google.cloud.aiplatform", types.SimpleNamespace(PipelineJob=FakeJob))
+    from pipewright.adapters import vertex
+
+    target = replace(V3.pipeline("training"), experiment=None)
+    assert vertex.submit(V3, target, {}, "j", {}) == "projects/p/locations/r/pipelineJobs/j"
+    FakeJob.created = False            # the job itself failed: the error is not hidden
+    with pytest.raises(RuntimeError, match="associated"):
+        vertex.submit(V3, target, {}, "j", {})
+
+
 class FakeEntryPoint:
     def __init__(self, name, fn):
         self.name, self.value, self._fn = name, f"fake:{name}", fn

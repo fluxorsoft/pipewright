@@ -1335,7 +1335,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pipewright"
+name = "pipewright-mlops"
 version = "0.4.0.dev0"
 source = { editable = "." }
 dependencies = [

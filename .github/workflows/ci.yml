@@ -41,7 +41,7 @@ jobs:
       - name: Install the wheel in a fresh environment and smoke test it
         run: |
           python3 -m venv "$RUNNER_TEMP/smoke"
-          "$RUNNER_TEMP/smoke/bin/pip" install "$(ls dist/pipewright-*-py3-none-any.whl)[gcp]"
+          "$RUNNER_TEMP/smoke/bin/pip" install "$(ls dist/pipewright_mlops-*-py3-none-any.whl)[gcp]"
           bash scripts/smoke_test.sh "$RUNNER_TEMP/smoke/bin/pipewright"
       - uses: actions/upload-artifact@v4
         with:

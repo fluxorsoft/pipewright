@@ -79,7 +79,7 @@ private environment with customer-managed keys and enforced organization policie
 | CI for app teams (`pipewright ci init`, self-hosted runners) | Built |
 | Product CI and release workflows (`.github/workflows/`) | Built |
 | Promotion between environments, `kfp` adapter (GKE), OpenTelemetry export | Planned |
-| Terraform for the platform side in this repository | Not included (see R-20) |
+| Terraform for the platform side | In a separate starter repository, shared on request (R-20) |
 
 ---
 
@@ -523,8 +523,8 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | R-09 | Manual approval of a first model version is not recorded as `model.approved` | The first version becomes the champion automatically |
 | R-18 | Approver identity relies on Google Cloud IAM and ID tokens | See section 8.7 for the residual risks |
 | R-19 | Labels arrive late for many use cases | The decision pack shows how many labelled outcomes exist, so drift is not read as degradation |
-| R-20 | No Terraform for the platform side in this repository | Users build environments with their own Terraform from the manifest schema, or use Pipewright Enterprise's blueprint. A minimal open-source starter environment is a candidate addition |
-| R-21 | The PyPI name `pipewright` belongs to an unrelated project | Publish under a different distribution name (for example `pipewright-mlops`) with the same `pipewright` import and command, or request the name |
+| R-20 | No Terraform for the platform side in this repository | By design. A separate starter repository (public endpoints, no CMEK or VPC) is shared on request: people ask the maintainer (LinkedIn or GitHub Discussions), which also builds the community. Production blueprints with private networking come with Pipewright Enterprise |
+| R-21 | The PyPI name `pipewright` belongs to an unrelated project | Resolved: the distribution is `pipewright-mlops`; the import and the command stay `pipewright` |
 
 ---
 

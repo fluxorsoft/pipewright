@@ -32,13 +32,13 @@ FORBIDDEN = ("__pycache__", ".pyc", ".pipewright/", ".pytest_cache")
 def main(dist: str) -> int:
     root = Path(__file__).resolve().parents[1]
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    wheels = sorted(Path(dist).glob("pipewright-*-py3-none-any.whl"))
+    wheels = sorted(Path(dist).glob("pipewright_mlops-*-py3-none-any.whl"))
     if len(wheels) != 1:
         print(f"expected one wheel in {dist}, found {[w.name for w in wheels]}")
         return 1
     wheel = wheels[0]
     problems = []
-    if not wheel.name.startswith(f"pipewright-{version}-"):
+    if not wheel.name.startswith(f"pipewright_mlops-{version}-"):
         problems.append(f"{wheel.name} does not carry the pyproject version {version}")
     names = set(zipfile.ZipFile(wheel).namelist())
     problems += [f"missing {n}" for n in REQUIRED if n not in names]

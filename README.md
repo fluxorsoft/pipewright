@@ -8,7 +8,49 @@ Pipewright is open source under the [Apache License 2.0](LICENSE) and maintained
 
 > **Status: alpha (0.4.0.dev0).** Working end to end on Google Cloud, including private environments with
 > customer-managed keys and enforced organization policies, but the configuration format may still change before
-> 1.0. Not yet published to PyPI: install from source (below).
+> 1.0. Install from source for now; the package will be published to PyPI as `pipewright-mlops`.
+
+## At a glance
+
+![Pipewright (open source) on Google Cloud: the building blocks and the main flows](docs/images/pipewright-architecture.png)
+
+<sub>Editable source: [docs/images/pipewright-architecture.drawio](docs/images/pipewright-architecture.drawio) (draw.io, official Google Cloud icons).</sub>
+
+The platform team builds the environment once and publishes an **environment manifest**: the names of everything a
+team may use. ML teams then work only with their own configuration and code; the `pipewright` CLI and the shared
+launcher do the rest.
+
+## Building blocks: what you need on Google Cloud
+
+Pipewright does not create infrastructure. Before an ML team runs `pipewright`, the platform side provides these
+resources in each environment's project and describes them in the manifest
+(`src/pipewright/config/schemas/manifest.schema.json`).
+
+| Building block | Google Cloud service | What Pipewright uses it for | Needed |
+|---|---|---|---|
+| Artifacts bucket | Cloud Storage | The environment manifest, release contracts and live pointers, pipeline roots, retrain cases | Always |
+| Landing bucket | Cloud Storage, with a Pub/Sub notification | Files dropped under a team's prefix start runs | For file triggers |
+| Registries | Artifact Registry: a Docker and a KFP repository (Python optional) | Component images and compiled pipeline templates, pinned by digest | Always |
+| Pipelines | Agent Platform Pipelines (formerly Vertex AI Pipelines) | Training and inference runs | Always |
+| Models | Model Registry; endpoints for online serving | Versions, the champion, approvals; serving with canary | Always (endpoints optional) |
+| Team data | BigQuery: one dataset per team | Raw data, predictions, metrics and monitoring tables | Always |
+| Launcher | Cloud Run, from `images/launcher.Dockerfile`, with its own service account | Turns files, schedules, API calls and run requests into pipeline runs; handles retrain decisions | Always |
+| Identities | IAM service accounts: the launcher, one runner per team, CI (Workload Identity Federation) | Every pipeline step runs as its team's runner; nothing uses keys | Always |
+| Messaging | Pub/Sub topics: landing events, run requests, lifecycle events, one per approver group | Triggers, runs from inside a private network, events for alerts and audit, approvals | Events and approvals recommended; run requests for private networks |
+| Schedules | Cloud Scheduler | Scheduled runs; the hourly retrain tick and weekly digest | For schedules and retrain decisions |
+| Alerts | Cloud Logging and Cloud Monitoring | Labelled logs, email alerts per use case, decision emails | Recommended |
+| Encryption | Cloud KMS (customer-managed keys) | Applied to pipeline jobs, models, endpoints and BigQuery queries | Optional (regulated environments) |
+| Private network | VPC, Private Service Connect, Private Services Access, VPC Service Controls | No public endpoints; pipeline workers peered with your network | Optional (regulated environments) |
+
+**APIs to enable:** `aiplatform`, `artifactregistry`, `bigquery`, `cloudscheduler`, `iam`, `iamcredentials`,
+`logging`, `monitoring`, `pubsub`, `run`, `storage` (all `.googleapis.com`), plus `cloudkms` for customer-managed
+keys.
+
+**Setting up the platform side.** This repository does not include Terraform for the environment. If you would like
+help building one, or the Terraform we use, get in touch with **Rakesh Gupta** on LinkedIn or open a
+[GitHub Discussion](https://github.com/fluxorsoft/pipewright/discussions): we are happy to share, and it helps us
+shape what comes next.
+<!-- TODO: add the LinkedIn profile URL to "Rakesh Gupta" above. -->
 
 ---
 
@@ -102,33 +144,14 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 
 ## How it works
 
-Two personas, one contract between them:
+Two personas, one contract between them (the diagram at the top shows the flow):
 
-```
-Platform team                                   ML (app) teams
-  builds each environment once                    own use cases: configuration + pipeline code
-  (buckets, registries, datasets, identities,     in their own MLOps repository
-   the launcher, Pub/Sub, keys, network)
-            |                                                |
-            v                                                v
-  environment manifest (environment.json)  <---- read by ---- pipewright CLI
-  the names of everything a tenant may use                     validate, doctor, release, ...
-            |                                                |
-            v                                                v
-  shared launcher (Cloud Run)  <---- file drops, schedules, API calls, Pub/Sub run requests
-            |
-            v
-  Agent Platform Pipelines (formerly Vertex AI Pipelines), as the tenant's own identity
-            |
-            v
-  tenant tables, Model Registry, endpoints  --->  lifecycle events and logs  --->  alerts, tools, audit
-```
-
-- **The platform team** owns durable, shared and security-relevant resources and publishes the manifest.
+- **The platform team** owns durable, shared and security-relevant resources, and publishes the environment manifest.
 - **ML teams** own pipeline code, configuration, tables inside their dataset, releases, schedules and model
   versions. Neither side edits the other's files.
 - **The launcher** is deployed once per environment and never redeployed for a model release: a release only moves
-  a pointer.
+  a pointer to a new, verified contract.
+- **Every step runs as the team's own identity**, with the environment's key and network applied from the manifest.
 
 [CONTEXT.md](CONTEXT.md) describes the design, the decisions behind it and every interface in detail.
 
@@ -136,15 +159,11 @@ Platform team                                   ML (app) teams
 
 ### What you need
 
-| Side | Requirement |
-|---|---|
-| Your machine | Python 3.11, [uv](https://docs.astral.sh/uv/), Docker (component images), the Google Cloud CLI or Application Default Credentials |
-| Google Cloud | A project with Agent Platform (Vertex AI), Cloud Storage, BigQuery, Artifact Registry (Docker and KFP repositories), Pub/Sub and Cloud Run |
-| The platform side | **An environment Pipewright can use:** an artifacts bucket, a landing bucket, the registries, a runner service account and dataset per tenant, the launcher deployed from `images/launcher.Dockerfile`, and an environment manifest describing them (`src/pipewright/config/schemas/manifest.schema.json`). Pipewright's app-team CLI assumes this exists and never creates infrastructure |
-
-The open-source repository does not include Terraform for the platform side. You can build the environment with
-your own Terraform, following the manifest schema and [docs/ONBOARDING.md](docs/ONBOARDING.md). Pipewright
-Enterprise provides a complete, private-by-default blueprint (below).
+- **On your machine:** Python 3.11, [uv](https://docs.astral.sh/uv/), Docker (component images), and the Google
+  Cloud CLI or Application Default Credentials.
+- **On Google Cloud:** an environment with the [building blocks](#building-blocks-what-you-need-on-google-cloud)
+  above and its environment manifest. [docs/ONBOARDING.md](docs/ONBOARDING.md) lists what the platform team hands to
+  each ML team.
 
 ### Install from source
 
@@ -155,7 +174,8 @@ uv sync --all-extras                # Python 3.11 virtual environment with the g
 uv run pipewright --help
 ```
 
-Or install the CLI into another environment: `pip install "./pipewright[gcp]"`.
+Or install the CLI into another environment from the checkout: `pip install "./pipewright[gcp]"`. Once it is on
+PyPI: `pip install "pipewright-mlops[gcp]"` (the command is still `pipewright`).
 
 ### Your first use case
 
@@ -211,7 +231,7 @@ never by patching this package.
 | Monitoring, alerts, lifecycle events | Yes | Yes |
 | Retrain decisions with approver quorum | Yes | Yes |
 | Private-managed Terraform blueprint (CMEK everywhere, private network, internal launcher, VPC Service Controls, organization policies) | No | Yes |
-| Approver groups, decision feeds and scheduler jobs provisioned | Build your own | Yes |
+| Approver groups, decision feeds and scheduler jobs provisioned | You provide them | Yes |
 | Evidence packs: a tamper-evident audit record per model version | No | Yes |
 | Support, onboarding and platform build-outs | Community | Fluxor Software |
 
@@ -228,7 +248,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Promotion of a release between environments by digest | Planned |
 | Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
 | OpenTelemetry export, per-tenant pipeline roots | Planned |
-| PyPI release | Planned |
+| PyPI release (`pipewright-mlops`) | Planned |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 

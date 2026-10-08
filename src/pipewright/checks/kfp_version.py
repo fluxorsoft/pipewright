@@ -67,7 +67,7 @@ def check(uc: ResolvedUseCase, compiler: str | None = None) -> KfpCheck:
     path = requirements_path(uc)
     rel = path.name if path.parent == uc.components_dir else str(path)
     if compiler is None:
-        return KfpCheck(True, "skipped: kfp is not installed here (install pipewright[gcp])", skipped=True)
+        return KfpCheck(True, "skipped: kfp is not installed here (install pipewright-mlops[gcp])", skipped=True)
     cv = Version(compiler)
     major, minor = cv.major, cv.minor
     want = f"kfp=={major}.{minor}.*"

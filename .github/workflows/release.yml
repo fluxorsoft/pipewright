@@ -2,7 +2,7 @@
 #
 #   ci             the whole of ci.yml: tests, wheel, smoke test, launcher image build
 #   version        the tag must equal v<pyproject version>
-#   publish-wheel  the wheel and sdist -> Artifact Registry Python repository (app teams: pip install pipewright==X)
+#   publish-wheel  the wheel and sdist -> Artifact Registry Python repository (app teams: pip install pipewright-mlops==X)
 #   publish-launcher  the launcher image, built from that same wheel -> Artifact Registry Docker repository,
 #                  tagged <version>; platform teams pin its digest in Terraform
 #   github-release the GitHub release with the files and the image digest
@@ -126,7 +126,7 @@ jobs:
           cat > notes.md <<EOF
           Pipewright $VERSION
 
-          - Python package: \`pip install "pipewright[gcp]==$VERSION"\` from the Artifact Registry Python repository
+          - Python package: \`pip install "pipewright-mlops[gcp]==$VERSION"\` from the Artifact Registry Python repository
           - Launcher image (pin this digest in the platform's Terraform):
             \`$IMAGE\`
           EOF

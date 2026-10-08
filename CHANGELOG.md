@@ -27,3 +27,9 @@ First open-source release.
 - `retraining.enabled: true` now means `retraining.mode: propose`: drift no longer requests training directly.
 - Decision emails show the summary as a code block, so line breaks and commands are kept.
 - Licensed under the Apache License 2.0.
+- Distribution name `pipewright-mlops` (PyPI); the import and the command stay `pipewright`.
+
+### Fixed
+
+- A pipeline job that cannot join its Agent Platform experiment (for example in a new project) is reported as
+  submitted with a warning, instead of failing the trigger and being retried as a duplicate.

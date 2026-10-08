@@ -71,7 +71,7 @@ def compile_pipeline(uc: ResolvedUseCase, pipeline: str = "training", component_
     try:
         from kfp import compiler
     except ImportError:
-        raise ConfigError("compiling pipelines needs the GCP extra: pip install 'pipewright[gcp]'") from None
+        raise ConfigError("compiling pipelines needs the GCP extra: pip install 'pipewright-mlops[gcp]'") from None
     if pipeline not in uc.pipelines:
         raise ConfigError(f"{uc.name} has no {pipeline} pipeline")
 
