@@ -47,10 +47,9 @@ resources in each environment's project and describes them in the manifest
 keys.
 
 **Setting up the platform side.** This repository does not include Terraform for the environment. If you would like
-help building one, or the Terraform we use, get in touch with **Rakesh Gupta** on LinkedIn or open a
+help building one, or the Terraform we use, email [hello@fluxorsoft.com](mailto:hello@fluxorsoft.com) or open a
 [GitHub Discussion](https://github.com/fluxorsoft/pipewright/discussions): we are happy to share, and it helps us
 shape what comes next.
-<!-- TODO: add the LinkedIn profile URL to "Rakesh Gupta" above. -->
 
 ---
 

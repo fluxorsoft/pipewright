@@ -523,7 +523,7 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | R-09 | Manual approval of a first model version is not recorded as `model.approved` | The first version becomes the champion automatically |
 | R-18 | Approver identity relies on Google Cloud IAM and ID tokens | See section 8.7 for the residual risks |
 | R-19 | Labels arrive late for many use cases | The decision pack shows how many labelled outcomes exist, so drift is not read as degradation |
-| R-20 | No Terraform for the platform side in this repository | By design. A separate starter repository (public endpoints, no CMEK or VPC) is shared on request: people ask the maintainer (LinkedIn or GitHub Discussions), which also builds the community. Production blueprints with private networking come with Pipewright Enterprise |
+| R-20 | No Terraform for the platform side in this repository | By design. A separate starter repository (public endpoints, no CMEK or VPC) is shared on request: people ask the maintainers (hello@fluxorsoft.com or GitHub Discussions), which also builds the community. Production blueprints with private networking come with Pipewright Enterprise |
 | R-21 | The PyPI name `pipewright` belongs to an unrelated project | Resolved: the distribution is `pipewright-mlops`; the import and the command stay `pipewright` |
 
 ---
