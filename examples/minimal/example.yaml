@@ -1,0 +1,9 @@
+# The minimal example: the churn example's training code with only the configuration Pipewright needs.
+# `pipewright new-usecase --from minimal` copies these paths from the churn example, then this folder's files.
+code_from: churn
+code:
+  - training_pipeline.py
+  - components/
+  - schemas/raw_customers.json
+  - schemas/model_metrics.json
+  - data/sample_customers.csv

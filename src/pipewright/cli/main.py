@@ -111,10 +111,53 @@ def cmd_alerts_sync(args) -> int:
 def cmd_new_usecase(args) -> int:
     from pipewright.scaffold import new_usecase as scaffold
 
-    dest = scaffold.new_usecase(Path(args.root), args.name, args.tenant, args.owner, args.from_example,
-                                args.table_prefix)
-    print(f"created {dest} from example {args.from_example}")
+    example = args.from_example or ("minimal" if args.from_bq else "churn")
+    data_yaml = raw_schema = None
+    notes = []
+    if args.from_bq:
+        from pipewright.gcp import Gcp
+        from pipewright.scaffold import from_bq
+
+        if example != "minimal":
+            raise ConfigError(f"--from-bq drafts the minimal example's data contract; the {example} example's "
+                              "evaluation and scoring use its own columns")
+        if not args.label:
+            raise ConfigError("--from-bq needs --label: the column the model predicts")
+        fields, values = from_bq.read_table(Gcp(), args.from_bq, args.label)
+        data_yaml, raw_schema, notes = from_bq.draft(fields, args.label, values, args.from_bq)
+    dest = scaffold.new_usecase(Path(args.root), args.name, args.tenant, args.owner, example, args.table_prefix,
+                                data_yaml=data_yaml, raw_schema=raw_schema)
+    print(f"created {dest} from example {example}" + (f", data contract drafted from {args.from_bq}"
+                                                      if args.from_bq else ""))
+    for note in notes:
+        print(f"  {note}")
     print("next: edit usecase.yaml, then  pipewright validate / doctor / tables sync / release  --env <env>")
+    if args.from_bq:
+        project, dataset, table = from_bq.parse_ref(args.from_bq)
+        print(f"then train on the table:  pipewright run --env <env> --usecase {args.name} "
+              f"--source-uri bq://{project}.{dataset}.{table}")
+    return 0
+
+
+def cmd_schemas(args) -> int:
+    from pipewright.config import reference
+
+    root = Path(args.root)
+    written = reference.write_editor_schemas(root)
+    print(f"wrote {len(written)} schemas to {root / reference.SCHEMAS_DIR}")
+    files = sorted(root.glob("environments/*.yaml")) + sorted((root / "usecases").rglob("*.yaml"))
+    changed = [f for f in files if reference.kind_of(root, f) and reference.add_modeline(root, f)]
+    print(f"schema line added or updated in {len(changed)} of {len(files)} YAML files")
+    return 0
+
+
+def cmd_explain(args) -> int:
+    from pipewright.config import reference
+
+    if args.list or not args.key:
+        print("\n".join(reference.all_keys()))
+        return 0
+    print(reference.render(reference.explain(args.key)))
     return 0
 
 
@@ -409,9 +452,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", required=True, help="use case name, e.g. churn-nimbus")
     sp.add_argument("--tenant", required=True, help="tenant the platform team gave you")
     sp.add_argument("--owner", required=True, help="owning team")
-    sp.add_argument("--from", dest="from_example", default="churn", help="example to copy (default: churn)")
+    sp.add_argument("--from", dest="from_example",
+                    help="example to copy: churn (every option) or minimal (only what is required); "
+                         "default churn, or minimal with --from-bq")
     sp.add_argument("--table-prefix", help="prefix for BigQuery tables (default: <name>_)")
+    sp.add_argument("--from-bq", metavar="PROJECT.DATASET.TABLE",
+                    help="draft the data contract from this BigQuery table's schema (needs the gcp extra)")
+    sp.add_argument("--label", help="with --from-bq: the column the model predicts (0/1 or true/false)")
     sp.set_defaults(func=cmd_new_usecase)
+
+    sp = sub.add_parser("schemas", help="write editor schemas and point each YAML file at its schema")
+    sp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
+    sp.set_defaults(func=cmd_schemas)
+
+    sp = sub.add_parser("explain", help="what a use case key means: description, type, allowed values, default")
+    sp.add_argument("key", nargs="?", help="dotted key under spec, e.g. data.split.strategy")
+    sp.add_argument("--list", action="store_true", help="list every key")
+    sp.set_defaults(func=cmd_explain)
 
     sp = sub.add_parser("deploy-model", help="serve the registry's default model version on an endpoint")
     sp.add_argument("--root", default=".")

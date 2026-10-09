@@ -14,6 +14,7 @@ REQUIRED = [
     "pipewright/config/schemas/usecase.schema.json",
     "pipewright/config/schemas/environment.schema.json",
     "pipewright/config/schemas/manifest.schema.json",
+    "pipewright/config/schemas/reference.yaml",
     "pipewright/build/templates/components.Dockerfile",
     "pipewright/build/templates/pipewright_runtime.py",
     "pipewright/scaffold/ci_templates/action.yml",
@@ -25,6 +26,8 @@ REQUIRED = [
     "pipewright/examples/churn/inference_pipeline.py",
     "pipewright/examples/churn/components/requirements.txt",
     "pipewright/examples/churn/data/sample_customers.csv",
+    "pipewright/examples/minimal/example.yaml",
+    "pipewright/examples/minimal/usecase.yaml.tmpl",
 ]
 FORBIDDEN = ("__pycache__", ".pyc", ".pipewright/", ".pytest_cache")
 

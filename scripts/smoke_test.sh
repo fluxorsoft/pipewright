@@ -29,6 +29,9 @@ spec: { manifest: dev.manifest.json }
 YAML
 "$PW" --version
 "$PW" new-usecase --name smoke-churn --tenant smoke --owner smoke-team
+"$PW" new-usecase --name smoke-lite --tenant smoke --owner smoke-team --from minimal
+test -f .pipewright-schemas/usecase.schema.json
+"$PW" explain data.split.strategy | grep -q "allowed:   random, stratified, time"
 "$PW" validate --env dev
 "$PW" resolve --env dev > resolved.yaml && grep -q "^  name: smoke-churn-classifier" resolved.yaml
 "$PW" ci init --environments dev

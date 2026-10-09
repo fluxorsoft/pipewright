@@ -33,6 +33,7 @@ names such project-wide publishers.
 
 ```
 team-mlops/
+├── .pipewright-schemas/    # editor schemas, written by `pipewright new-usecase` and `pipewright schemas`
 ├── environments/
 │   └── <env>.yaml          # points at the manifest the platform team published
 └── usecases/
@@ -55,8 +56,11 @@ evaluation record (`evaluation.json` next to the model) from which Pipewright re
 version becomes the champion or is served. Configuration files end in `.yaml`.
 
 Most changes are config: a gate, a slice, the tuning budget, a drift threshold or a machine size is a line in
-`config/` or `steps:`, reviewed like any other change. The JSON Schemas in
-`src/pipewright/config/schemas/` list every setting; [CONTEXT.md](../CONTEXT.md) explains how they fit together.
+`config/` or `steps:`, reviewed like any other change. `pipewright explain <key>` says what any key means, its
+default and whether it may vary per environment. In the editor, the first line of each YAML file
+(`# yaml-language-server: $schema=...`, written by `new-usecase`; `pipewright schemas` adds it to older files)
+gives completion, hover help and underlined mistakes from the schemas in `.pipewright-schemas/`. Commit that folder
+with the repo. [CONTEXT.md](../CONTEXT.md) explains how the settings fit together.
 
 `environments/<env>.yaml`:
 
@@ -75,7 +79,7 @@ TLS-intercepting proxy also set `REQUESTS_CA_BUNDLE`.
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `pipewright new-usecase --name <usecase> --tenant <tenant> --owner <team>` | Copies the churn example: two pipelines, components, config, schemas, tests, sample data. Table names get the prefix `<usecase>_` |
+| 1 | `pipewright new-usecase --name <usecase> --tenant <tenant> --owner <team>` | Copies the churn example: two pipelines, components, config, schemas, tests, sample data. Table names get the prefix `<usecase>_`. `--from minimal` starts smaller (training only, required keys only); `--from-bq <project.dataset.table> --label <column>` also drafts the data contract from a BigQuery table |
 | 2 | edit `config/`, `usecase.yaml`, components | Your data contract, features, gates, monitoring; your model code |
 | 2b | `pipewright test --env <env>` | Runs `tests.command` (the example's helper unit tests) |
 | 3 | `pipewright validate --env <env>` | Schema, overrides, references, files, table schemas |

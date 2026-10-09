@@ -1,12 +1,23 @@
-"""pipewright new-usecase: start a use case from a packaged example."""
+"""pipewright new-usecase: start a use case from a packaged example.
+
+An example may take its code from another one: example.yaml names it (`code_from`) and the paths to copy (`code`),
+and the example's own files go on top. The minimal example is the churn example's training code with less config.
+Every YAML file written gets a first line pointing the editor at Pipewright's schemas (config/reference.py).
+"""
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from pathlib import Path
 
+import yaml
+
+from pipewright.config import reference
 from pipewright.errors import ConfigError
+
+EXAMPLE_FILE = "example.yaml"
 
 NAME = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 
@@ -24,8 +35,24 @@ def list_examples() -> list[str]:
     return sorted(p.name for p in examples_dir().iterdir() if (p / "usecase.yaml.tmpl").is_file())
 
 
+def _copy_code(src: Path, dest: Path, ignore) -> None:
+    """The paths example.yaml takes from another example."""
+    meta = yaml.safe_load((src / EXAMPLE_FILE).read_text(encoding="utf-8")) or {}
+    base = examples_dir() / meta["code_from"]
+    for rel in meta.get("code", []):
+        source, target = base / rel, dest / rel.rstrip("/")
+        if source.is_dir():
+            shutil.copytree(source, target, ignore=ignore, dirs_exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
 def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "churn",
-                table_prefix: str | None = None, model_name: str | None = None) -> Path:
+                table_prefix: str | None = None, model_name: str | None = None,
+                data_yaml: str | None = None, raw_schema: list[dict] | None = None) -> Path:
+    """data_yaml and raw_schema (from scaffold/from_bq.py) replace the example's config/data.yaml and raw table
+    schema, for a use case drafted from a BigQuery table."""
     for label, value in (("name", name), ("tenant", tenant)):
         if not NAME.match(value):
             raise ConfigError(f"{label} {value!r} must be lowercase letters, digits and hyphens, "
@@ -41,8 +68,11 @@ def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "
     values = {"usecase": name, "tenant": tenant, "owner": owner, "table_prefix": prefix,
               "model_name": model_name or f"{name}-classifier"}
 
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.tmpl", ".pipewright", ".pytest_cache")
-    shutil.copytree(src, dest, ignore=ignore)
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.tmpl", ".pipewright", ".pytest_cache", EXAMPLE_FILE)
+    dest.mkdir(parents=True)
+    if (src / EXAMPLE_FILE).is_file():
+        _copy_code(src, dest, ignore)
+    shutil.copytree(src, dest, ignore=ignore, dirs_exist_ok=True)
     # Every *.tmpl (usecase.yaml.tmpl, config/*.yaml.tmpl, ...) is rendered without its suffix.
     for template in sorted(src.rglob("*.tmpl")):
         text = template.read_text(encoding="utf-8")
@@ -54,6 +84,18 @@ def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "
         target = dest / template.relative_to(src).with_suffix("")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
+    if data_yaml is not None:
+        (dest / "config").mkdir(exist_ok=True)
+        (dest / "config" / "data.yaml").write_text(data_yaml, encoding="utf-8")
+        (dest / "schemas" / "raw_customers.json").write_text(json.dumps(raw_schema, indent=2) + "\n",
+                                                             encoding="utf-8")
+        for sample in (dest / "data").glob("*.csv"):     # the example's sample data does not fit the new contract
+            sample.unlink()
+        if (dest / "data").is_dir() and not any((dest / "data").iterdir()):
+            (dest / "data").rmdir()
+    reference.write_editor_schemas(root)
+    for path in sorted(dest.rglob("*.yaml")):
+        reference.add_modeline(root, path)
     gitignore = "# Pipewright build output and Python caches\n.pipewright/\n__pycache__/\n*.pyc\n.pytest_cache/\n"
     (dest / ".gitignore").write_text(gitignore, encoding="utf-8")
     return dest

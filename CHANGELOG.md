@@ -34,6 +34,14 @@ First open-source release.
   `model list` shows each version's result.
 - `.yml` configuration files are refused with a message to rename them to `.yaml`, instead of being ignored.
 
+- **Help with the YAML.** `pipewright explain <key>` (description, type, allowed values, default, whether it may vary
+  per environment); editor schemas in `.pipewright-schemas/` and a `yaml-language-server` line in every generated
+  YAML file, for completion, hover help and underlined mistakes (`pipewright schemas` for existing repos); every use
+  case key described in `config/schemas/reference.yaml`.
+- **Minimal example** (`new-usecase --from minimal`): the churn training code with only the required configuration.
+- **Data contract from BigQuery** (`new-usecase --from-bq <project.dataset.table> --label <column>`): drafts
+  `config/data.yaml` and the raw table's schema from a table or view.
+
 ### Fixed
 
 - A pipeline job that cannot join its Agent Platform experiment (for example in a new project) is reported as

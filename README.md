@@ -231,6 +231,15 @@ The churn example (`examples/churn/`) is a complete reference: training and infe
 data contract, gates, monitoring, retrain decisions, table schemas, tests and synthetic sample data. The full
 walkthrough, including what the platform team hands over, is in [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
+### Help with the YAML
+
+| You want | Use |
+|---|---|
+| Fewer keys to start with | `pipewright new-usecase --from minimal ...`: the churn example's training code with only the required configuration (two files) and one gate; everything else takes its default |
+| The data contract written for you | `pipewright new-usecase --name <name> --tenant <tenant> --owner <team> --from-bq <project.dataset.table> --label <column>` drafts `config/data.yaml` (columns, types, label, split, features) and the raw table's schema from a BigQuery table or view. Then train on it with `pipewright run --source-uri bq://<project.dataset.table>` |
+| Completion and hover help in the editor | Every YAML file `new-usecase` writes starts with `# yaml-language-server: $schema=...`, pointing at schemas in `.pipewright-schemas/` (in VS Code, with the Red Hat YAML extension). Keys are suggested, explained on hover, and mistakes underlined. `pipewright schemas` adds the line to existing files and refreshes the schemas after an upgrade |
+| What a key means | `pipewright explain data.split.strategy` prints its description, type, allowed values, default and whether it may vary per environment; `pipewright explain --list` lists every key |
+
 **Credentials:** Application Default Credentials, or `GCLOUD_CONFIG=<gcloud configuration>` for refreshable gcloud
 user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH` and
 `PIPEWRIGHT_BUILD_CA_BUNDLE`.
@@ -239,7 +248,7 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 
 | Stage | Commands |
 |---|---|
-| Configure | `new-usecase`, `validate`, `resolve`, `doctor`, `test` |
+| Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test` |
 | Release | `tables sync`, `release`, `status`, `rollback`, `schedules sync`, `alerts sync`, `ci init` |
 | Operate | `run`, `model list`, `model approve`, `deploy-model`, `monitor status`, `data erase` |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze` |
@@ -278,6 +287,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
 | OpenTelemetry export, per-tenant pipeline roots | Planned |
 | PyPI release (`pipewright-mlops`) | Planned |
+| Ray on Vertex AI as compute inside the full lifecycle (Terraform for the Ray cluster, then an end-to-end test) | Planned |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 

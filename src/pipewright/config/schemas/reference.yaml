@@ -1,0 +1,227 @@
+# What each use case key means: one line per key, under `spec`. Shown when hovering a key in the editor (the
+# exported schemas carry these) and by `pipewright explain <key>`. `<name>` stands for a name you choose.
+# A test keeps this file and usecase.schema.json in step: every key described, no description without a key.
+
+tenant: The tenant this use case belongs to, as named in the environment manifest. Given to you by the platform team; it decides the service account, BigQuery dataset and landing prefix the use case uses.
+include: Glob patterns, relative to the use case folder, of files that hold the rest of the spec. Each file holds one or more top-level sections; a section lives in exactly one file.
+
+resources: Overrides of the tenant's resources from the manifest. Normally left out; the platform team's manifest fills them.
+resources.runner_service_account: The service account pipeline runs use. Comes from the tenant in the manifest.
+resources.bigquery_dataset: The BigQuery dataset for the use case's tables. Comes from the tenant in the manifest.
+resources.landing_prefix: The landing bucket prefix where files for this use case arrive. Comes from the tenant in the manifest.
+resources.outputs_uri: The gs:// location for outputs when outputs.store is gcs or both. Comes from the tenant in the manifest.
+
+pipeline: A single pipeline, shorthand for pipelines.training. Use `pipelines` for training plus inference.
+pipeline.file: The Python file, relative to the use case folder, that defines the Kubeflow pipeline.
+pipeline.function: The name of the pipeline function (decorated with @dsl.pipeline) in that file.
+pipelines: The use case's pipelines by role. Training is required for model work; inference is optional.
+pipelines.training: The pipeline that trains, evaluates and registers a model.
+pipelines.training.file: The Python file, relative to the use case folder, that defines the training pipeline.
+pipelines.training.function: The name of the training pipeline function in that file.
+pipelines.inference: The pipeline that scores new data with the champion model.
+pipelines.inference.file: The Python file, relative to the use case folder, that defines the inference pipeline.
+pipelines.inference.function: The name of the inference pipeline function in that file.
+
+components: Where the pipeline components' code lives. It is built into the component image every step runs in.
+components.dir: The folder of component code, relative to the use case folder.
+components.requirements: The requirements file installed into the component image.
+framework: The ML framework of the component image.
+
+triggers: What starts a run, and which pipeline it starts.
+triggers.landing: A run when a file lands under the use case's landing prefix. null turns it off, for example in one environment.
+triggers.landing.suffixes: File name endings that start a run when a file lands under the use case's landing prefix, for example [.csv].
+triggers.landing.pipeline: The pipeline a landed file starts.
+triggers.schedules: Runs on a schedule (Cloud Scheduler jobs, created by `pipewright schedules sync`).
+triggers.schedules.name: The schedule's name, unique in the use case.
+triggers.schedules.cron: When it runs, in cron syntax, for example "0 6 * * *" (06:00 every day).
+triggers.schedules.timezone: The time zone the cron expression is read in, for example Europe/London.
+triggers.schedules.source_uri: The gs:// data the scheduled run reads. ${buckets.landing} and other manifest names may be used.
+triggers.schedules.pipeline: The pipeline the schedule starts.
+triggers.api: Whether the launcher's POST /run may start this use case's pipelines (for scoring on demand and retrains).
+
+parameters: Values passed to every pipeline that declares a parameter of the same name. ${...} references to resources, model and manifest names are filled in.
+parameters.<name>: A pipeline parameter value.
+
+resources_per_step: The older name of `steps`, merged with it. Prefer `steps`.
+resources_per_step.<name>: A step, by its component name with dashes (train-model for train_model).
+resources_per_step.<name>.cpu: CPUs for the step, for example 4 or "500m".
+resources_per_step.<name>.memory: Memory for the step, for example 8G.
+resources_per_step.<name>.gpu: An accelerator for the step.
+resources_per_step.<name>.gpu.type: The accelerator type, for example NVIDIA_TESLA_T4.
+resources_per_step.<name>.gpu.count: How many accelerators.
+resources_per_step.<name>.retries: How many times a failed step is retried.
+resources_per_step.<name>.cache: Whether the step may reuse a cached result from an identical earlier run.
+steps: Compute and behaviour per pipeline step, applied to the compiled pipeline; no pipeline code change needed.
+steps.<name>: A step, by its component name with dashes (train-model for train_model).
+steps.<name>.cpu: CPUs for the step, for example 4 or "500m".
+steps.<name>.memory: Memory for the step, for example 8G.
+steps.<name>.gpu: An accelerator for the step.
+steps.<name>.gpu.type: The accelerator type, for example NVIDIA_TESLA_T4.
+steps.<name>.gpu.count: How many accelerators.
+steps.<name>.retries: How many times a failed step is retried.
+steps.<name>.cache: Whether the step may reuse a cached result from an identical earlier run.
+
+data: The data contract, the label and how data is split. Passed to pipelines in ml_config.
+data.contract: What the input data must look like. A run whose data breaks the contract stops before training.
+data.contract.columns: The expected columns. `pipewright new-usecase --from-bq` drafts them from a BigQuery table.
+data.contract.columns.name: The column name.
+data.contract.columns.type: The column's type.
+data.contract.columns.required: Whether the column must be present.
+data.contract.columns.min: The smallest allowed value.
+data.contract.columns.max: The largest allowed value.
+data.contract.columns.allowed: The only values allowed.
+data.contract.columns.max_null_fraction: The largest share of empty values allowed in this column, 0 to 1.
+data.contract.min_rows: The fewest rows a run accepts.
+data.contract.max_null_fraction: The largest share of empty values allowed in any column, 0 to 1.
+data.contract.unique: Columns whose values must not repeat, such as an ID.
+data.contract.allow_extra_columns: Whether columns not in the contract are allowed. When false, they stop the run.
+data.label: The column the model learns to predict.
+data.label.column: The label column's name.
+data.label.values: The label's possible values, for example [0, 1].
+data.label.positive: The value that counts as positive for metrics such as precision and recall.
+data.split: How data is divided into training, validation and test sets.
+data.split.strategy: random, stratified (keeps the label's proportions) or time (the newest rows are the test set).
+data.split.time_column: The column that orders rows in time; needed with strategy time.
+data.split.test_fraction: The share of rows held back for testing.
+data.split.validation_fraction: The share of rows held back for validation during training.
+data.split.seed: The random seed, so a split can be repeated.
+
+features: Which columns the model uses.
+features.include: Only these columns are features. Left out, every column except the label and those excluded.
+features.exclude: Columns never used as features, such as IDs and dates.
+
+training: Hyperparameters, the experiment and tuning.
+training.hyperparameters: Values the training step reads, by name (for example epochs, learning_rate).
+training.hyperparameters.<name>: A hyperparameter value.
+training.seed: The random seed for training, so a run can be repeated.
+training.experiment: The Agent Platform experiment runs are recorded in.
+training.experiment.name: The experiment's name. Left out, one is named after the use case.
+training.tuning: Hyperparameter tuning, which runs several trials and keeps the best.
+training.tuning.enabled: Whether training tunes before the final fit.
+training.tuning.metric: The metric trials are compared on. Left out, evaluation.primary_metric.
+training.tuning.goal: Whether a larger (maximize) or smaller (minimize) metric is better.
+training.tuning.max_trials: The most trials in one run.
+training.tuning.parallel_trials: How many trials run at the same time.
+training.tuning.search_space: The hyperparameters to try, by name, and their ranges.
+training.tuning.search_space.<name>: One hyperparameter's range.
+training.tuning.search_space.<name>.type: double and integer take min and max; discrete and categorical take values.
+training.tuning.search_space.<name>.min: The smallest value tried.
+training.tuning.search_space.<name>.max: The largest value tried.
+training.tuning.search_space.<name>.values: The values tried.
+training.tuning.search_space.<name>.scale: linear, or log for ranges over orders of magnitude such as learning rates.
+
+evaluation: How a trained model is judged before it can become the champion. Pipewright re-checks the gates from the evaluation record.
+evaluation.primary_metric: The metric that matters most; used by tuning and the champion comparison when they name none.
+evaluation.decision_threshold: The score above which a prediction counts as positive, for the metrics that need one.
+evaluation.metrics: The metrics computed on the test set.
+evaluation.gates: Minimums and maximums a model must meet. A model that fails one is not registered as a candidate.
+evaluation.gates.metric: The metric the gate checks.
+evaluation.gates.min: The lowest value allowed.
+evaluation.gates.max: The highest value allowed.
+evaluation.champion: Comparison with the current champion on the same test data.
+evaluation.champion.enabled: Whether a new model must beat the champion.
+evaluation.champion.metric: The metric compared. Left out, evaluation.primary_metric.
+evaluation.champion.min_improvement: How much better the new model must be.
+evaluation.slices: Columns whose values form slices (groups) the model is also measured on.
+evaluation.slice_gates: The largest gap allowed between a slice and the overall result.
+evaluation.slice_gates.metric: The metric compared per slice.
+evaluation.slice_gates.max_gap: The largest amount a slice may be worse than overall.
+evaluation.slice_gates.min_rows: Slices with fewer test rows are not checked.
+
+explainability: Which features drive the model's predictions, recorded with each version.
+explainability.enabled: Whether training computes feature importance.
+explainability.method: How importance is measured.
+explainability.top_k: How many of the most important features are recorded.
+
+registry: How versions in the Model Registry become the default (the champion).
+registry.set_default: on_approval lets training make a passing version the default; manual waits for `pipewright model approve`. Left out, follows approvals.promote_model.
+
+model_card: Text for the model card stored with each version.
+model_card.intended_use: What the model is for and who uses its output.
+model_card.out_of_scope: Uses the model is not suitable for.
+model_card.limitations: Known weaknesses, such as data it has not seen.
+model_card.ethical_considerations: Fairness and other risks, and how they are handled.
+
+inference: Scoring with the champion model.
+inference.output_table: The table predictions are written to.
+inference.decision_threshold: The score above which a prediction is positive. Left out, evaluation.decision_threshold.
+
+monitoring: Checks run on each inference, for drift, prediction drift and performance against observed outcomes.
+monitoring.alerts.events: The events that send an email.
+monitoring.alerts.severity: The severity of the alert policies.
+monitoring.drift: Whether the scored data has moved away from the training data, feature by feature.
+monitoring.drift.enabled: Whether drift is checked.
+monitoring.drift.method: How drift is measured (population stability index).
+monitoring.drift.threshold: The drift above which a feature raises an alert. 0.2 is a common choice for PSI.
+monitoring.drift.features: The features checked. Left out, all of them.
+monitoring.prediction_drift: Whether the model's predictions have moved away from those at training time.
+monitoring.prediction_drift.enabled: Whether prediction drift is checked.
+monitoring.prediction_drift.threshold: The drift above which an alert is raised.
+monitoring.performance: How the model does on outcomes observed after scoring.
+monitoring.performance.enabled: Whether performance is checked.
+monitoring.performance.labels: Where the observed outcomes are.
+monitoring.performance.labels.table: The table of observed outcomes.
+monitoring.performance.labels.key: The column that joins outcomes to predictions.
+monitoring.performance.labels.label: The column holding the observed outcome.
+monitoring.performance.metric: The metric computed on observed outcomes.
+monitoring.performance.min: The value below which an alert is raised.
+monitoring.output_table: The table monitoring results are written to.
+monitoring.alerts: Email for Pipewright events, set up by `pipewright alerts sync`.
+monitoring.alerts.notify: Email addresses, distribution lists included.
+
+retraining: What drift or a performance drop leads to, and who decides on a retrain.
+retraining.mode: off (alerts only), propose (a case opens and a person decides) or candidate (trains a candidate that is never promoted). Write "off" in quotes, since YAML reads a bare off as false (which also means off).
+retraining.enabled: The older switch. true means mode propose, false means off.
+retraining.when: What may open a retrain case (schedule, drift, performance). The key is `when`, not `on`, because YAML reads on as true.
+retraining.cooldown_days: Days after an approved retrain during which new alerts are recorded but open no case.
+retraining.source_uri: The training data an approved retrain uses by default; an approver may choose another.
+retraining.decisions: How people hear about a retrain case and how long they have to decide.
+retraining.decisions.notify: Who is emailed a case's summary and ID. Email never approves anything.
+retraining.decisions.publish: Whether decision events also go to the tenant's decision feed (a subscription the platform provides).
+retraining.decisions.escalate_after_days: Days without a decision before the case is escalated.
+retraining.decisions.escalate_notify: Who is emailed when a case is escalated.
+retraining.decisions.digest: Whether a weekly summary of open cases and decisions is sent.
+retraining.approvals: Who must agree before a retrain runs.
+retraining.approvals.required: Approver groups registered by the platform (approver_groups in the manifest). One approval is needed from each.
+retraining.approvals.separate_from_requester: Whether the person who asked for the retrain may also approve it.
+retraining.snooze: Putting off a decision.
+retraining.snooze.max_days: The longest a case may be snoozed. The environment may set a lower cap.
+retraining.snooze.reopen_when_worse_by: A snoozed or declined case re-opens at once when the worst drift (PSI) rises by this much.
+
+data_protection: Personal data in the use case's tables.
+data_protection.personal_data_columns: Columns that hold personal data; recorded in the release and kept out of logs.
+data_protection.erasure: How a data subject's rows are found for `pipewright data erase`.
+data_protection.erasure.key_column: The column that identifies a data subject, such as customer_id.
+
+tests: How `pipewright test` and the release check the use case's code.
+tests.command: The command run in the use case folder; it must exit 0.
+
+outputs: Where the use case's tables are written.
+outputs.store: bigquery (tables), gcs (Parquet files plus BigQuery external tables) or both, for example while moving to a lake.
+outputs.gcs: Parquet output on Cloud Storage, when outputs.store is gcs or both.
+outputs.gcs.format: The file format.
+outputs.gcs.external_tables: Whether BigQuery external tables of the same names are created over the files, so SQL keeps working.
+outputs.bigquery: BigQuery tables the use case owns, created and evolved by `pipewright tables sync` (additive changes only).
+outputs.bigquery.tables: The tables, by name.
+outputs.bigquery.tables.<name>: A table, with its schema file, partitioning, clustering and description.
+outputs.bigquery.retention_days: Days before partitions are deleted.
+
+model: The model in the Model Registry and how it is served.
+model.name: The model's display name in the Model Registry.
+model.promotion: How a model reaches the next environment (planned) - model copies the approved version, retrain trains it again from the same release.
+model.serving: Online serving on an endpoint, deployed with `pipewright deploy-model`.
+model.serving.enabled: Whether the model is served online. Needs online serving for the tenant.
+model.serving.target: Where it is served.
+model.serving.machine: The machine type, for example n1-standard-2.
+model.serving.replicas: How many replicas serve.
+model.serving.replicas.min: The fewest replicas.
+model.serving.replicas.max: The most replicas, reached under load.
+model.serving.canary_percent: The share of traffic a new version gets with `deploy-model --canary`.
+
+approvals: Which changes need a person.
+approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.
+approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation.
+approvals.approvers: Who may approve, as user:<email> or group:<email>.
+
+features_store: Reserved for a later version; leave it out.
+environments: Per-environment overrides, by environment name. Usually kept in environments/<env>.yaml instead.

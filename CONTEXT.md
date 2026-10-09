@@ -91,10 +91,12 @@ README.md                   what Pipewright is, the gaps it closes, getting star
 CONTRIBUTING.md, SECURITY.md, CHANGELOG.md, LICENSE, NOTICE
 pyproject.toml, uv.lock     the package (hatchling), dev environment (uv)
 src/pipewright/             the Python package, one subpackage per responsibility (section 8.1)
-  config/schemas/           JSON Schemas: environment, use case, environment manifest (the public contracts)
+  config/schemas/           JSON Schemas: environment, use case, environment manifest (the public contracts);
+                            reference.yaml: what each use case key means (editor hover, `pipewright explain`)
   build/templates/          components.Dockerfile, pipewright_runtime.py (injected into every component image)
   scaffold/ci_templates/    GitHub Actions workflows written by `pipewright ci init`
 examples/churn/             the reference use case copied by `pipewright new-usecase`
+examples/minimal/           the churn training code with only the required configuration (example.yaml)
 images/launcher.Dockerfile  the launcher image, built from the wheel
 tests/                      offline unit tests (fakes for Google Cloud)
 scripts/                    check_package.py (wheel contents), smoke_test.sh (installed CLI, no cloud)
@@ -125,6 +127,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-11 | Sources may be CSV or Parquet on GCS, or BigQuery tables and views (`bq://`) | Met | `pipewright_runtime.read_source` |
 | FR-12 | Training: data contract checks, splits (random, stratified, time), tuning with parallel trials, experiments | Met | example, `config/ml.py` |
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
+| FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
 | FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
 | FR-15 | Online serving with approval gate, canary, promote and undeploy | Met | `models/deploy.py` |
@@ -272,6 +275,9 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-70 | **Decision events always go on the lifecycle events topic;** delivery to a team's own app is an opt-in, per-tenant filtered subscription (`retraining.decisions.publish`), checked by `doctor` | Audit needs every decision; topics stay platform-owned while teams choose delivery | Active |
 | D-72 | **Pipewright verifies the evaluation gates itself** from the version's evaluation record (`evaluation.json` next to the model artifacts) at `model approve` and `deploy-model`, against the configuration in force now; a missing champion comparison passes only when no earlier version exists | Teams write their own evaluation code; a rewritten step could drop a gate silently. Checking the record makes the freedom safe without constraining the code | Active (2026-10-09) |
 | D-73 | **One spelling for configuration files: `.yaml`.** A `.yml` file where Pipewright looks (use case file, included config, per-environment overrides, environment files) is refused with a rename message | A `dev.yml` override that is silently ignored is hard to spot | Active (2026-10-09) |
+| D-74 | **One description per key, next to the schema.** `schemas/reference.yaml` holds one line per dotted use case key; it is merged into the schemas the editor reads and into `pipewright explain`, and a test fails when a key has no description or a description has no key | The schemas say what is valid, not what it means; one source keeps hover text, `explain` and the docs from drifting apart | Active (2026-10-09) |
+| D-75 | **Editor schemas are files in the MLOps repo**, `.pipewright-schemas/`, written by `pipewright schemas` and `new-usecase`, with a `yaml-language-server` line in each YAML file pointing at its schema by relative path | Works offline, in any editor that uses the YAML language server, and matches the installed Pipewright version; no hosted schema URL to keep in step | Active (2026-10-09) |
+| D-76 | **`--from-bq` drafts; it does not decide.** From the table come the columns, types, required columns, the label's 0/1 values, a time split when there is a date column, and non-numeric columns excluded from features. Ranges, allowed values, uniqueness and personal data are left to the team, with a note on columns that look like identifiers | The schema cannot know what a column means; a draft that guessed would be trusted without review | Active (2026-10-09) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -489,8 +495,11 @@ CLI must be upgraded **before** a platform publishes new fields (R-05).
 
 ### 9.3 Use case and environment files
 
-`usecase.schema.json` and `environment.schema.json` in `src/pipewright/config/schemas/`. Every key carries a
-description; the churn example uses most of them.
+`usecase.schema.json` and `environment.schema.json` in `src/pipewright/config/schemas/`; `reference.yaml` next to
+them describes every use case key (D-74). The churn example uses most keys; the minimal example only the required
+ones. `pipewright schemas` writes the editor schemas to `.pipewright-schemas/` in the MLOps repo: the use case
+schema, one for included files (any top-level sections), one for `environments/<env>.yaml` overrides (only the keys
+that may vary), and the environment schema.
 
 ### 9.4 Evaluation record
 
@@ -567,6 +576,7 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | Promotion of a release between environments by digest (FR-29) | Planned |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |
+| Ray on Vertex AI as compute inside the full Pipewright lifecycle: steps that submit work to a Ray cluster, with releases, gates, the registry and monitoring as today. Terraform for the Ray cluster first, then an end-to-end test | Planned |
 | Iceberg (BigLake) tables for row-level deletes | Design only |
 | Feature store integration | Under review |
 
