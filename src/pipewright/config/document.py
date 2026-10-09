@@ -3,6 +3,9 @@
 usecases/<name>/usecase.yaml           identity, tenant, pipelines, `include:` patterns
 usecases/<name>/<included files>       one or more spec sections each; a section lives in exactly one file
 usecases/<name>/environments/<env>.yaml  per-environment overrides (same as spec.environments.<env>)
+
+Pipewright's files end in `.yaml`. A `.yml` file where Pipewright looks for one is refused with a clear error rather
+than silently ignored (a `dev.yml` override that never applies is hard to spot).
 """
 
 from __future__ import annotations
@@ -27,8 +30,17 @@ class UseCaseDocument:
     origins: dict[str, str] = field(default_factory=dict)  # spec section -> file it came from
 
 
+def rename_hint(path: Path, base: Path | None = None) -> str:
+    """The error for a .yml file Pipewright would otherwise ignore."""
+    rel = path.relative_to(base).as_posix() if base else path.name
+    return f"{rel}: Pipewright reads .yaml files; rename it to {rel[:-4]}.yaml"
+
+
 def discover_usecases(root: Path) -> dict[str, Path]:
     base = Path(root) / USECASES_DIR
+    misnamed = [p for p in sorted(base.glob("*/usecase.yml")) if not (p.parent / USECASE_FILE).exists()]
+    if misnamed:
+        raise ConfigError([rename_hint(p, Path(root)) for p in misnamed])
     return {p.parent.name: p for p in sorted(base.glob(f"*/{USECASE_FILE}"))}
 
 
@@ -45,7 +57,10 @@ def load_usecase_document(path: Path) -> UseCaseDocument:
 
     for pattern in spec.get("include", []):
         files = sorted(p for p in folder.glob(pattern) if p.is_file() and p.resolve() != path.resolve())
-        if not files:
+        # Files the pattern misses only because of their extension.
+        misnamed = sorted(folder.glob(pattern[:-5] + ".yml")) if pattern.endswith(".yaml") else []
+        problems += [rename_hint(p, folder) for p in misnamed]
+        if not files and not misnamed:
             problems.append(f"include pattern {pattern!r} matched no files")
         for f in files:
             rel = f.relative_to(folder).as_posix()
@@ -60,6 +75,7 @@ def load_usecase_document(path: Path) -> UseCaseDocument:
 
     env_dir = folder / OVERRIDES_DIR
     if env_dir.is_dir():
+        problems += [rename_hint(p, folder) for p in sorted(env_dir.glob("*.yml"))]
         inline = spec.setdefault("environments", {})
         for f in sorted(env_dir.glob("*.yaml")):
             rel = f.relative_to(folder).as_posix()

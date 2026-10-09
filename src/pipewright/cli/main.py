@@ -138,6 +138,7 @@ def cmd_deploy_model(args) -> int:
           f"{p.replicas['min']}-{p.replicas['max']})"
           + ("  [already live]" if p.already_deployed else "")
           + (f"; replaces {', '.join(p.other_versions)}" if p.other_versions else ""))
+    print("evaluation gates: " + ("pass" if not p.gate_problems else "FAIL\n  " + "\n  ".join(p.gate_problems)))
     if args.dry_run:
         return 0
     deploy_model.check_approval(uc, gcp.identity(), args.approve)

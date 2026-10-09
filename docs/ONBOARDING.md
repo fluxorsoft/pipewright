@@ -49,6 +49,11 @@ team-mlops/
 Tables live in BigQuery by default. `outputs.store: gcs` writes them as Parquet under your tenant's outputs
 location instead (with BigQuery external tables of the same names, so SQL keeps working), and `both` does both.
 
+Your pipeline and component code is yours: file names, libraries and models are your choice. The contract is
+small (see the README, "Your code and Pipewright"): the four launcher parameters, the component image, and an
+evaluation record (`evaluation.json` next to the model) from which Pipewright re-checks your gates before a
+version becomes the champion or is served. Configuration files end in `.yaml`.
+
 Most changes are config: a gate, a slice, the tuning budget, a drift threshold or a machine size is a line in
 `config/` or `steps:`, reviewed like any other change. The JSON Schemas in
 `src/pipewright/config/schemas/` list every setting; [CONTEXT.md](../CONTEXT.md) explains how they fit together.

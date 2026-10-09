@@ -3,6 +3,9 @@
 Follows approvals.deploy_model: `manual` requires --approve, and when approvers lists users the caller must be one
 of them. Group approvers cannot be checked locally; CI environments enforce them with protected approvals.
 
+The default version is served only when its evaluation record passes the use case's gates (models/gates.py),
+which also catches a version a pipeline made the default by itself.
+
 Rollout: by default the new version takes all traffic and older versions are removed. With --canary it takes
 model.serving.canary_percent and the current version keeps the rest; `--promote` then moves all traffic to it.
 """
@@ -24,6 +27,7 @@ class DeployPlan:
     replicas: dict
     already_deployed: bool
     other_versions: list[str]
+    gate_problems: list = None          # problems with the default version's evaluation record
 
 
 def endpoint_name(uc: ResolvedUseCase) -> str:
@@ -63,14 +67,24 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     deployed = endpoints[0].list_models() if endpoints else []
     current = [d for d in deployed if d.model == default.resource_name and d.model_version_id == default.version_id]
     serving = uc.model["serving"]
+    from pipewright.gcp import Gcp
+    from pipewright.models import gates
+
+    earlier = str(default.version_id).isdigit() and int(default.version_id) > 1
+    problems = gates.verify(Gcp(creds), default.uri, uc.ml["evaluation"], earlier)
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
                       serving["replicas"], bool(current),
-                      [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current])
+                      [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems)
 
 
 def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, log=print) -> None:
     ai = _aiplatform(env, creds)
     p = plan(uc, env, creds)
+    if p.gate_problems:
+        raise ConfigError(p.gate_problems + ["make a passing version the default (`pipewright model approve`), "
+                                             "then deploy"],
+                          source=f"v{p.version} of {p.model} is not served: the default version does not pass "
+                                 f"{uc.name}'s evaluation gates")
     if p.already_deployed:
         log(f"v{p.version} of {p.model} is already live on {p.endpoint}")
         return

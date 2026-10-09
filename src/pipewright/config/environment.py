@@ -67,6 +67,10 @@ def environment_from_manifest(ref: str, base_dir: Path = Path(".")) -> Environme
 
 def load_environment(root: Path, name: str) -> Environment:
     path = Path(root) / ENVIRONMENTS_DIR / f"{name}.yaml"
+    misnamed = path.with_suffix(".yml")
+    if not path.exists() and misnamed.exists():
+        raise ConfigError(f"{ENVIRONMENTS_DIR}/{misnamed.name}: Pipewright reads .yaml files; rename it to "
+                          f"{ENVIRONMENTS_DIR}/{name}.yaml")
     doc = load_yaml(path)
     validate(doc, "environment", str(path))
     spec = doc["spec"]

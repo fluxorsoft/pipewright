@@ -29,6 +29,11 @@ First open-source release.
 - Licensed under the Apache License 2.0.
 - Distribution name `pipewright-mlops` (PyPI); the import and the command stay `pipewright`.
 
+- **Evaluation gates checked by Pipewright.** `model approve` and `deploy-model` recompute the metric gates, slice
+  gates and champion margin from the version's evaluation record (`evaluation.json`) and refuse a version that fails;
+  `model list` shows each version's result.
+- `.yml` configuration files are refused with a message to rename them to `.yaml`, instead of being ignored.
+
 ### Fixed
 
 - A pipeline job that cannot join its Agent Platform experiment (for example in a new project) is reported as

@@ -2,7 +2,8 @@
 
 The default version is the champion: inference pipelines score with it and training compares challengers to it.
 With registry.set_default: manual, training registers candidates and `model approve` makes one the default,
-following approvals.promote_model (manual needs --approve, and a listed user approver).
+following approvals.promote_model (manual needs --approve, and a listed user approver). A version becomes the
+default only when its evaluation record passes the use case's gates, recomputed here (models/gates.py).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 
 from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
+from pipewright.models import gates
 from pipewright.models.deploy import check_approval
 
 
@@ -22,41 +24,81 @@ class Version:
     description: str
     created: str
     labels: dict
+    gates: str = ""          # "pass", "FAIL: <first problem>", "no record" or "" (not checked)
 
 
-def _registry(uc: ResolvedUseCase, env: Environment, creds):
+def _resource(uc: ResolvedUseCase, env: Environment, creds) -> str:
     from google.cloud import aiplatform
-    from google.cloud.aiplatform.models import ModelRegistry
 
     aiplatform.init(project=env.project, location=env.region, credentials=creds)
     models = aiplatform.Model.list(filter=f'display_name="{uc.model["name"]}"')
     if not models:
         raise ConfigError(f"no model {uc.model['name']!r} in the registry yet: run the training pipeline first")
-    return ModelRegistry(model=models[0].resource_name)
+    return models[0].resource_name
 
 
-def versions(uc: ResolvedUseCase, env: Environment, creds) -> list[Version]:
+def _registry(uc: ResolvedUseCase, env: Environment, creds):
+    from google.cloud.aiplatform.models import ModelRegistry
+
+    return ModelRegistry(model=_resource(uc, env, creds))
+
+
+def artifact_uri(resource: str, version: str) -> str | None:
+    from google.cloud import aiplatform
+
+    return aiplatform.Model(model_name=f"{resource}@{version}").uri
+
+
+def gate_problems(uc: ResolvedUseCase, creds, resource: str, version, earlier_versions: bool) -> list[str]:
+    """earlier_versions: a version older than this one exists, so a champion comparison must be recorded."""
+    from pipewright.gcp import Gcp
+
+    return gates.verify(Gcp(creds), artifact_uri(resource, str(version)), uc.ml["evaluation"], earlier_versions)
+
+
+def _number(version_id) -> int:
+    return int(version_id) if str(version_id).isdigit() else 0
+
+
+def versions(uc: ResolvedUseCase, env: Environment, creds, check_gates: bool = True, limit: int = 10) -> list[Version]:
+    from google.cloud.aiplatform.models import ModelRegistry
+
+    resource = _resource(uc, env, creds)
     out = []
-    for v in _registry(uc, env, creds).list_versions():
+    for v in ModelRegistry(model=resource).list_versions():
         aliases = list(v.version_aliases or [])
         out.append(Version(str(v.version_id), "default" in aliases, [a for a in aliases if a != "default"],
                            v.version_description or "", str(v.version_create_time)[:19],
                            dict(getattr(v, "labels", None) or {})))
-    return sorted(out, key=lambda v: int(v.version_id) if v.version_id.isdigit() else 0, reverse=True)
+    out.sort(key=lambda v: _number(v.version_id), reverse=True)
+    oldest = min((_number(v.version_id) for v in out), default=0)
+    for v in out[:limit] if check_gates and gates.needs_record(uc.ml["evaluation"]) else []:
+        try:
+            problems = gate_problems(uc, creds, resource, v.version_id, _number(v.version_id) > oldest)
+        except Exception as e:  # noqa: BLE001 - listing must not fail because one record cannot be read
+            v.gates = f"not checked: {type(e).__name__}"
+            continue
+        v.gates = "pass" if not problems else ("no record" if problems[0].startswith("no evaluation record")
+                                               else f"FAIL: {problems[0]}")
+    return out
 
 
 def render(uc: ResolvedUseCase, rows: list[Version]) -> str:
     lines = [f"{uc.model['name']} ({uc.environment})"]
     for v in rows:
         status = "DEFAULT" if v.default else v.labels.get("status", "")
-        lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}")
+        gate = f"  [gates {v.gates}]" if v.gates else ""
+        lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}{gate}")
     return "\n".join(lines)
 
 
 def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity: str | None, approved: bool,
             log=print) -> None:
     check_approval(uc, identity, approved, key="promote_model")
-    registry = _registry(uc, env, creds)
+    from google.cloud.aiplatform.models import ModelRegistry
+
+    resource = _resource(uc, env, creds)
+    registry = ModelRegistry(model=resource)
     known = {str(v.version_id): v for v in registry.list_versions()}
     version = version.removeprefix("v")
     if version not in known:
@@ -65,6 +107,12 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
         log(f"v{version} of {uc.model['name']} is already the default")
         return
     previous = next((k for k, v in known.items() if "default" in (v.version_aliases or [])), None)
+    # Pipewright recomputes the gates from the version's evaluation record; it does not trust the pipeline.
+    earlier = any(_number(k) < _number(version) for k in known)
+    problems = gate_problems(uc, creds, resource, version, earlier)
+    if problems:
+        raise ConfigError(problems, source=f"v{version} of {uc.model['name']} cannot become the default: it does "
+                                           f"not pass {uc.name}'s evaluation gates")
     # Moving the `default` alias is what makes a version the default.
     registry.add_version_aliases(new_aliases=["default"], version=version)
     import io

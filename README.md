@@ -154,6 +154,36 @@ Two personas, one contract between them (the diagram at the top shows the flow):
 
 [CONTEXT.md](CONTEXT.md) describes the design, the decisions behind it and every interface in detail.
 
+## Your code and Pipewright
+
+Teams write their pipelines and ML code their own way. Pipewright needs only a small contract at the edges:
+
+| | Free (your choice) | Fixed (the contract) |
+|---|---|---|
+| Layout | Pipeline file and function names, the components folder, how config is split into files (`include:` patterns), table schema file names | `usecases/<name>/usecase.yaml`, with `metadata.name` equal to the folder; overrides in `usecases/<name>/environments/<env>.yaml` |
+| Pipelines | Steps, libraries, frameworks, models; anything inside a step (Ray on Vertex AI included) | Kubeflow Pipelines v2 (`kfp` pinned to the version Pipewright compiles with); every pipeline accepts `project`, `region`, `source_uri` and `run_id`; components take their image from `COMPONENT_IMAGE` |
+| Configuration | Which sections you use; most have defaults | Optional `ml_config` parameter: when a pipeline declares it, it receives the resolved configuration (data contract, gates, monitoring, retraining) |
+| Evaluation | How you compute metrics | Training writes an **evaluation record**, `evaluation.json` next to the model artifacts, with the metrics, slices and champion comparison (see below) |
+| Files | | Configuration files end in `.yaml`; a `.yml` file is refused with a message to rename it |
+
+**Pipewright checks the gates itself.** Your evaluation step may apply the gates, but Pipewright does not take its
+word for it. Before a version becomes the champion (`pipewright model approve`) or is served (`pipewright
+deploy-model`), Pipewright recomputes every metric gate, slice gate and the champion margin from the version's
+evaluation record, against the configuration in force now. A rewritten evaluation step that drops a gate cannot
+promote a failing model, and `pipewright model list` shows each version's result. The record:
+
+```json
+{
+  "metrics":  {"auc": 0.81, "calibration_error": 0.03},
+  "slices":   {"contract_length_months": {"12": {"rows": 400, "auc": 0.79}}},
+  "champion": {"auc": 0.80, "_version": "3"},
+  "decision": "approve"
+}
+```
+
+`slices` is needed for slice gates; `champion` holds the champion's metrics on the same test data, or `null` when
+there was no champion yet. The churn example writes this record in its evaluate and register steps.
+
 ## Getting started
 
 ### What you need

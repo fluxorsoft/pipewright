@@ -125,6 +125,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-11 | Sources may be CSV or Parquet on GCS, or BigQuery tables and views (`bq://`) | Met | `pipewright_runtime.read_source` |
 | FR-12 | Training: data contract checks, splits (random, stratified, time), tuning with parallel trials, experiments | Met | example, `config/ml.py` |
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
+| FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
 | FR-15 | Online serving with approval gate, canary, promote and undeploy | Met | `models/deploy.py` |
 | FR-16 | Inference scores with the champion and monitors feature drift, prediction drift and live performance (PSI) | Met | example, `monitoring/` |
@@ -269,6 +270,8 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-68 | **Drift opens a human decision; no automatic retraining.** Modes `off`, `propose` (the recommended minimum for production), `candidate` (never promotes) | Retraining on the same data does not improve a model; drift has causes needing opposite responses (data bug, seasonality, real change, harmless shift) | Active |
 | D-69 | **Email notifies; an authenticated identity approves.** Approval is `pipewright retrain approve`; approvers are verified when they act | Anyone can forward an email; regulated approvals need a named, verified approver | Active |
 | D-70 | **Decision events always go on the lifecycle events topic;** delivery to a team's own app is an opt-in, per-tenant filtered subscription (`retraining.decisions.publish`), checked by `doctor` | Audit needs every decision; topics stay platform-owned while teams choose delivery | Active |
+| D-72 | **Pipewright verifies the evaluation gates itself** from the version's evaluation record (`evaluation.json` next to the model artifacts) at `model approve` and `deploy-model`, against the configuration in force now; a missing champion comparison passes only when no earlier version exists | Teams write their own evaluation code; a rewritten step could drop a gate silently. Checking the record makes the freedom safe without constraining the code | Active (2026-10-09) |
+| D-73 | **One spelling for configuration files: `.yaml`.** A `.yml` file where Pipewright looks (use case file, included config, per-environment overrides, environment files) is refused with a rename message | A `dev.yml` override that is silently ignored is hard to spot | Active (2026-10-09) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -489,7 +492,14 @@ CLI must be upgraded **before** a platform publishes new fields (R-05).
 `usecase.schema.json` and `environment.schema.json` in `src/pipewright/config/schemas/`. Every key carries a
 description; the churn example uses most of them.
 
-### 9.4 Plugin API v1
+### 9.4 Evaluation record
+
+`evaluation.json` in the model version's artifact directory, written by the training pipeline: `metrics` (name to
+value), `slices` (column to value to `{rows, <metric>: value}`, for slice gates), `champion` (the champion's metrics on
+the same test data and `_version`, or `null`), `decision` (informational). Pipewright recomputes the gates from it
+(D-72). When the configuration has no gates, slice gates or champion comparison, no record is needed.
+
+### 9.5 Plugin API v1
 
 Entry point group `pipewright.commands`, signature `register(subparsers, common)`. Helpers a plugin may rely on:
 `load_environment`, `environment_from_manifest`, `resolve_usecase`, `Gcp`, `gcs_read`, `gcs_write`,
