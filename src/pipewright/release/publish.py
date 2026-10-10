@@ -13,6 +13,12 @@ from pipewright.release.contract import CONTRACT_VERSION, ReleaseContract, now
 Uploaded = dict  # pipeline name -> (template_uri, template_digest)
 
 
+
+def pipeline_root(env, uc) -> str:
+    """Where a use case's runs write their artifacts: the tenant's own prefix of the artifacts bucket, so a tenant's
+    runner can be granted that prefix only (R-04)."""
+    return f"gs://{env.artifacts_bucket}/pipeline-root/{uc.tenant}/{uc.name}"
+
 def _tag(value: str) -> str:
     return re.sub(r"[^a-z0-9-]", "-", value.lower()).strip("-")[:120]
 
@@ -69,7 +75,7 @@ def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, Templ
         template_uri=training["template_uri"],
         template_digest=training["template_digest"],
         component_image=component_image,
-        pipeline_root=f"gs://{env.artifacts_bucket}/pipeline-root/{uc.name}",
+        pipeline_root=pipeline_root(env, uc),
         runner_service_account=uc.resources["runner_service_account"],
         parameters=training["parameters"],
         static_parameters=training["static_parameters"],

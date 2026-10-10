@@ -205,3 +205,16 @@ def test_a_changed_template_is_a_new_release_even_on_the_same_commit(repo, monke
     changed = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
     assert changed.contract.release_id.startswith("abc123-") and changed.contract.template_digest != \
         first.contract.template_digest
+    # Each tenant's runs write under its own prefix of the artifacts bucket (R-04); a contract published with the
+    # older shared root is not reused for the same commit.
+    assert changed.contract.pipeline_root == f"gs://{env.artifacts_bucket}/pipeline-root/{uc.tenant}/{uc.name}"
+    import json as _json
+
+    legacy = _json.loads(changed.contract.to_json())
+    legacy["release_id"], legacy["pipeline_root"] = "abc123", f"gs://{env.artifacts_bucket}/pipeline-root/{uc.name}"
+    for key in list(store):
+        store.pop(key)
+    store[f"contracts/{uc.name}/abc123.json"] = _json.dumps(legacy)
+    moved = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
+    assert moved.contract.release_id.startswith("abc123-") and moved.contract.pipeline_root.endswith(
+        f"/pipeline-root/{uc.tenant}/{uc.name}")
