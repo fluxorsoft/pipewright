@@ -96,7 +96,10 @@ def register_model(
         version_description=f"run {run_id}, {primary}={value:.4f}" if value is not None else f"run {run_id}",
         encryption_spec_key_name=ml_config["platform"].get("kms_key"),   # CMEK in private environments
         labels={"run_id": alias[:63], "pipeline": "training", "usecase": ml_config["usecase"][:63],
-                "status": "champion" if make_default else "candidate"},
+                "status": "champion" if make_default else "candidate",
+                # the release that trained it: `pipewright promote` promotes a model only with that release
+                **({"release": re.sub(r"[^a-z0-9-]", "-", os.environ["PIPEWRIGHT_RELEASE"].lower())[:63]}
+                   if os.environ.get("PIPEWRIGHT_RELEASE") else {})},
         sync=True,
     )
     vertex_model.uri = f"https://{region}-aiplatform.googleapis.com/v1/{registered.versioned_resource_name}"

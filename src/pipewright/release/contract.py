@@ -95,11 +95,14 @@ class ReleaseContract:
     # checkout of the MLOps repo, e.g. evidence packs. Optional; older launchers ignore it.
     metadata: dict = field(default_factory=dict)
     ray: dict = field(default_factory=dict)
+    # Set when the release came through `pipewright promote`: the source release, digests, model, who, policy.
+    promoted_from: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> ReleaseContract:
         known = set(cls.__dataclass_fields__)
-        optional = {"source_commit", "created_at", "labels", "blueprint", "pipelines", "metadata", "ray"}
+        optional = {"source_commit", "created_at", "labels", "blueprint", "pipelines", "metadata", "ray",
+                    "promoted_from"}
         missing = sorted(known - optional - set(data))
         if missing:
             raise ConfigError(f"contract is missing fields: {missing}")

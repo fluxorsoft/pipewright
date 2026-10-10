@@ -370,6 +370,26 @@ def cmd_rollback(args) -> int:
     return 0
 
 
+def cmd_promote(args) -> int:
+    from pipewright.release import promote
+
+    root = Path(args.root)
+    path = _selected(root, [args.usecase])[args.usecase]
+    src, dst = load_environment(root, args.source), load_environment(root, args.to)
+    result = promote.promote(path, src, dst, release_id=args.release, model_version=args.model_version,
+                             accept_template_change=args.accept_template_change)
+    if result.unchanged:
+        return 0
+    for c in result.checks:
+        print(f"  verified: {c}")
+    if result.model_version:
+        approve = dst.policies.get("promote_model", "manual")
+        print(f"model v{result.model_version} is a candidate in {dst.name}: "
+              + ("make it the default with `pipewright model approve --env " + dst.name + " --usecase " + args.usecase
+                 + f" --version {result.model_version}`" if approve != "auto" else "approve it to serve"))
+    return 0
+
+
 def cmd_status(args) -> int:
     from pipewright.gcp import Gcp
     from pipewright.release import service as release
@@ -460,6 +480,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--usecase", required=True)
     sp.add_argument("--to", help="release id (default: the previous one)")
     sp.set_defaults(func=cmd_rollback)
+
+    sp = sub.add_parser("promote", help="promote a tested release (and its approved model) to the next environment")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--from", dest="source", required=True, help="the environment it was tested in, e.g. test")
+    sp.add_argument("--to", required=True, help="the environment to promote to, e.g. prod (its promotion.from)")
+    sp.add_argument("--usecase", required=True)
+    sp.add_argument("--release", help="the source release id (default: the one live in the source)")
+    sp.add_argument("--model-version", help="the source model version (default: its default, approved version)")
+    sp.add_argument("--accept-template-change", action="store_true",
+                    help="promote even if the destination compiles the pipelines differently (recorded)")
+    sp.set_defaults(func=cmd_promote)
 
     sp = sub.add_parser("new-usecase", help="start a use case from a Pipewright example")
     sp.add_argument("--root", default=".")
