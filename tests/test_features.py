@@ -76,6 +76,48 @@ def test_a_landing_trigger_cannot_deliver_an_entity_table(repo):
         resolve_usecase(path, env)
 
 
+# ------------------------------------------------------------------- policy --
+
+def with_manifest(repo, required=None, datasets=None):
+    if required is not None:
+        repo.manifests["dev"]["features"] = {"required": required}
+    if datasets is not None:
+        repo.manifests["dev"]["tenants"]["churn"]["features"] = {"datasets": datasets}
+    return scaffold(repo)
+
+
+def test_feature_tables_must_be_in_the_tenants_datasets(repo):
+    project = repo.manifests["dev"]["project"]
+    dest, env = with_manifest(repo, datasets=[f"{project}.features_core"])
+    with pytest.raises(ConfigError, match=f"{project}.churn is not a feature dataset of tenant 'churn'"):
+        resolve_usecase(dest / "usecase.yaml", env)
+
+
+def test_listed_datasets_and_required_pass_when_every_feature_is_a_feature(repo):
+    project = repo.manifests["dev"]["project"]
+    dest, env = with_manifest(repo, required=True, datasets=[f"{project}.churn"])
+    uc = resolve_usecase(dest / "usecase.yaml", env)
+    assert env.features == {"required": True} and len(uc.ml["features"]["include"]) == 8
+
+
+def test_required_refuses_a_feature_from_the_entity_table(repo):
+    def entity_feature(d):
+        d["data"]["contract"]["columns"].append({"name": "region", "type": "string"})
+
+    repo.manifests["dev"]["features"] = {"required": True}
+    resolve = resolve_with(repo, entity_feature)
+    with pytest.raises(ConfigError, match="not from a feature table: region"):
+        resolve()
+
+
+def test_required_refuses_a_use_case_without_feature_tables(repo):
+    repo.manifests["dev"]["features"] = {"required": True}
+    repo.write()
+    with pytest.raises(ConfigError, match="add data.features_from"):
+        resolve_usecase(new_usecase(repo.root, "churn-min", "churn", "team", example="minimal") / "usecase.yaml",
+                        load_environment(repo.root, "dev"))
+
+
 # ------------------------------------------------------------------ runtime --
 
 def runtime():
@@ -170,7 +212,8 @@ def test_doctor_checks_each_feature_table(repo):
     schemas = {
         "churn_feats_customer_profile": [("customer_id", "STRING"), ("feature_timestamp", "TIMESTAMP"),
                                          ("tenure_months", "INT64"), ("monthly_charges", "FLOAT64"),
-                                         ("total_charges", "STRING"), ("contract_length_months", "INT64")],
+                                         ("total_charges", "STRING"), ("contract_length_months", "INT64"),
+                                         ("num_products", "INT64"), ("has_paperless_billing", "INT64")],
         "churn_feats_support_activity": [("customer_id", "STRING"), ("feature_timestamp", "TIMESTAMP")],
     }
 

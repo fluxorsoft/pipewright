@@ -4,13 +4,13 @@ data:
     columns:
       - { name: customer_id,            type: string,  required: true }    # entity table
       - { name: snapshot_date,          type: date,    required: true }    # entity table: the cut-off
-      - { name: num_products,           type: integer }                    # entity table
-      - { name: has_paperless_billing,  type: integer }                    # entity table
       - { name: churned,                type: integer, allowed: [0, 1] }   # entity table: the label
       - { name: tenure_months,          type: integer }                    # customer_profile
       - { name: monthly_charges,        type: float }                      # customer_profile
       - { name: total_charges,          type: float }                      # customer_profile
       - { name: contract_length_months, type: integer }                    # customer_profile
+      - { name: num_products,           type: integer }                    # customer_profile
+      - { name: has_paperless_billing,  type: integer }                    # customer_profile
       - { name: num_support_tickets,    type: integer }                    # support_activity
       - { name: avg_monthly_usage_gb,   type: float }                      # support_activity
   label: { column: churned }
@@ -24,7 +24,8 @@ data:
     entity: { columns: [customer_id], time_column: snapshot_date }
     sources:
       - table: bq://${resources.bigquery_dataset}.{{table_prefix}}customer_profile
-        features: [tenure_months, monthly_charges, total_charges, contract_length_months]
+        features: [tenure_months, monthly_charges, total_charges, contract_length_months, num_products,
+                   has_paperless_billing]
       - table: bq://${resources.bigquery_dataset}.{{table_prefix}}support_activity
         features: [num_support_tickets, avg_monthly_usage_gb]
 

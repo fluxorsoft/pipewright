@@ -203,6 +203,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         for where, uri in [*named, ("retraining.source_uri", retrain_source)]:
             if uri and uri.startswith("gs://"):
                 problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
+    _feature_policy(ml, env, tenant, problems)
     _retraining_policy(ml["retraining"], approvals, env, problems)
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
     registry = ml["registry"]
@@ -273,6 +274,33 @@ def _ray(steps: dict, tenant: str, env: Environment, problems: list[str]) -> dic
     problems += found
     return {"mode": settings["mode"], "ray_version": settings["ray_version"],
             "python_version": settings["python_version"], "steps": clusters}
+
+
+def _feature_policy(ml: dict, env: Environment, tenant: str, problems: list[str]) -> None:
+    """Feature tables against the platform: a tenant's feature tables must be in the datasets the manifest lists for
+    it (tenants.<t>.features.datasets), and with features.required every model feature comes from a feature table."""
+    from pipewright.config.ml import feature_columns
+
+    spec = ml["data"].get("features_from")
+    allowed = ((env.tenants.get(tenant) or {}).get("features") or {}).get("datasets")
+    if spec and allowed is not None:
+        for i, src in enumerate(spec["sources"]):
+            if sources.problem(src["table"]):
+                continue                                     # reported with the block
+            dataset = sources.bq_table(src["table"], env.project).rsplit(".", 1)[0]
+            if dataset not in allowed:
+                problems.append(f"data.features_from.sources[{i}].table: {dataset} is not a feature dataset of tenant "
+                                f"{tenant!r} in {env.name} ({', '.join(allowed) or 'none listed'}); ask the platform "
+                                "team")
+    if (env.features or {}).get("required"):
+        if not spec:
+            problems.append(f"{env.name} requires features from feature tables (features.required): add "
+                            "data.features_from")
+            return
+        outside = [c for c in ml["features"]["include"] or [] if c not in feature_columns(spec)]
+        if outside:
+            problems.append(f"{env.name} requires every model feature from data.features_from (features.required); "
+                            f"not from a feature table: {', '.join(outside)}")
 
 
 def _retraining_policy(retraining: dict, approvals: dict, env: Environment, problems: list[str]) -> None:

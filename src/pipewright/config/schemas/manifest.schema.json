@@ -222,6 +222,17 @@
               }
             ],
             "description": "this tenant's Ray settings, over the environment's"
+          },
+          "features": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/tenant_features"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the feature datasets this tenant's use cases may read (data.features_from)"
           }
         }
       }
@@ -356,6 +367,16 @@
           "type": "null"
         }
       ]
+    },
+    "features": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/features"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "$defs": {
@@ -436,6 +457,31 @@
               "description": "longest a cluster may live; cleanup removes it after this plus a grace period"
             }
           }
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Feature tables for use cases' data.features_from (optional; without it any table the runner can read)",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "models in this environment must take every feature from data.features_from"
+        }
+      }
+    },
+    "tenant_features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "datasets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{4,61}[a-z0-9]\\.[A-Za-z0-9_]{1,1024}$"
+          },
+          "description": "project.dataset of each feature dataset the tenant may read; feature tables elsewhere are refused"
         }
       }
     }
