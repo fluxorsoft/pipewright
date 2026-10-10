@@ -576,7 +576,8 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | Promotion of a release between environments by digest (FR-29) | Planned |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |
-| Ray on Vertex AI as compute inside the full Pipewright lifecycle: steps that submit work to a Ray cluster, with releases, gates, the registry and monitoring as today. Terraform for the Ray cluster first, then an end-to-end test | Planned |
+| Ray on Vertex AI as compute inside the full Pipewright lifecycle, with releases, gates, the registry and monitoring as today: a cluster per Ray step, created and deleted by the launcher within limits the platform sets in the manifest (an optional `ray` block; without it, the runner identity, a prebuilt Ray image and conservative sizes, so the starter needs no change), cleaned up by run label if a step is killed | Next |
+| Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
 | Iceberg (BigLake) tables for row-level deletes | Design only |
 | Feature store integration | Under review |
 
