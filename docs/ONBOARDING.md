@@ -12,6 +12,7 @@ ML persona assumes the infrastructure already exists; this guide covers the hand
 | BigQuery dataset | the team creates its own tables in it with `tables sync` |
 | Landing prefix | e.g. `incoming/nimbus/`; files dropped here start the team's runs |
 | Online serving allowed | yes / no |
+| Feature datasets (optional) | `project.dataset` feature datasets the team may read, and whether the environment requires feature tables; see [FEATURES.md](FEATURES.md) |
 | Environment manifest | published at `gs://<artifacts-bucket>/pipewright/environment.json` |
 
 The shared launcher picks up new tenants from the manifest within a minute; no launcher redeploy is needed.

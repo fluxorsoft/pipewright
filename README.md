@@ -237,7 +237,8 @@ with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by
 
 Instead of one prepared table per use case, a use case can name the features it needs and the BigQuery feature
 tables that hold them. Feature tables belong to whoever produces the features (a data team, or the team itself);
-Pipewright only reads them.
+Pipewright only reads them. The recommended way to use features, how a feature table must look and the mistakes to
+avoid: [docs/FEATURES.md](docs/FEATURES.md).
 
 ```yaml
 # config/data.yaml
