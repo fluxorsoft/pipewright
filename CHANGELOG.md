@@ -61,6 +61,10 @@ First open-source release.
   (`validate`, `doctor`, the launcher's log) instead of failing; an optional `requires` (for example `">=0.5"`)
   makes an older version refuse the manifest with a clear message.
 
+- **Per-tenant pipeline roots.** Runs write their artifacts under `pipeline-root/<tenant>/<usecase>/` of the
+  artifacts bucket, so each tenant's runner can be granted its own prefix only. Existing releases keep their root
+  until re-released.
+
 ### Fixed
 
 - **Steps with only `retries` or `cache`** no longer get an empty `resources` block in the compiled template: Agent

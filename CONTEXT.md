@@ -157,7 +157,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 |---|---|---|---|
 | NFR-01 | **Reproducible releases:** images, templates and contracts addressed by digest; a published contract never changes | Met | D-41, D-42 |
 | NFR-02 | **Idempotency:** retries and redeliveries never duplicate runs, releases or decisions | Met | deterministic run IDs, run keys, create-only writes, generation checks |
-| NFR-03 | **Isolation between tenants:** own runner identity, dataset, landing and outputs prefixes | Met (artifacts bucket shared, R-04) | manifest tenants, IAM on the platform side |
+| NFR-03 | **Isolation between tenants:** own runner identity, dataset, landing and outputs prefixes, and pipeline root (`pipeline-root/<tenant>/<usecase>`) | Met | release contract, launcher |
 | NFR-04 | **Customer-managed keys** applied to pipeline jobs, models, endpoints and BigQuery query results when the manifest names them | Met | D-37, D-44 |
 | NFR-07 | **Data residency:** Pub/Sub publishes through the environment's regional endpoint | Met | D-40 |
 | NFR-09 | **Auditability:** every change and use of a model is traceable to identity, data, release and approval | Met | events carry `by`; contracts carry provenance |
@@ -708,7 +708,7 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 
 | ID | Item | Notes or proposal |
 |---|---|---|
-| R-04 | The artifacts bucket is shared by tenants | Per-tenant pipeline roots (`pipeline-root/<tenant>/<usecase>`) planned |
+| R-04 | The artifacts bucket was shared by tenants | Resolved 2026-10-10: runs write under `pipeline-root/<tenant>/<usecase>`, so a platform can grant each runner its own prefix only (Pipewright Enterprise does). A contract with another pipeline root is not reused for the same commit |
 | R-05 | Older versions and newer manifest fields | Resolved 2026-10-10: unknown keys are ignored with a warning; a policy key comes with `requires`, which older versions refuse clearly. Holds from the first release on; images built before it still need new manifest keys rolled out after them |
 | R-06 | Cloud Scheduler IAM is project-wide | Jobs should only call the launcher as its identity; `doctor` checks |
 | R-07 | Tenant offboarding is undefined | Proposal: block removal until runtime objects are gone |
@@ -768,7 +768,8 @@ deprecations page and the SDK 2.0.1 migration guide:
 |---|---|
 | First open-source release (0.4.0), wheel and launcher image | Next |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
-| Per-tenant pipeline roots (R-04); OpenTelemetry export from the launcher | Planned |
+| Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
+| OpenTelemetry export from the launcher | Planned |
 | Promotion of a release between environments by digest (FR-29) | Planned |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |
