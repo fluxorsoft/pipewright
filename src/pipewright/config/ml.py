@@ -209,6 +209,7 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
 
 
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")
+FEATURE_GROUP = re.compile(r"^[a-z_][a-z0-9_]{0,59}$")
 FEATURE_TABLE = re.compile(r"^bq://(?:[a-z][a-z0-9-]{4,61}[a-z0-9]\.)?[A-Za-z_][A-Za-z0-9_]{0,1023}\.[A-Za-z0-9_$-]{1,1024}$")
 
 
@@ -240,12 +241,25 @@ def _features_from(spec: dict | None, columns: dict, label: str | None, known, p
     seen: dict[str, int] = {}
     for i, src in enumerate(spec["sources"]):
         at = f"{where}.sources[{i}]"
-        if not FEATURE_TABLE.match(src["table"]):
-            problems.append(f"{at}.table {src['table']!r} is not bq://project.dataset.table (or bq://dataset.table)")
-        keys = src.get("entity_columns") or entity["columns"]
-        if len(keys) != len(entity["columns"]):
-            problems.append(f"{at}.entity_columns: give one column for each of data.features_from.entity.columns")
-        for col in [*keys, src.get("time_column", "feature_timestamp"), *src["features"]]:
+        if ("table" in src) == ("feature_group" in src):
+            problems.append(f"{at}: name either a table or a feature_group")
+            continue
+        if "feature_group" in src:
+            # The registry gives the table, entity and time columns at run time; `doctor` checks them now.
+            for key in ("entity_columns", "time_column"):
+                if key in src:
+                    problems.append(f"{at}.{key}: is read from the feature group's registration; leave it out")
+            if not FEATURE_GROUP.match(src["feature_group"]):
+                problems.append(f"{at}.feature_group {src['feature_group']!r} is not a feature group ID")
+            names = list(src["features"])
+        else:
+            if not FEATURE_TABLE.match(src["table"]):
+                problems.append(f"{at}.table {src['table']!r} is not bq://project.dataset.table (or bq://dataset.table)")
+            keys = src.get("entity_columns") or entity["columns"]
+            if len(keys) != len(entity["columns"]):
+                problems.append(f"{at}.entity_columns: give one column for each of data.features_from.entity.columns")
+            names = [*keys, src.get("time_column", "feature_timestamp"), *src["features"]]
+        for col in names:
             if not IDENTIFIER.match(col):
                 problems.append(f"{at}: {col!r} is not a column name")
         prefix = src.get("prefix", "")

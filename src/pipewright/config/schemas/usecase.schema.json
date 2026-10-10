@@ -348,9 +348,12 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["table", "features"],
+                "required": ["features"],
                 "properties": {
                   "table": { "type": "string", "pattern": "^bq://" },
+                  "feature_group": { "type": "string" },
+                  "project": { "type": "string" },
+                  "region": { "type": "string" },
                   "entity_columns": { "type": "array", "minItems": 1, "items": { "type": "string" } },
                   "time_column": { "type": "string" },
                   "features": { "type": "array", "minItems": 1, "items": { "type": "string" } },

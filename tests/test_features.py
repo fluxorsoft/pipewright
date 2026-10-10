@@ -2,6 +2,7 @@
 import copy
 import importlib.util
 import json
+import shutil
 
 import pytest
 
@@ -239,3 +240,118 @@ def test_the_example_compiles(repo):
     infos = compile_all(uc)
     assert check_parameters(uc, infos) == ([], [])
     assert "run_id" in infos["inference"].parameters
+
+
+# ----------------------------------------------------------- feature groups --
+
+GROUP = {"name": "projects/123/locations/us-central1/featureGroups/support",
+         "bigQuery": {"bigQuerySource": {"inputUri": "bq://data-proj.features_core.support_v3"},
+                      "entityIdColumns": ["cust"], "timeSeries": {"timestampColumn": "valid_from"}}}
+REGISTERED = [{"name": f"{GROUP['name']}/features/num_support_tickets", "versionColumnName": "tickets_30d"},
+              {"name": f"{GROUP['name']}/features/avg_monthly_usage_gb"}]
+
+
+def test_a_feature_group_stands_for_its_table_and_columns():
+    rt = runtime()
+    src = rt.group_source({"feature_group": "support", "features": ["num_support_tickets"], "prefix": "s_"},
+                          GROUP, REGISTERED)
+    assert src == {"table": "bq://data-proj.features_core.support_v3", "entity_columns": ["cust"],
+                   "time_column": "valid_from", "features": ["num_support_tickets"],
+                   "columns": {"num_support_tickets": "tickets_30d"}, "feature_group": GROUP["name"], "prefix": "s_"}
+    spec = {"entity": FEATURES_FROM["entity"], "sources": [src]}
+    sql = rt.features_query("p.d.e", ["customer_id", "snapshot_date"], spec, "p")
+    assert "f.`tickets_30d` AS `s_num_support_tickets`" in sql and "CAST(f.`valid_from` AS TIMESTAMP)" in sql
+    with pytest.raises(ValueError, match="has no feature churn_score .registered: avg_monthly_usage_gb"):
+        rt.group_source({"feature_group": "support", "features": ["churn_score"]}, GROUP, REGISTERED)
+
+
+def test_groups_are_read_from_the_registry_page_by_page():
+    rt = runtime()
+
+    class Session:
+        def __init__(self):
+            self.urls = []
+
+        def get(self, url, timeout=None):
+            self.urls.append(url)
+            body = GROUP if url.endswith("/support") else (
+                {"features": REGISTERED[:1], "nextPageToken": "t2"} if "pageToken" not in url
+                else {"features": REGISTERED[1:]})
+            return type("R", (), {"status_code": 200, "json": lambda self: body, "text": ""})()
+
+    session = Session()
+    spec = {"entity": FEATURES_FROM["entity"],
+            "sources": [FEATURES_FROM["sources"][0], {"feature_group": "support", "project": "data-proj",
+                                                      "features": ["num_support_tickets", "avg_monthly_usage_gb"]}]}
+    out = rt.resolve_feature_groups(spec, "p", "us-central1", session)
+    assert out["sources"][0] == FEATURES_FROM["sources"][0]                   # tables stay as they are
+    assert out["sources"][1]["columns"] == {"num_support_tickets": "tickets_30d",
+                                           "avg_monthly_usage_gb": "avg_monthly_usage_gb"}
+    assert session.urls[0] == ("https://us-central1-aiplatform.googleapis.com/v1/projects/data-proj/locations/"
+                               "us-central1/featureGroups/support") and session.urls[2].endswith("pageToken=t2")
+    with pytest.raises(ValueError, match=r"data-proj.features_core \(feature group support\) is not a feature "
+                                         r"dataset of this tenant"):
+        rt._check_feature_datasets(out, "p", {"platform": {"feature_datasets": ["p.feats", "other-p.x"]}})
+
+
+def test_a_source_names_a_table_or_a_group(repo):
+    def both(d):
+        d["data"]["features_from"]["sources"][1]["feature_group"] = "support"
+
+    def group_with_time(d):
+        d["data"]["features_from"]["sources"][1] = {"feature_group": "support", "time_column": "x",
+                                                    "features": ["num_support_tickets", "avg_monthly_usage_gb"]}
+
+    with pytest.raises(ConfigError, match="name either a table or a feature_group"):
+        resolve_with(repo, both)()
+    shutil.rmtree(repo.root / "usecases" / "churn-feats")
+    with pytest.raises(ConfigError, match="time_column: is read from the feature group's registration"):
+        resolve_with(repo, group_with_time)()
+
+
+def test_a_group_source_resolves_and_carries_the_tenants_datasets(repo):
+    project = repo.manifests["dev"]["project"]
+    repo.manifests["dev"]["tenants"]["churn"]["features"] = {"datasets": [f"{project}.churn"]}
+
+    def to_group(d):
+        d["data"]["features_from"]["sources"][1] = {"feature_group": "support_activity",
+                                                    "features": ["num_support_tickets", "avg_monthly_usage_gb"]}
+
+    uc = resolve_with(repo, to_group)()
+    assert uc.ml_config()["platform"]["feature_datasets"] == [f"{project}.churn"]
+    assert uc.ml["data"]["features_from"]["sources"][1]["feature_group"] == "support_activity"
+
+
+def test_doctor_resolves_a_group_and_checks_its_table(repo):
+    from pipewright.checks import doctor
+
+    project = repo.manifests["dev"]["project"]
+    repo.manifests["dev"]["tenants"]["churn"]["features"] = {"datasets": [f"{project}.churn"]}
+
+    def to_group(d):
+        d["data"]["features_from"]["sources"] = [{"feature_group": "support",
+                                                  "features": ["num_support_tickets", "avg_monthly_usage_gb"]}]
+        d["data"]["features_from"]["sources"].insert(0, {"table": "bq://churn.churn_feats_customer_profile",
+                                                         "features": ["tenure_months"]})
+        d["data"]["contract"]["columns"] = [c for c in d["data"]["contract"]["columns"]
+                                            if c["name"] in ("customer_id", "snapshot_date", "churned", "tenure_months",
+                                                             "num_support_tickets", "avg_monthly_usage_gb")]
+
+    uc = resolve_with(repo, to_group)()
+    env = load_environment(repo.root, "dev")
+
+    class Gcp:
+        def get(self, url, **_):
+            if "featureGroups" in url:
+                body = GROUP if url.endswith("/support") else {"features": REGISTERED}
+            else:
+                body = {"type": "TABLE", "schema": {"fields": [{"name": n, "type": t} for n, t in (
+                    ("customer_id", "STRING"), ("feature_timestamp", "TIMESTAMP"), ("tenure_months", "INT64"))]}}
+            return type("R", (), {"ok": True, "status": 200, "body": body})()
+
+    report = doctor.Report()
+    doctor._check_feature_tables(uc, env, Gcp(), report)
+    text = report.render()
+    assert "data-proj.features_core.support_v3 (feature group support)" in text
+    assert f"data-proj.features_core is not a feature dataset of tenant churn ({project}.churn)" in text
+    assert report.failed == 1

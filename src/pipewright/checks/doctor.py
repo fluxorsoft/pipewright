@@ -360,11 +360,21 @@ def _check_feature_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, repor
     s = f"Feature tables of {uc.name}"
     contract = {c["name"]: c["type"] for c in (uc.ml["data"].get("contract") or {}).get("columns", [])}
     keys = spec["entity"]["columns"]
+    allowed = uc.platform.get("feature_datasets")
     for src in spec["sources"]:
+        group = None
+        if "feature_group" in src:
+            src, group = _resolve_group(src, env, gcp, report, s), src["feature_group"]
+            if src is None:
+                continue
         if sources.problem(src["table"]):
             continue                                   # validate reports it
         project, dataset, table = sources.bq_table(src["table"], env.project).split(".")
-        name = f"{project}.{dataset}.{table}"
+        name = f"{project}.{dataset}.{table}" + (f" (feature group {group})" if group else "")
+        if group and allowed is not None and f"{project}.{dataset}" not in allowed:
+            report.add(s, Result(FAIL, name, f"{project}.{dataset} is not a feature dataset of tenant {uc.tenant} "
+                                 f"({', '.join(allowed) or 'none'})", "ask the platform team, or the group's owners"))
+            continue
         resp = gcp.get(f"{BQ}/projects/{project}/datasets/{dataset}/tables/{table}")
         if not resp.ok:
             report.add(s, Result(FAIL, name, error_text(resp), "check the name, and that the runner service account "
@@ -372,21 +382,53 @@ def _check_feature_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, repor
             continue
         types = {f["name"]: f["type"] for f in (resp.body.get("schema") or {}).get("fields", [])}
         ts = src.get("time_column", "feature_timestamp")
-        need = [*(src.get("entity_columns") or keys), ts, *src["features"]]
+        cols = src.get("columns") or {}
+        need = [*(src.get("entity_columns") or keys), ts, *(cols.get(c, c) for c in src["features"])]
         missing = [c for c in need if c not in types]
         if missing:
             report.add(s, Result(FAIL, name, f"no column {', '.join(missing)}",
                                  "a feature table has the entity columns, a time column and one column per feature"))
             continue
         problems = [] if types[ts] in _TIME_TYPES else [f"time column {ts} is {types[ts]}, not a date or timestamp"]
-        prefix = src.get("prefix", "")
+        prefix, columns = src.get("prefix", ""), src.get("columns") or {}
         for col in src["features"]:
-            want = contract.get(prefix + col)
-            if want and want not in _CONTRACT_TYPES.get(types[col], set()):
-                problems.append(f"{col} is {types[col]}, the contract says {want}")
+            want, kind = contract.get(prefix + col), types[columns.get(col, col)]
+            if want and want not in _CONTRACT_TYPES.get(kind, set()):
+                problems.append(f"{col} is {kind}, the contract says {want}")
         kind = resp.body.get("type", "").lower() or "table"
         report.add(s, Result(WARN if problems else OK, name, "; ".join(problems) if problems else
                              f"{kind}, {len(src['features'])} features as of {ts}"))
+
+
+def _resolve_group(src: dict, env: Environment, gcp: Gcp, report: Report, section: str) -> dict | None:
+    """A feature_group source as the table source the Feature Registry says it stands for, or None (reported)."""
+    from pipewright.build.templates.pipewright_runtime import group_source
+
+    project, region = src.get("project") or env.project, src.get("region") or env.region
+    url = (f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}"
+           f"/featureGroups/{src['feature_group']}")
+    resp = gcp.get(url)
+    if not resp.ok:
+        report.add(section, Result(FAIL, f"feature group {src['feature_group']}", error_text(resp),
+                                   "check the group ID, project and region, and that you may read the Feature "
+                                   "Registry (roles/aiplatform.featurestoreResourceViewer)"))
+        return None
+    features, token = [], None
+    while True:
+        page = gcp.get(f"{url}/features", pageSize=100, **({"pageToken": token} if token else {}))
+        if not page.ok:
+            report.add(section, Result(FAIL, f"feature group {src['feature_group']}", error_text(page)))
+            return None
+        features += page.body.get("features", [])
+        token = page.body.get("nextPageToken")
+        if not token:
+            break
+    try:
+        return group_source(src, resp.body, features)
+    except ValueError as e:
+        report.add(section, Result(FAIL, f"feature group {src['feature_group']}", str(e),
+                                   "register the features in the group, or use the registered names"))
+        return None
 
 
 def _check_retraining(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:

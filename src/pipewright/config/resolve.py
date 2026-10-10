@@ -257,7 +257,10 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   "run_requests_topic": env.launcher.get("run_requests_topic"),
                   "kms_key": env.security.get("kms_key"),
                   "bigquery_kms_key": env.security.get("bigquery_kms_key"),
-                  **({"ray": ray} if ray else {})},
+                  **({"ray": ray} if ray else {}),
+                  # read_source refuses feature tables (and groups' tables) outside them
+                  **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
+                                                  .get("datasets")) is not None else {})},
         outputs=outputs, ray_requirements=ray_requirements,
     )
 
@@ -285,8 +288,8 @@ def _feature_policy(ml: dict, env: Environment, tenant: str, problems: list[str]
     allowed = ((env.tenants.get(tenant) or {}).get("features") or {}).get("datasets")
     if spec and allowed is not None:
         for i, src in enumerate(spec["sources"]):
-            if sources.problem(src["table"]):
-                continue                                     # reported with the block
+            if "table" not in src or sources.problem(src["table"]):
+                continue                     # a feature group's table: doctor and read_source check it
             dataset = sources.bq_table(src["table"], env.project).rsplit(".", 1)[0]
             if dataset not in allowed:
                 problems.append(f"data.features_from.sources[{i}].table: {dataset} is not a feature dataset of tenant "

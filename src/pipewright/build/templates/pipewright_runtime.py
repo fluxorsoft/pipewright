@@ -170,7 +170,8 @@ def features_query(entity_ref: str, entity_columns: list[str], features_from: di
             raise ValueError(f"the entity table {entity_ref} already has {', '.join(clash)}, which "
                              f"data.features_from.sources[{i}] adds; drop them from the entity table or set a prefix")
         on = " AND ".join(f"f.{_q(fk)} = k.{_q(k)}" for fk, k in zip(fkeys, keys, strict=True))
-        values = ", ".join(f"f.{_q(c)} AS {_q(prefix + c)}" for c in src["features"])
+        columns = src.get("columns") or {}             # a registered feature's column, when it differs from its name
+        values = ", ".join(f"f.{_q(columns.get(c, c))} AS {_q(prefix + c)}" for c in src["features"])
         ctes.append(
             f"f{i} AS (SELECT " + ", ".join(f"k.{_q(k)}" for k in keys) + f", k.__pw_cutoff, TRUE AS __pw_hit, "
             f"{values} FROM entity_keys AS k JOIN {_q(table)} AS f ON {on} "
@@ -183,8 +184,89 @@ def features_query(entity_ref: str, entity_columns: list[str], features_from: di
     return ("WITH " + ",\n".join(ctes) + "\nSELECT " + ", ".join(select) + "\nFROM entity\n" + "\n".join(joins))
 
 
+# Feature groups (Agent Platform Feature Store, Feature Registry): a source may name a registered group instead of a
+# table. The registry is read at run time, so a group its owners point at a new table is followed; the group gives
+# the table, the entity and time columns, and each registered feature's column.
+_REGISTRY = "https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/featureGroups/{group}"
+
+
+def group_source(src: dict, group: dict, features: list[dict]) -> dict:
+    """A feature_group source as the table source it stands for, from the group and its registered features."""
+    bq = group.get("bigQuery") or {}
+    uri = (bq.get("bigQuerySource") or {}).get("inputUri")
+    if not uri:
+        raise ValueError(f"feature group {src['feature_group']} has no BigQuery source")
+    registered = {f["name"].rsplit("/", 1)[-1]: f.get("versionColumnName") or f["name"].rsplit("/", 1)[-1]
+                  for f in features}
+    missing = [f for f in src["features"] if f not in registered]
+    if missing:
+        raise ValueError(f"feature group {src['feature_group']} has no feature {', '.join(missing)} "
+                         f"(registered: {', '.join(sorted(registered)) or 'none'})")
+    out = {"table": uri, "entity_columns": list(bq.get("entityIdColumns") or ["entity_id"]),
+           "time_column": (bq.get("timeSeries") or {}).get("timestampColumn") or "feature_timestamp",
+           "features": list(src["features"]), "columns": {f: registered[f] for f in src["features"]},
+           "feature_group": group.get("name", src["feature_group"])}
+    if src.get("prefix"):
+        out["prefix"] = src["prefix"]
+    return out
+
+
+def _registry_get(session, url: str, what: str) -> dict:
+    r = session.get(url, timeout=60)
+    if r.status_code == 404:
+        raise ValueError(f"{what} not found")
+    if r.status_code != 200:
+        raise ValueError(f"{what}: {r.status_code} {r.text[:300]}")
+    return r.json()
+
+
+def resolve_feature_groups(features_from: dict, project: str, region: str, session=None) -> dict:
+    """features_from with every feature_group source read from the Feature Registry and turned into a table source."""
+    if not any("feature_group" in s for s in features_from["sources"]):
+        return features_from
+    if session is None:
+        import google.auth
+        from google.auth.transport.requests import AuthorizedSession
+
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        session = AuthorizedSession(creds)
+    sources = []
+    for src in features_from["sources"]:
+        if "feature_group" not in src:
+            sources.append(src)
+            continue
+        url = _REGISTRY.format(region=src.get("region") or region, project=src.get("project") or project,
+                               group=src["feature_group"])
+        what = f"feature group {src['feature_group']} (project {src.get('project') or project})"
+        group = _registry_get(session, url, what)
+        features, token = [], None
+        while True:
+            page = _registry_get(session, f"{url}/features?pageSize=100" + (f"&pageToken={token}" if token else ""),
+                                 f"features of {what}")
+            features += page.get("features", [])
+            token = page.get("nextPageToken")
+            if not token:
+                break
+        sources.append(group_source(src, group, features))
+    return {**features_from, "sources": sources}
+
+
+def _check_feature_datasets(features_from: dict, project: str, ml_config: dict) -> None:
+    """The platform's feature datasets for the tenant (ml_config.platform.feature_datasets), when it lists them."""
+    allowed = (ml_config.get("platform") or {}).get("feature_datasets")
+    if allowed is None:
+        return
+    for src in features_from["sources"]:
+        dataset = bq_table(src["table"], project).rsplit(".", 1)[0]
+        if dataset not in allowed:
+            via = f" (feature group {src['feature_group'].rsplit('/', 1)[-1]})" if src.get("feature_group") else ""
+            raise ValueError(f"{dataset}{via} is not a feature dataset of this tenant ({', '.join(allowed) or 'none'})")
+
+
 def _read_with_features(client, entity_ref: str, project: str, features_from: dict, ml_config: dict,
                         run_id: str | None):
+    features_from = resolve_feature_groups(features_from, project, (ml_config.get("platform") or {}).get("region"))
+    _check_feature_datasets(features_from, project, ml_config)
     entity_columns = [f.name for f in client.get_table(entity_ref).schema]
     job = client.query(features_query(entity_ref, entity_columns, features_from, project))
     df = job.to_dataframe(create_bqstorage_client=False)
@@ -196,6 +278,8 @@ def _read_with_features(client, entity_ref: str, project: str, features_from: di
         sources.append({"table": bq_table(src["table"], project),
                         "time_column": src.get("time_column", "feature_timestamp"),
                         "features": [prefix + c for c in src["features"]],
+                        **({"feature_group": src["feature_group"], "columns": src["columns"]}
+                           if src.get("feature_group") else {}),
                         "rows_matched": int(hit.sum()), "rows": len(df)})
     record = {"entity_table": entity_ref, "cutoff": tc if tc in entity_columns else "query time",
               "query_job": job.job_id, "read_at": (job.started or datetime.now(timezone.utc)).isoformat(),

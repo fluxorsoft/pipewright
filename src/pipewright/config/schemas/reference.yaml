@@ -108,6 +108,9 @@ data.features_from.entity.columns: The columns that identify an entity, such as 
 data.features_from.entity.time_column: "The cut-off time of each row: features dated after it are not used. For scoring, set it to the scoring date. A table without this column is cut off at the query time (mark the column required: false in the contract)."
 data.features_from.sources: The feature tables to read, owned by whoever produces the features.
 data.features_from.sources.table: "A BigQuery feature table or view: bq://project.dataset.table. It has the entity columns, a timestamp column and one column per feature. The runner needs read access."
+data.features_from.sources.feature_group: "A feature group registered in the Agent Platform Feature Store, instead of a table. Read from the Feature Registry at each run: its table, entity and time columns, and each feature's column. features then names registered features."
+data.features_from.sources.project: The project the feature group is registered in. Default the environment's project.
+data.features_from.sources.region: The region the feature group is registered in. Default the environment's region.
 data.features_from.sources.entity_columns: The table's entity columns, in the order of entity.columns, when their names differ. Default the same names.
 data.features_from.sources.time_column: The table's column saying when each value became true. Default feature_timestamp.
 data.features_from.sources.features: The feature columns to take from this table. Each must be in the data contract.
