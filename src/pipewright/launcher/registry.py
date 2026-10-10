@@ -7,6 +7,8 @@ import logging
 import threading
 import time
 
+from pipewright.config.environment import check_requires
+from pipewright.config.schema import prune_unknown
 from pipewright.errors import ConfigError
 from pipewright.gcp import Gcp, gcs_list, gcs_read
 from pipewright.release.contract import CONTRACTS_PREFIX, Pointer, ReleaseContract
@@ -34,7 +36,14 @@ class Registry:
         text, _ = gcs_read(self.gcp, bucket, name)
         if text is None:
             raise ConfigError(f"manifest not found: {self.manifest_uri}")
-        return json.loads(text)
+        manifest = json.loads(text)
+        # A manifest that needs a newer Pipewright is refused (the launcher keeps its last good one); keys this
+        # version does not know are logged and otherwise ignored (R-05).
+        check_requires(manifest, self.manifest_uri)
+        _, ignored = prune_unknown(manifest, "manifest")
+        if ignored:
+            log.warning("manifest keys this launcher does not know, ignored: %s", ", ".join(ignored))
+        return manifest
 
     def _contract(self, name: str) -> ReleaseContract:
         if name not in self._contracts:

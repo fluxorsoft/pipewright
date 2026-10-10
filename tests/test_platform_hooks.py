@@ -44,7 +44,6 @@ def test_no_security_block_means_defaults(repo):
 @pytest.mark.parametrize("field,value", [
     ("kms_key", "aiplatform"),                                       # not a key resource name
     ("network", "projects/acme-ml-dev/global/networks/ml-vpc"),      # needs the project number
-    ("color", "blue"),                                               # unknown field
 ])
 def test_security_block_is_validated(repo, field, value):
     private(repo).manifests["dev"]["security"][field] = value

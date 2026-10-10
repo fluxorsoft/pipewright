@@ -288,6 +288,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-80 | **Feature sources are pluggable; BigQuery feature tables first.** A source is a BigQuery table or view named in the use case. The point-in-time join is SQL Pipewright generates and runs as the runner with CMEK (D-44): for each distinct (entity, cut-off) the newest row dated at or before the cut-off, joined back on (entity, cut-off). A registered Feature Store feature group is a later kind of source that resolves to the same table and columns; the SDK's Preview fetch is not used. Online serving, when built, uses Bigtable | Google is thinning the managed product (section 8.11); BigQuery is the stable part, so Pipewright depends only on it | Active (2026-10-10) |
 | D-81 | **The platform decides where features may come from, in the manifest.** `tenants.<t>.features.datasets` lists a tenant's feature datasets; `features.required` makes `data.features_from` the only source of model features. Both are checked at `validate`, so a use case that breaks them never releases | Access is the platform's decision and reaches teams the same way as every other platform setting; a refusal at validate names what to change | Active (2026-10-10) |
 | D-82 | **A feature group is resolved through the Feature Registry at each run, not pinned at release.** The registry is the owners' source of truth: when they move a group to a new table, runs follow it. The event records what each run actually read (group and table), and the tenant's datasets bound where a group may point | Registration is what makes a feature defined once; copying its resolution into each release would let use cases drift from it | Active (2026-10-10) |
+| D-83 | **Newer manifest fields are ignored with a warning; policies carry `requires`.** Unknown keys are pruned using the schema itself, then the rest is validated in full; `requires` (a version specifier) makes an older version refuse the manifest when a key must not be skipped | App teams pin their CLI in CI; a platform adding a field must not break every team, and a policy must never be silently ignored. Built before the first release, because the oldest released version is the one that has to tolerate newer manifests | Active (2026-10-10) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -658,8 +659,13 @@ launcher directly from inside the network), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and th
 | `features` (optional) | `required`: every model feature from `data.features_from`; per tenant, `tenants.<t>.features.datasets`: the `project.dataset` feature datasets its use cases may read |
 | `ray` (optional; also per tenant, `tenants.<t>.ray`) | `enabled`, `mode` (`per_run`), `ray_version`, `python_version`, `image`, `network_attachment`, `limits{max_workers, machines, accelerators, max_minutes}` |
 
-**Compatibility rule:** additive, optional fields only. The schema forbids unknown properties, so the launcher and
-CLI must be upgraded **before** a platform publishes new fields (R-05).
+**Compatibility rule (R-05, built 2026-10-10):** manifest fields are added, never changed in meaning. A version
+that meets keys it does not know (anywhere the schema forbids extra keys) **ignores them and says so**: `validate`
+prints a warning, `doctor` lists them, the launcher logs them. Everything it does know is still validated in full.
+A key that is a **policy** (one an older version must not silently skip, such as `features.required`) comes with
+`requires` in the manifest, a version specifier such as `">=0.5"`: older versions then refuse the manifest with
+"this environment needs Pipewright >=0.5", and the launcher keeps its last good manifest. So app teams' pinned CLIs
+keep working when the platform adds a field, and never run with a policy they cannot apply.
 
 ### 9.3 Use case and environment files
 
@@ -703,7 +709,7 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | ID | Item | Notes or proposal |
 |---|---|---|
 | R-04 | The artifacts bucket is shared by tenants | Per-tenant pipeline roots (`pipeline-root/<tenant>/<usecase>`) planned |
-| R-05 | Older CLIs reject manifests with new fields | Upgrade the launcher and CLI before publishing new fields, or relax the schema for unknown optional keys |
+| R-05 | Older versions and newer manifest fields | Resolved 2026-10-10: unknown keys are ignored with a warning; a policy key comes with `requires`, which older versions refuse clearly. Holds from the first release on; images built before it still need new manifest keys rolled out after them |
 | R-06 | Cloud Scheduler IAM is project-wide | Jobs should only call the launcher as its identity; `doctor` checks |
 | R-07 | Tenant offboarding is undefined | Proposal: block removal until runtime objects are gone |
 | R-08 | Erasure in GCS artifacts and trained models | Not covered; retrain to remove influence; review with a data protection specialist |
@@ -761,7 +767,8 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Item | Status |
 |---|---|
 | First open-source release (0.4.0), wheel and launcher image | Next |
-| Per-tenant pipeline roots (R-04); manifest forward compatibility (R-05); OpenTelemetry export from the launcher | Planned |
+| Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
+| Per-tenant pipeline roots (R-04); OpenTelemetry export from the launcher | Planned |
 | Promotion of a release between environments by digest (FR-29) | Planned |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |

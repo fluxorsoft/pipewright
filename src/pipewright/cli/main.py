@@ -26,9 +26,20 @@ def _selected(root: Path, names: list[str] | None) -> dict[str, Path]:
     return {n: found[n] for n in names}
 
 
+def _ignored_keys(env) -> str | None:
+    if not env.manifest_ignored:
+        return None
+    from pipewright import __version__
+
+    return (f"the manifest has keys this Pipewright ({__version__}) does not know, ignored: "
+            f"{', '.join(env.manifest_ignored)}. Upgrade to use them")
+
+
 def cmd_validate(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
+    if note := _ignored_keys(env):
+        print(f"WARN  {note}\n")
     selected = _selected(root, args.usecase)
     failed = 0
     for name, path in selected.items():

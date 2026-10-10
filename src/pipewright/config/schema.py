@@ -49,6 +49,60 @@ def _message(error) -> str:
     return f"{where}: {msg}"
 
 
+def prune_unknown(document: Any, kind: str) -> tuple[Any, list[str]]:
+    """A copy of `document` without the keys the schema does not know, and the dotted paths of those keys.
+
+    Forward compatibility (R-05): a manifest written for a newer Pipewright may carry keys this version has never
+    heard of. They are dropped (and reported) instead of failing the whole document; everything this version does
+    know is still validated in full. Keys are only dropped where the schema forbids extra properties."""
+    schema = _validator(kind).schema
+    dropped: list[str] = []
+
+    def deref(node: dict) -> dict:
+        while isinstance(node, dict) and "$ref" in node:
+            target = schema
+            for part in node["$ref"].removeprefix("#/").split("/"):
+                target = target[part]
+            node = target
+        return node
+
+    def walk(value: Any, node: dict, path: str) -> Any:
+        node = deref(node)
+        if not isinstance(node, dict):
+            return value
+        for key in ("anyOf", "oneOf"):
+            if key in node:
+                branch = next((deref(b) for b in node[key] if _fits(value, deref(b))), None)
+                return walk(value, branch, path) if branch else value
+        if isinstance(value, dict):
+            props = node.get("properties") or {}
+            extra = node.get("additionalProperties", True)
+            out = {}
+            for k, v in value.items():
+                where = f"{path}.{k}" if path else k
+                if k in props:
+                    out[k] = walk(v, props[k], where)
+                elif extra is False:
+                    dropped.append(where)
+                elif isinstance(extra, dict):
+                    out[k] = walk(v, extra, where)
+                else:
+                    out[k] = v
+            return out
+        if isinstance(value, list) and isinstance(node.get("items"), dict):
+            return [walk(v, node["items"], f"{path}[{i}]") for i, v in enumerate(value)]
+        return value
+
+    return walk(document, schema, ""), dropped
+
+
+def _fits(value: Any, node: dict) -> bool:
+    kind = node.get("type")
+    kinds = kind if isinstance(kind, list) else [kind]
+    return (isinstance(value, dict) and "object" in kinds) or (value is None and "null" in kinds) or (
+        isinstance(value, list) and "array" in kinds) or (kind is None and isinstance(value, dict))
+
+
 def validate(document: Any, kind: str, source: str) -> None:
     """Raises ConfigError listing every schema violation."""
     errors = sorted(_validator(kind).iter_errors(document), key=lambda e: list(map(str, e.absolute_path)))

@@ -57,6 +57,10 @@ First open-source release.
   Feature Registry gives its table and columns at each run. The manifest can list a tenant's feature datasets and
   require feature tables (`features.required`); `validate`, `doctor` and `read_source` enforce both.
 
+- **Manifest forward compatibility.** Manifest keys this version does not know are ignored with a warning
+  (`validate`, `doctor`, the launcher's log) instead of failing; an optional `requires` (for example `">=0.5"`)
+  makes an older version refuse the manifest with a clear message.
+
 ### Fixed
 
 - **Steps with only `retries` or `cache`** no longer get an empty `resources` block in the compiled template: Agent

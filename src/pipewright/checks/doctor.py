@@ -99,6 +99,11 @@ def check_environment(env: Environment, gcp: Gcp, report: Report) -> None:
     report.add(s, Result(INFO, "running as", who or "unknown identity"))
     if env.manifest_source:
         report.add(s, Result(OK, "manifest", env.manifest_source))
+    if env.manifest_ignored:
+        from pipewright import __version__
+
+        report.add(s, Result(WARN, "manifest keys ignored", ", ".join(env.manifest_ignored),
+                             f"this Pipewright ({__version__}) does not know them: upgrade to use them"))
 
     _exists(gcp, report, s, "project", f"{CRM}/projects/{env.project}", "check the project ID and your access",
             lambda b: b.get("state", ""))
