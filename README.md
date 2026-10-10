@@ -270,9 +270,10 @@ data:
   features. `validate` refuses anything else.
 
 Why tables and not a feature store product: the offline store of Google's Agent Platform Feature Store is
-BigQuery itself, and its training-data fetch is still in Preview. Registered feature groups are planned as a second
-kind of source that resolves to the same tables. `pipewright new-usecase --from features` starts from an example
-with two feature tables.
+BigQuery itself, and its training-data fetch is still in Preview. Registered feature groups are a second kind of
+source that resolves to the same tables: `- feature_group: customer_profile` with registered feature names, read
+from the Feature Registry at each run. `pipewright new-usecase --from features` starts from an example with two
+feature tables.
 
 ## Getting started
 
@@ -379,7 +380,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | PyPI release (`pipewright-mlops`) | Planned |
 | Ray on Vertex AI, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
-| Agent Platform Feature Store feature groups as a feature source; online serving from Bigtable | Planned |
+| Agent Platform Feature Store feature groups as a feature source | Built |
+| Online serving from Bigtable (endpoints read features by entity ID) | Planned |
 | Standing (long-lived) Ray clusters | Not planned: standalone clusters are for development, outside Pipewright; pipelines use a cluster per run |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.

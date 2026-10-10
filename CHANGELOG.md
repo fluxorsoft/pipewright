@@ -53,6 +53,9 @@ First open-source release.
   (the newest value at or before it), in one BigQuery query with the environment's key. Scoring without the
   cut-off column uses the latest values. A `data.features.resolved` event, `validate` and `doctor` checks, and
   `new-usecase --from features`.
+- **Feature groups as a feature source.** A `data.features_from` source may name a Feature Store feature group; the
+  Feature Registry gives its table and columns at each run. The manifest can list a tenant's feature datasets and
+  require feature tables (`features.required`); `validate`, `doctor` and `read_source` enforce both.
 
 ### Fixed
 

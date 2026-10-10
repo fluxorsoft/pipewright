@@ -130,6 +130,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
 | FR-45 | **Ray on Vertex AI inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
 | FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
+| FR-47 | **Features by registered name:** a source may name a Feature Store feature group; the Feature Registry gives its table, columns and each feature's column at run time, and the same point-in-time query runs | Met | `pipewright_runtime.resolve_feature_groups`, `checks/doctor.py`, section 8.11 |
 | FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
 | FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
@@ -286,6 +287,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-79 | **Pipewright consumes features; it never produces them.** Feature tables (entity columns, a timestamp, feature columns), their views and any Feature Store registration belong to the features' owners (D-17). A use case names features; the run's source becomes the entity table (entity IDs, the cut-off time per row, the label); ingest joins the two and everything after ingest is unchanged | One owner per feature; the data contract, validation, training, gates and monitoring keep working as they are | Active (2026-10-10) |
 | D-80 | **Feature sources are pluggable; BigQuery feature tables first.** A source is a BigQuery table or view named in the use case. The point-in-time join is SQL Pipewright generates and runs as the runner with CMEK (D-44): for each distinct (entity, cut-off) the newest row dated at or before the cut-off, joined back on (entity, cut-off). A registered Feature Store feature group is a later kind of source that resolves to the same table and columns; the SDK's Preview fetch is not used. Online serving, when built, uses Bigtable | Google is thinning the managed product (section 8.11); BigQuery is the stable part, so Pipewright depends only on it | Active (2026-10-10) |
 | D-81 | **The platform decides where features may come from, in the manifest.** `tenants.<t>.features.datasets` lists a tenant's feature datasets; `features.required` makes `data.features_from` the only source of model features. Both are checked at `validate`, so a use case that breaks them never releases | Access is the platform's decision and reaches teams the same way as every other platform setting; a refusal at validate names what to change | Active (2026-10-10) |
+| D-82 | **A feature group is resolved through the Feature Registry at each run, not pinned at release.** The registry is the owners' source of truth: when they move a group to a new table, runs follow it. The event records what each run actually read (group and table), and the tenant's datasets bound where a group may point | Registration is what makes a feature defined once; copying its resolution into each release would let use cases drift from it | Active (2026-10-10) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -570,10 +572,31 @@ data:
 **What stays with the features' owners:** computing features, freshness, erasure in feature tables (`pipewright data
 erase` covers the use case's own tables), and Feature Store registration if they use it.
 
+**Feature groups as a source** (D-82). A source may name a group registered in the Agent Platform Feature Store
+instead of a table:
+
+```yaml
+    sources:
+      - feature_group: customer_profile    # registered by the features' owners
+        features: [tenure_months, monthly_charges]   # registered feature names
+        # project: data-prod                # where the group is registered; default the environment's project
+        # region: us-central1               # default the environment's region
+```
+
+- **Read at each run:** ingest reads the Feature Registry, which gives the group's BigQuery source, entity columns,
+  time column (`feature_timestamp` by default) and each feature's column (`versionColumnName`). The same
+  point-in-time query then runs, with each feature under its registered name. If owners point a group at a new
+  table, runs follow it; nothing is copied into the release.
+- **Same rules as tables:** the resolved table must be in one of the tenant's feature datasets (`read_source`
+  refuses it otherwise). The event names the group next to the table it resolved to.
+- **Checks:** `validate` checks that a source names a table or a group, not both, and that a group sets no
+  `entity_columns` or `time_column`. `doctor` resolves each group through the registry, then checks its table like
+  any other, including the tenant's datasets.
+- **Permissions:** the runner reads the registry with `roles/aiplatform.user` (which it has). Reading only needs
+  `roles/aiplatform.featurestoreResourceViewer`; owners register groups with `roles/aiplatform.featurestoreAdmin`.
+
 **Later:**
 
-- **Feature groups as a source:** `- feature_group: customer_profile` resolved through the Feature Registry to its
-  table and columns, then the same query.
 - **Online serving from Bigtable**, on demand: Feature Store Bigtable online serving (which syncs BigQuery to
   Bigtable), or Pipewright's own export. The serving handler would read by entity ID.
 
@@ -746,7 +769,8 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
 | Iceberg (BigLake) tables for row-level deletes | Design only |
 | Features from BigQuery feature tables, point in time, for training and batch scoring (FR-46, D-79, D-80, section 8.11) | Built 2026-10-10 |
-| Feature Store feature groups as a second kind of feature source; online serving from Bigtable | Planned (online serving on demand) |
+| Feature Store feature groups as a feature source (D-82) | Built 2026-10-10 |
+| Online serving from Bigtable: endpoints read features by entity ID | Planned (on demand) |
 
 ---
 
