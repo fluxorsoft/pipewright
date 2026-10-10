@@ -32,6 +32,10 @@ REQUIRED = [
     "pipewright/examples/ray/example.yaml",
     "pipewright/examples/ray/usecase.yaml.tmpl",
     "pipewright/examples/ray/components/ray_tune_job.py",
+    "pipewright/examples/features/example.yaml",
+    "pipewright/examples/features/usecase.yaml.tmpl",
+    "pipewright/examples/features/config/data.yaml.tmpl",
+    "pipewright/examples/features/data/load_tables.sh",
 ]
 FORBIDDEN = ("__pycache__", ".pyc", ".pipewright/", ".pytest_cache")
 

@@ -30,7 +30,7 @@ dependencies = [
 gcp = [
     "google-cloud-storage>=2.18,<4",
     "google-cloud-bigquery>=3.25",
-    "google-cloud-aiplatform[pipelines]>=1.70",
+    "google-cloud-aiplatform[pipelines]>=1.70,!=2.0.0",
     "google-auth>=2.30",
     "requests>=2.31",
     "kfp>=2.9,<3",          # compile checks; keep in step with the component images

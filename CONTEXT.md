@@ -129,6 +129,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-12 | Training: data contract checks, splits (random, stratified, time), tuning with parallel trials, experiments | Met | example, `config/ml.py` |
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
 | FR-45 | **Ray on Vertex AI inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
+| FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
 | FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
 | FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
@@ -282,6 +283,8 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-76 | **`--from-bq` drafts; it does not decide.** From the table come the columns, types, required columns, the label's 0/1 values, a time split when there is a date column, and non-numeric columns excluded from features. Ranges, allowed values, uniqueness and personal data are left to the team, with a note on columns that look like identifiers | The schema cannot know what a column means; a draft that guessed would be trusted without review | Active (2026-10-09) |
 | D-77 | **A Ray cluster per Ray step of a run, made by the launcher from the release.** The step names itself; the launcher checks the caller is the use case's runner, takes the size from the live contract (checked against the platform's limits at release) and the image from the release, and creates the cluster as the runner with the environment's key and network attachment. Requests travel like run requests (Pub/Sub inside a perimeter, with the runner's ID token; HTTP otherwise). Clusters carry run labels and a deadline; the tick deletes clusters of ended runs | Creating a cluster that runs as the runner needs permission to act as it, which the launcher has and tenants do not; sizing from the reviewed release means a request cannot ask for more | Active (2026-10-10) |
 | D-78 | **Standalone Ray clusters for development, a cluster per run for pipelines.** Data scientists develop on standalone clusters of their own (console, notebook, Ray Client); every Pipewright run gets its own cluster (D-77). Pipewright has no standing mode: `ray.mode` has one value, `per_run`. A Terraform-managed standing cluster would also wait for the Google provider (no Ray settings on `google_vertex_ai_persistent_resource`) or a GKE blueprint (KubeRay) | What is released, gated and audited runs on clusters Pipewright made for it; development stays free | Active (2026-10-10) |
+| D-79 | **Pipewright consumes features; it never produces them.** Feature tables (entity columns, a timestamp, feature columns), their views and any Feature Store registration belong to the features' owners (D-17). A use case names features; the run's source becomes the entity table (entity IDs, the cut-off time per row, the label); ingest joins the two and everything after ingest is unchanged | One owner per feature; the data contract, validation, training, gates and monitoring keep working as they are | Active (2026-10-10) |
+| D-80 | **Feature sources are pluggable; BigQuery feature tables first.** A source is a BigQuery table or view named in the use case. The point-in-time join is SQL Pipewright generates and runs as the runner with CMEK (D-44): for each distinct (entity, cut-off) the newest row dated at or before the cut-off, joined back on (entity, cut-off). A registered Feature Store feature group is a later kind of source that resolves to the same table and columns; the SDK's Preview fetch is not used. Online serving, when built, uses Bigtable | Google is thinning the managed product (section 8.11); BigQuery is the stable part, so Pipewright depends only on it | Active (2026-10-10) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -489,6 +492,106 @@ Entry point group `pipewright.commands`; each entry point is a callable `registe
 subcommands. Plugin API v1. A plugin that fails to load is skipped with a warning; `pipewright plugins` lists what
 loaded.
 
+### 8.11 Features from feature tables (built 2026-10-10)
+
+**Where Google's products stand (researched 2026-10-10):**
+
+- The Agent Platform Feature Store (formerly Vertex AI Feature Store) is now a metadata layer over BigQuery: a
+  feature group registers a BigQuery table or view (entity columns, `feature_timestamp`), and BigQuery is the
+  offline store. Registration is optional, and the training-data fetch (`fetch_historical_feature_values`) is
+  still in Preview.
+- On 2026-02-17 Google deprecated the legacy Feature Store and Optimized online serving. Both are removed on
+  2027-02-17. Bigtable online serving remains, and supports CMEK.
+- Google's migration guide for legacy users (updated 2026-10-07) goes to "a Bigtable feature store", BigQuery for
+  training and Bigtable for serving, not to the newer Feature Store.
+- BigQuery has its own point-in-time functions (`ML.FEATURES_AT_TIME`, `ML.ENTITY_FEATURES_AT_TIME`).
+- Cataloguing moved to Knowledge Catalog (Dataplex, renamed 2026-04-10), which indexes BigQuery tables
+  automatically.
+
+So the stable part is the pattern (governed feature tables in BigQuery, read point in time, served from
+Bigtable). Pipewright depends on that, and treats the managed product as an optional source.
+
+**The use case** (`config/data.yaml`, D-79, D-80):
+
+```yaml
+data:
+  contract: { ... }                       # unchanged: every column the model and the checks see
+  features_from:
+    entity: { columns: [customer_id], time_column: snapshot_date }   # in the run's source, the entity table
+    sources:
+      - table: bq://features.customer_profile          # a BigQuery feature table or view
+        features: [tenure_months, monthly_charges]
+        # entity_columns: [cust_id]                    # when the table names the entity columns differently
+        # time_column: valid_from                      # default feature_timestamp
+        # prefix: profile_                             # when two tables have a feature of the same name
+```
+
+**How a run reads it** (`pipewright_runtime.read_source`, so teams' own ingest code needs no change):
+
+1. **The source is the entity table**, a `bq://` table or view: the entity columns, the cut-off column and the
+   label. `validate` refuses landing-file triggers and `gs://` schedule or retrain sources, since a file cannot be
+   one.
+2. **One BigQuery query**, as the runner with the environment's key:
+   - for each distinct (entity, cut-off), each feature table's newest row dated at or before the cut-off
+     (`QUALIFY ROW_NUMBER()`);
+   - joined back to every entity row on (entity, cut-off), so duplicates are kept and the result is deterministic.
+   - A `date` cut-off is midnight UTC at the start of that day, so values dated that day are not used. A feature
+     table should have one row per entity per timestamp; ties are broken arbitrarily.
+3. **Scoring** uses the same query. A scoring table usually carries the cut-off column as the scoring date, which
+   also makes scores reproducible. A table without it is cut off at the query time and gets the latest values;
+   the contract must then mark the column `required: false`, since contract columns are required by default.
+4. **Nothing after ingest changes.** The frame has the entity table's columns plus the features, exactly as a
+   prepared table would.
+5. **The `data.features.resolved` event** records the entity table, the cut-off rule, the query job and time
+   (BigQuery time travel can reproduce the read for seven days), and per source the table, the features and how
+   many rows found a value. Missing values are also logged as a warning.
+
+**Checks:**
+
+- `validate`: the block's shape, valid column names, every feature in the data contract, no feature in two sources
+  without a prefix, no feature that is the label or an entity or cut-off column, a date or timestamp cut-off, one
+  table entity column for each entity column.
+- `doctor`: each feature table exists, has the entity, time and feature columns, a date or timestamp time column,
+  and types the contract accepts.
+- `read_source` refuses an entity table without the entity columns, or one that already has a feature's column.
+
+**What stays with the features' owners:** computing features, freshness, erasure in feature tables (`pipewright data
+erase` covers the use case's own tables), and Feature Store registration if they use it.
+
+**Later:**
+
+- **Feature groups as a source:** `- feature_group: customer_profile` resolved through the Feature Registry to its
+  table and columns, then the same query.
+- **Online serving from Bigtable**, on demand: Feature Store Bigtable online serving (which syncs BigQuery to
+  Bigtable), or Pipewright's own export. The serving handler would read by entity ID.
+- **Enterprise:** grants, a policy and evidence (Enterprise CONTEXT, section 8.12).
+
+**Example:** `examples/features/` (`new-usecase --from features`): the churn sample split into an entity table and
+two feature tables, each with rows dated after the cut-off that must never be used. `data/load_tables.sh` loads
+them.
+
+**Tested live 2026-10-10** (a private environment with CMEK, VPC-SC and Ray over Private Service Connect):
+
+- **The query itself:** the example's tables loaded into the tenant dataset, then `read_source` run against them as a
+  step would. All 5,000 rows are identical to the churn sample the tables were made from, so no value dated after
+  a cut-off was used, though every customer has some. Scoring as of the query time matches a pandas reference
+  exactly (4,502 of 4,901 rows got the later value; the rest are dated after the query).
+- **Training on Agent Platform Pipelines** (`churn-feats`, run `ra0b8c84dcdaf`): the feature join in `ingest-data`,
+  then the unchanged pipeline. `churn-feats-classifier` v1 is DEFAULT, AUC 0.810, gates pass. The
+  `data.features.resolved` event reached the tenant's `pipewright_events` view.
+- **Training with a Ray step** (`churn-feats-ray`, run `rf8507504ebfd`): the same feature tables; the tuning trials
+  ran on a per-run Ray cluster. `churn-feats-ray-classifier` v1 is DEFAULT, AUC 0.807, gates pass. Both
+  `data.features.resolved` and `ray.cluster.created` were recorded for the run.
+- **Batch scoring** (`churn-feats` inference, run `r5fcd02997c4b`): a scoring view dated today. 5,000 customers were
+  scored with the features as of today. Drift monitoring flagged exactly the three features the later rows change
+  (`tenure_months`, `total_charges`, `num_support_tickets`, maximum PSI 0.55) and raised an alert.
+- **Found and fixed on the way:**
+  - The example's `record-monitoring` step failed when no monitoring table was set; it now skips the write.
+  - The features example now has drift monitoring.
+  - A scoring table must carry the contract's required columns: contract columns are required by default, so the
+    cut-off column normally doubles as the scoring date.
+  - A run requested within 60 seconds of a release can still get the previous release (the launcher caches
+    pointers, `POINTER_TTL`); this is by design.
 ---
 
 ## 9. Interfaces and contracts
@@ -574,6 +677,7 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | R-19 | Labels arrive late for many use cases | The decision pack shows how many labelled outcomes exist, so drift is not read as degradation |
 | R-20 | No Terraform for the platform side in this repository | By design. A separate starter repository (public endpoints, no CMEK or VPC) is shared on request: people ask the maintainers (hello@fluxorsoft.com or GitHub Discussions), which also builds the community. Production blueprints with private networking come with Pipewright Enterprise |
 | R-21 | The PyPI name `pipewright` belongs to an unrelated project | Resolved: the distribution is `pipewright-mlops`; the import and the command stay `pipewright` |
+| R-22 | Feature governance is BigQuery IAM | The runner reads feature tables directly, so what a tenant may read is decided by grants on the feature datasets (the platform's), and the event records what a run actually read. Pipewright cannot stop a team reading a table its runner may read; Enterprise adds the grants, a policy and evidence |
 
 ---
 
@@ -595,6 +699,26 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 - Never commit credentials, project IDs, real email addresses or customer data; use placeholders such as
   `example.com` and `acme-ml-dev`.
 
+### 12.1 Google dependencies (checked 2026-10-10; recheck before each release)
+
+Pipewright builds only on Google services and SDK parts that are not deprecated. Checked against the Agent Platform
+deprecations page and the SDK 2.0.1 migration guide:
+
+| Used by Pipewright | State |
+|---|---|
+| Agent Platform Pipelines (KFP 2.17), Model Registry, endpoints, custom jobs | Supported |
+| Persistent resources for Ray (Ray on Agent Platform), the Ray client in `google-cloud-aiplatform[ray]` | Supported; no deprecation notice |
+| `google-cloud-aiplatform` 2.x (examples pin 2.3.0) | The classic ML surface is "fully supported"; 2.0.0 must not be installed (the core excludes it) |
+| BigQuery, including `ML.FEATURES_AT_TIME` and `ML.ENTITY_FEATURES_AT_TIME` | Supported |
+| Planned: Feature Store feature groups and the Feature Registry; Bigtable online serving; Knowledge Catalog (Dataplex renamed, same APIs) | Supported; Bigtable is Google's recommended replacement for Optimized online serving |
+
+| Retiring | Shutdown | Effect on Pipewright |
+|---|---|---|
+| Feature Store (Legacy) | 2027-02-17 | Never used |
+| Feature Store Optimized online serving | 2027-02-17 | Never used; online serving will use Bigtable |
+| Vertex Explainable AI | 2027-03-16 | Never used: `explainability` is permutation importance in the use case's own evaluation step |
+| SDK generative modules (`vertexai.generative_models` and others) | Removed 2026-06-24 | Never imported |
+
 ---
 
 ## 13. Roadmap
@@ -609,7 +733,8 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | Ray on Vertex AI, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
 | Iceberg (BigLake) tables for row-level deletes | Design only |
-| Feature store integration | Under review |
+| Features from BigQuery feature tables, point in time, for training and batch scoring (FR-46, D-79, D-80, section 8.11) | Built 2026-10-10 |
+| Feature Store feature groups as a second kind of feature source; online serving from Bigtable | Planned (online serving on demand) |
 
 ---
 

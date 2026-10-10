@@ -128,7 +128,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 | Stage | Capabilities |
 |---|---|
 | Configure | Multi-file use cases (one concern per file), JSON Schema validation with path-qualified errors, `${...}` references to manifest names, per-environment overrides on a fixed list of keys, `resolve` to print the effective configuration |
-| Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
+| Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, **features from feature tables** joined point in time (no value from after a row's cut-off reaches training), tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
 | Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray on Vertex AI** for a step that needs a cluster: one cluster per run, sized in `steps.<step>.ray` within the platform's limits, deleted when the step ends |
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
@@ -232,6 +232,43 @@ with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by
 `pipewright new-usecase --from ray` starts from an example that runs the churn tuning trials in parallel on Ray.
 
 **Development and pipelines:** while developing, data scientists use a standalone Ray cluster of their own (made in the console, used from a notebook with `ray.init("vertex_ray://<cluster>")`, Python and Ray versions matching the cluster). Pipelines never use it: every run, dev to prod, gets its own cluster from Pipewright. The same Ray code runs in both; only who owns the cluster changes.
+
+## Features from feature tables
+
+Instead of one prepared table per use case, a use case can name the features it needs and the BigQuery feature
+tables that hold them. Feature tables belong to whoever produces the features (a data team, or the team itself);
+Pipewright only reads them.
+
+```yaml
+# config/data.yaml
+data:
+  contract: { ... }                       # unchanged: every column the model and the checks see
+  features_from:
+    entity: { columns: [customer_id], time_column: snapshot_date }    # in the run's source, the entity table
+    sources:
+      - table: bq://features.customer_profile          # entity columns, feature_timestamp, one column per feature
+        features: [tenure_months, monthly_charges]
+      - table: bq://features.support_activity
+        features: [num_support_tickets]
+```
+
+- **The run's source is the entity table:** who, as of when, and the label (`pipewright run --source-uri
+  bq://...`). Each row gets the newest value of each feature dated at or before its cut-off, so nothing from after
+  it reaches training. A `date` cut-off is the start of that day (UTC).
+- **Scoring** uses the same query, so training and batch scoring read features the same way. A scoring table
+  usually carries the cut-off column as the scoring date, which also makes the scores reproducible. Without it
+  (the contract must then mark that column `required: false`) the cut-off is the query time.
+- **One query, in BigQuery**, run as the runner with the environment's key; everything after ingest (the data
+  contract, validation, training, gates, monitoring) is unchanged. A `data.features.resolved` event records the
+  tables, features, query job and time, and how many rows found a value.
+- **Checks:** `validate` checks the block against the data contract (every feature in the contract, no clashes,
+  not the label, a date or timestamp cut-off) and refuses landing-file triggers, since the source must be a
+  `bq://` table; `doctor` checks each feature table has the columns, with types the contract accepts.
+
+Why tables and not a feature store product: the offline store of Google's Agent Platform Feature Store is
+BigQuery itself, and its training-data fetch is still in Preview. Registered feature groups are planned as a second
+kind of source that resolves to the same tables. `pipewright new-usecase --from features` starts from an example
+with two feature tables.
 
 ## Getting started
 
@@ -337,6 +374,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | OpenTelemetry export, per-tenant pipeline roots | Planned |
 | PyPI release (`pipewright-mlops`) | Planned |
 | Ray on Vertex AI, a cluster per Ray step of a run | Built |
+| Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
+| Agent Platform Feature Store feature groups as a feature source; online serving from Bigtable | Planned |
 | Standing (long-lived) Ray clusters | Not planned: standalone clusters are for development, outside Pipewright; pipelines use a cluster per run |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.

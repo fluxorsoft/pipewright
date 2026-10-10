@@ -30,7 +30,8 @@ def churn_inference_pipeline(
     model_display_name: str = "churn-classifier",
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
 ):
-    data = load_data(project=project, source_uri=source_uri, ml_config=ml_config).set_display_name("load-data")
+    data = load_data(project=project, source_uri=source_uri, ml_config=ml_config,
+                     run_id=run_id).set_display_name("load-data")
 
     validate = validate_data(data=data.outputs["data"], ml_config=ml_config, mode="inference")
     validate.set_display_name("validate-data")

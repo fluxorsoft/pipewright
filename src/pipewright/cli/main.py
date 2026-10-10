@@ -456,8 +456,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--tenant", required=True, help="tenant the platform team gave you")
     sp.add_argument("--owner", required=True, help="owning team")
     sp.add_argument("--from", dest="from_example",
-                    help="example to copy: churn (every option) or minimal (only what is required); "
-                         "default churn, or minimal with --from-bq")
+                    help="example to copy: churn (every option), minimal (only what is required), ray (tuning on a "
+                         "Ray cluster) or features (features from feature tables); default churn, or minimal "
+                         "with --from-bq")
     sp.add_argument("--table-prefix", help="prefix for BigQuery tables (default: <name>_)")
     sp.add_argument("--from-bq", metavar="PROJECT.DATASET.TABLE",
                     help="draft the data contract from this BigQuery table's schema (needs the gcp extra)")

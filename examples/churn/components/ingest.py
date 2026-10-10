@@ -3,6 +3,9 @@
     gs://bucket/path/file.csv | .parquet     a landing file or any object
     bq://project.dataset.table               a BigQuery table or view (bq://dataset.table: this project)
 
+With data.features_from the source is the entity table and read_source adds the features from the feature
+tables, each as it was at the row's cut-off time.
+
 Training also appends the rows to the raw table (outputs.store), so every model has the exact data it saw.
 """
 
@@ -32,7 +35,7 @@ def ingest_data(
     from pipewright_runtime import read_source, write_table
 
     logging.basicConfig(level=logging.INFO)
-    df = read_source(source_uri, project, ml_config)
+    df = read_source(source_uri, project, ml_config, run_id)
     logging.info("read %d rows / %d columns from %s", len(df), df.shape[1], source_uri)
     df.to_parquet(raw_data.path, index=False)
     raw_data.metadata.update({"source_uri": source_uri, "rows": len(df), "columns": list(df.columns)})
@@ -48,11 +51,11 @@ def ingest_data(
 
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
-def load_data(project: str, source_uri: str, ml_config: dict, data: dsl.Output[dsl.Dataset]) -> int:
+def load_data(project: str, source_uri: str, ml_config: dict, data: dsl.Output[dsl.Dataset], run_id: str = "") -> int:
     """Inference input: reads the source to a Dataset. Nothing is written to the training tables."""
     from pipewright_runtime import read_source
 
-    df = read_source(source_uri, project, ml_config)
+    df = read_source(source_uri, project, ml_config, run_id or None)
     df.to_parquet(data.path, index=False)
     data.metadata.update({"source_uri": source_uri, "rows": len(df)})
     return len(df)

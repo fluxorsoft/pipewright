@@ -102,6 +102,16 @@ data.split.time_column: The column that orders rows in time; needed with strateg
 data.split.test_fraction: The share of rows held back for testing.
 data.split.validation_fraction: The share of rows held back for validation during training.
 data.split.seed: The random seed, so a split can be repeated.
+data.features_from: "Read features from feature tables instead of taking every column from the run's source. The source becomes the entity table: the entity IDs, a cut-off time per row and the label. Each row gets the latest feature values at or before its cut-off, so nothing from after it reaches training."
+data.features_from.entity: The entity table's key and cut-off columns.
+data.features_from.entity.columns: The columns that identify an entity, such as customer_id.
+data.features_from.entity.time_column: "The cut-off time of each row: features dated after it are not used. For scoring, set it to the scoring date. A table without this column is cut off at the query time (mark the column required: false in the contract)."
+data.features_from.sources: The feature tables to read, owned by whoever produces the features.
+data.features_from.sources.table: "A BigQuery feature table or view: bq://project.dataset.table. It has the entity columns, a timestamp column and one column per feature. The runner needs read access."
+data.features_from.sources.entity_columns: The table's entity columns, in the order of entity.columns, when their names differ. Default the same names.
+data.features_from.sources.time_column: The table's column saying when each value became true. Default feature_timestamp.
+data.features_from.sources.features: The feature columns to take from this table. Each must be in the data contract.
+data.features_from.sources.prefix: Added to this table's feature names, when two tables have a feature of the same name.
 
 features: Which columns the model uses.
 features.include: Only these columns are features. Left out, every column except the label and those excluded.

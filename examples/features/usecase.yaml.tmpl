@@ -1,0 +1,49 @@
+# {{usecase}}: created from the Pipewright feature tables example (pipewright new-usecase --from features).
+# The minimal example, with features read from feature tables (config/data.yaml, data.features_from). A run's
+# source is the entity table: who, as of when, and the label. Each row gets every feature as it was at that time,
+# never a value from after it. data/load_tables.sh loads the sample tables; `pipewright doctor` checks them.
+apiVersion: pipewright/v1
+kind: UseCase
+metadata:
+  name: {{usecase}}
+  owner: {{owner}}
+
+spec:
+  tenant: {{tenant}}                      # given to you by the platform team
+  include: [config/*.yaml]               # config/data.yaml: the contract, label, split and the feature tables
+
+  pipelines:
+    training:  { file: training_pipeline.py,  function: churn_training_pipeline }
+    inference: { file: inference_pipeline.py, function: churn_inference_pipeline }
+  components: { dir: components/, requirements: components/requirements.txt }
+
+  model:
+    name: {{model_name}}
+
+  triggers:
+    api: true                            # `pipewright run --source-uri bq://<dataset>.{{table_prefix}}entities`
+
+  parameters:                            # the pipelines' own parameters
+    bq_dataset: ${resources.bigquery_dataset}
+    model_display_name: ${model.name}
+    raw_table: {{table_prefix}}raw_customers
+    metrics_table: {{table_prefix}}model_metrics
+
+  evaluation:
+    gates:
+      - { metric: auc, min: 0.7 }        # a model below this is not registered
+
+  inference:
+    output_table: {{table_prefix}}predictions
+
+  monitoring:                            # drift of the features as read at scoring time, against training
+    drift: { enabled: true }
+    output_table: {{table_prefix}}model_monitoring
+
+  outputs:                               # tables the pipelines write, created by `pipewright tables sync`
+    bigquery:
+      tables:
+        {{table_prefix}}raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
+        {{table_prefix}}model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }
+        {{table_prefix}}predictions:   { schema: schemas/predictions.json,   partition: { field: scored_at, type: DAY } }
+        {{table_prefix}}model_monitoring: { schema: schemas/model_monitoring.json, partition: { field: monitored_at, type: DAY } }

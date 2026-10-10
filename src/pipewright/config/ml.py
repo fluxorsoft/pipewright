@@ -10,6 +10,7 @@ the ML. The resolved sections reach the pipeline as one `ml_config` parameter.
 from __future__ import annotations
 
 import copy
+import re
 
 from pipewright.config.merge import deep_merge
 
@@ -21,7 +22,8 @@ RETRAINING_MODES = ("off", "propose", "candidate")
 DEFAULTS = {
     "data": {"contract": None, "label": None,
              "split": {"strategy": "stratified", "time_column": None, "test_fraction": 0.2,
-                       "validation_fraction": 0.0}},
+                       "validation_fraction": 0.0},
+             "features_from": None},
     "features": {"include": None, "exclude": []},
     "training": {"hyperparameters": {}, "seed": 42, "experiment": {"name": None},
                  "tuning": {"enabled": False, "metric": None, "goal": "maximize", "max_trials": 8,
@@ -87,6 +89,8 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         problems.append("data.split: strategy stratified needs data.label.column")
     if split["test_fraction"] + split.get("validation_fraction", 0) >= 1:
         problems.append("data.split: test_fraction + validation_fraction must be below 1")
+
+    _features_from(data.get("features_from"), columns, label, known, problems)
 
     # ---- features
     personal = set(protection["personal_data_columns"])
@@ -202,3 +206,59 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         known(erasure["key_column"], "data_protection.erasure.key_column")
 
     return copy.deepcopy(ml)
+
+
+IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")
+FEATURE_TABLE = re.compile(r"^bq://(?:[a-z][a-z0-9-]{4,61}[a-z0-9]\.)?[A-Za-z_][A-Za-z0-9_]{0,1023}\.[A-Za-z0-9_$-]{1,1024}$")
+
+
+def feature_columns(features_from: dict | None) -> dict[str, tuple[int, str]]:
+    """The columns feature tables add to the run's data: output name -> (source index, column in that table)."""
+    out: dict[str, tuple[int, str]] = {}
+    for i, src in enumerate((features_from or {}).get("sources") or []):
+        for col in src.get("features") or []:
+            out.setdefault(src.get("prefix", "") + col, (i, col))
+    return out
+
+
+def _features_from(spec: dict | None, columns: dict, label: str | None, known, problems: list[str]) -> None:
+    """data.features_from: the run's source is the entity table; each source adds the latest values at or before
+    the entity row's cut-off time (see pipewright_runtime.read_source)."""
+    if not spec:
+        return
+    where = "data.features_from"
+    entity = spec["entity"]
+    for col in [*entity["columns"], entity["time_column"]]:
+        if not IDENTIFIER.match(col):
+            problems.append(f"{where}.entity: {col!r} is not a column name")
+    for col in entity["columns"]:
+        known(col, f"{where}.entity.columns")
+    tc = entity["time_column"]
+    if known(tc, f"{where}.entity.time_column") and columns and columns[tc]["type"] not in TIME_TYPES:
+        problems.append(f"{where}.entity.time_column {tc!r} must be a date or timestamp column")
+    taken = set(entity["columns"]) | {tc}
+    seen: dict[str, int] = {}
+    for i, src in enumerate(spec["sources"]):
+        at = f"{where}.sources[{i}]"
+        if not FEATURE_TABLE.match(src["table"]):
+            problems.append(f"{at}.table {src['table']!r} is not bq://project.dataset.table (or bq://dataset.table)")
+        keys = src.get("entity_columns") or entity["columns"]
+        if len(keys) != len(entity["columns"]):
+            problems.append(f"{at}.entity_columns: give one column for each of data.features_from.entity.columns")
+        for col in [*keys, src.get("time_column", "feature_timestamp"), *src["features"]]:
+            if not IDENTIFIER.match(col):
+                problems.append(f"{at}: {col!r} is not a column name")
+        prefix = src.get("prefix", "")
+        if prefix and not IDENTIFIER.match(prefix + "x"):
+            problems.append(f"{at}.prefix {prefix!r} cannot start a column name")
+        for col in src["features"]:
+            name = prefix + col
+            if name in seen:
+                problems.append(f"{at}: feature {name!r} also comes from sources[{seen[name]}]; set a prefix")
+                continue
+            seen[name] = i
+            if name in taken:
+                problems.append(f"{at}: feature {name!r} is an entity or time column of the entity table")
+            if name == label:
+                problems.append(f"{at}: feature {name!r} is the label; the label comes from the entity table")
+            known(name, f"{at}.features")

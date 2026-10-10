@@ -311,8 +311,9 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
                                  "check the name, and that the runner service account may read it "
                                  "(roles/bigquery.dataViewer on the dataset)"))
 
+    _check_feature_tables(uc, env, gcp, report)
     _check_retraining(uc, env, gcp, report)
-    requests_retrain = retrain["enabled"] and {"drift", "performance"} & set(retrain["when"])
+    requests_retrain =retrain["enabled"] and {"drift", "performance"} & set(retrain["when"])
     if not requests_retrain or env.launcher.get("run_requests_topic"):
         return      # over the run requests topic, proposals need no call to the launcher
     runner = uc.resources["runner_service_account"]
@@ -338,6 +339,54 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
                          "will be recorded as failed",
                          "" if ok else "ask the platform team to grant roles/run.invoker on the launcher to the "
                          "tenant's runner service account"))
+
+
+# BigQuery column types -> the data contract types they can fill.
+_CONTRACT_TYPES = {"STRING": {"string"}, "INTEGER": {"integer", "float"}, "INT64": {"integer", "float"},
+                   "FLOAT": {"float"}, "FLOAT64": {"float"}, "NUMERIC": {"float"}, "BIGNUMERIC": {"float"},
+                   "BOOLEAN": {"boolean", "integer"}, "BOOL": {"boolean", "integer"}, "DATE": {"date"},
+                   "TIMESTAMP": {"timestamp"}, "DATETIME": {"timestamp"}}
+_TIME_TYPES = {"DATE", "TIMESTAMP", "DATETIME"}
+
+
+def _check_feature_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    """data.features_from: every feature table exists and has the entity, time and feature columns, with types the
+    data contract accepts."""
+    spec = uc.ml["data"].get("features_from")
+    if not spec:
+        return
+    from pipewright.runs import sources
+
+    s = f"Feature tables of {uc.name}"
+    contract = {c["name"]: c["type"] for c in (uc.ml["data"].get("contract") or {}).get("columns", [])}
+    keys = spec["entity"]["columns"]
+    for src in spec["sources"]:
+        if sources.problem(src["table"]):
+            continue                                   # validate reports it
+        project, dataset, table = sources.bq_table(src["table"], env.project).split(".")
+        name = f"{project}.{dataset}.{table}"
+        resp = gcp.get(f"{BQ}/projects/{project}/datasets/{dataset}/tables/{table}")
+        if not resp.ok:
+            report.add(s, Result(FAIL, name, error_text(resp), "check the name, and that the runner service account "
+                                 "may read it (roles/bigquery.dataViewer on the dataset, or an authorized view)"))
+            continue
+        types = {f["name"]: f["type"] for f in (resp.body.get("schema") or {}).get("fields", [])}
+        ts = src.get("time_column", "feature_timestamp")
+        need = [*(src.get("entity_columns") or keys), ts, *src["features"]]
+        missing = [c for c in need if c not in types]
+        if missing:
+            report.add(s, Result(FAIL, name, f"no column {', '.join(missing)}",
+                                 "a feature table has the entity columns, a time column and one column per feature"))
+            continue
+        problems = [] if types[ts] in _TIME_TYPES else [f"time column {ts} is {types[ts]}, not a date or timestamp"]
+        prefix = src.get("prefix", "")
+        for col in src["features"]:
+            want = contract.get(prefix + col)
+            if want and want not in _CONTRACT_TYPES.get(types[col], set()):
+                problems.append(f"{col} is {types[col]}, the contract says {want}")
+        kind = resp.body.get("type", "").lower() or "table"
+        report.add(s, Result(WARN if problems else OK, name, "; ".join(problems) if problems else
+                             f"{kind}, {len(src['features'])} features as of {ts}"))
 
 
 def _check_retraining(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:

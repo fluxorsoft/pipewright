@@ -1,0 +1,12 @@
+# The feature tables example: the churn example's training code, with most features read from feature tables
+# instead of one prepared table. `pipewright new-usecase --from features` copies these paths from the churn
+# example, then this folder's files.
+code_from: churn
+code:
+  - training_pipeline.py
+  - inference_pipeline.py
+  - components/
+  - schemas/raw_customers.json
+  - schemas/model_metrics.json
+  - schemas/predictions.json
+  - schemas/model_monitoring.json

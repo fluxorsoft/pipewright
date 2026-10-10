@@ -48,6 +48,11 @@ First open-source release.
   launcher's tick). `pipewright release` builds the use case's Ray image; `ray_cluster()` and `ray_job()` in the
   component runtime; a Ray client version check; `new-usecase --from ray`; a `ray.cluster.created` event records
   what each cluster used.
+- **Features from feature tables.** `data.features_from` names BigQuery feature tables and their features; the
+  run's source is then the entity table and `read_source` joins each feature as it was at the row's cut-off
+  (the newest value at or before it), in one BigQuery query with the environment's key. Scoring without the
+  cut-off column uses the latest values. A `data.features.resolved` event, `validate` and `doctor` checks, and
+  `new-usecase --from features`.
 
 ### Fixed
 

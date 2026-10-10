@@ -3,7 +3,8 @@
 
     from pipewright_runtime import emit_event, log, read_source, write_table
 
-read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or view
+read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or view; with data.features_from, the
+              source is the entity table and features are joined point in time from the feature tables
 write_table   writes rows to the use case's store (outputs.store): BigQuery, Parquet on GCS, or both
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
@@ -102,15 +103,26 @@ def bigquery_client(project: str, ml_config: dict | None = None):
     return bigquery.Client(project=project, default_query_job_config=config)
 
 
-def read_source(source_uri: str, project: str, ml_config: dict | None = None):
+def read_source(source_uri: str, project: str, ml_config: dict | None = None, run_id: str | None = None):
     """A run's input as a DataFrame. gs://.../*.parquet is read as Parquet, any other gs:// object as CSV;
-    bq:// reads a table or a view with a query, so filtering and joins can live in a view."""
+    bq:// reads a table or a view with a query, so filtering and joins can live in a view.
+
+    With data.features_from in ml_config the source is the entity table (bq:// only) and each row gets the latest
+    values of the named features at or before its cut-off time; a `data.features.resolved` event records what was
+    read."""
     import pandas as pd
 
+    features_from = ((ml_config or {}).get("data") or {}).get("features_from")
+    if features_from and not source_uri.startswith("bq://"):
+        raise ValueError(f"{source_uri!r}: with data.features_from the run's source is the entity table, a bq:// "
+                         "table or view")
     if source_uri.startswith("bq://"):
         ref = bq_table(source_uri, project)
-        df = bigquery_client(project, ml_config).query(f"SELECT * FROM `{ref}`").to_dataframe(
-            create_bqstorage_client=False)
+        client = bigquery_client(project, ml_config)
+        if features_from:
+            df = _read_with_features(client, ref, project, features_from, ml_config or {}, run_id)
+        else:
+            df = client.query(f"SELECT * FROM `{ref}`").to_dataframe(create_bqstorage_client=False)
         for col in df.columns:               # BigQuery DATE arrives as dbdate: use ISO text, as CSV would give
             if str(df[col].dtype) == "dbdate":
                 df[col] = pd.to_datetime(df[col]).dt.strftime("%Y-%m-%d")
@@ -122,6 +134,78 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None):
         payload = storage.Client(project=project).bucket(bucket).blob(name).download_as_bytes()
         return pd.read_parquet(io.BytesIO(payload)) if name.endswith(".parquet") else pd.read_csv(io.BytesIO(payload))
     raise ValueError(f"{source_uri!r}: source_uri must start with gs:// or bq://")
+
+
+# ----------------------------------------------------------------- features --
+# The point-in-time join is plain BigQuery SQL, run as the runner with the environment's key: for every distinct
+# (entity, cut-off) of the entity table, the newest row of each feature table dated at or before the cut-off.
+# Joining back on (entity, cut-off) keeps every entity row, duplicates included, and is deterministic.
+
+def _q(name: str) -> str:
+    return f"`{name}`"
+
+
+def features_query(entity_ref: str, entity_columns: list[str], features_from: dict, project: str) -> str:
+    """The SQL for read_source with data.features_from. `entity_columns` are the entity table's columns: without
+    the cut-off column (a table being scored), every row is cut off at the query time, so it gets the latest values."""
+    entity = features_from["entity"]
+    keys, tc = entity["columns"], entity["time_column"]
+    missing = [c for c in keys if c not in entity_columns]
+    if missing:
+        raise ValueError(f"the entity table {entity_ref} has no column {', '.join(missing)} "
+                         "(data.features_from.entity.columns)")
+    cutoff = (lambda alias: f"CAST({alias}{_q(tc)} AS TIMESTAMP)") if tc in entity_columns else \
+        (lambda _alias: "CURRENT_TIMESTAMP()")
+    ctes = ["entity AS (SELECT * FROM " + _q(entity_ref) + ")",
+            "entity_keys AS (SELECT DISTINCT " + ", ".join(_q(k) for k in keys) + f", {cutoff('')} AS __pw_cutoff "
+            "FROM entity)"]
+    select, joins = ["entity.*"], []
+    for i, src in enumerate(features_from["sources"]):
+        table = bq_table(src["table"], project)
+        fkeys = src.get("entity_columns") or keys
+        fts = src.get("time_column", "feature_timestamp")
+        prefix = src.get("prefix", "")
+        clash = [prefix + c for c in src["features"] if prefix + c in entity_columns]
+        if clash:
+            raise ValueError(f"the entity table {entity_ref} already has {', '.join(clash)}, which "
+                             f"data.features_from.sources[{i}] adds; drop them from the entity table or set a prefix")
+        on = " AND ".join(f"f.{_q(fk)} = k.{_q(k)}" for fk, k in zip(fkeys, keys, strict=True))
+        values = ", ".join(f"f.{_q(c)} AS {_q(prefix + c)}" for c in src["features"])
+        ctes.append(
+            f"f{i} AS (SELECT " + ", ".join(f"k.{_q(k)}" for k in keys) + f", k.__pw_cutoff, TRUE AS __pw_hit, "
+            f"{values} FROM entity_keys AS k JOIN {_q(table)} AS f ON {on} "
+            f"AND CAST(f.{_q(fts)} AS TIMESTAMP) <= k.__pw_cutoff "
+            f"QUALIFY ROW_NUMBER() OVER (PARTITION BY " + ", ".join(f"k.{_q(k)}" for k in keys)
+            + f", k.__pw_cutoff ORDER BY f.{_q(fts)} DESC) = 1)")
+        select += [f"f{i}.{_q(prefix + c)}" for c in src["features"]] + [f"f{i}.__pw_hit IS NOT NULL AS __pw_hit_{i}"]
+        joins.append(f"LEFT JOIN f{i} ON " + " AND ".join(f"f{i}.{_q(k)} = entity.{_q(k)}" for k in keys)
+                     + f" AND f{i}.__pw_cutoff = {cutoff('entity.')}")
+    return ("WITH " + ",\n".join(ctes) + "\nSELECT " + ", ".join(select) + "\nFROM entity\n" + "\n".join(joins))
+
+
+def _read_with_features(client, entity_ref: str, project: str, features_from: dict, ml_config: dict,
+                        run_id: str | None):
+    entity_columns = [f.name for f in client.get_table(entity_ref).schema]
+    job = client.query(features_query(entity_ref, entity_columns, features_from, project))
+    df = job.to_dataframe(create_bqstorage_client=False)
+    tc = features_from["entity"]["time_column"]
+    sources = []
+    for i, src in enumerate(features_from["sources"]):
+        hit = df.pop(f"__pw_hit_{i}")
+        prefix = src.get("prefix", "")
+        sources.append({"table": bq_table(src["table"], project),
+                        "time_column": src.get("time_column", "feature_timestamp"),
+                        "features": [prefix + c for c in src["features"]],
+                        "rows_matched": int(hit.sum()), "rows": len(df)})
+    record = {"entity_table": entity_ref, "cutoff": tc if tc in entity_columns else "query time",
+              "query_job": job.job_id, "read_at": (job.started or datetime.now(timezone.utc)).isoformat(),
+              "sources": sources}
+    for s in sources:
+        if s["rows"] and s["rows_matched"] < s["rows"]:
+            log(f"{s['rows'] - s['rows_matched']} of {s['rows']} entity rows have no value in {s['table']} at or "
+                "before their cut-off; their features from it are empty", ml_config, "WARNING", run_id)
+    emit_event("data.features.resolved", ml_config, run_id, **record)
+    return df
 
 
 # ------------------------------------------------------------------- tables --

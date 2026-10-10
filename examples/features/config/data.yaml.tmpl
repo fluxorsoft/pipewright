@@ -1,0 +1,32 @@
+# The data contract, as before: every column the model and checks see, wherever it comes from.
+data:
+  contract:
+    columns:
+      - { name: customer_id,            type: string,  required: true }    # entity table
+      - { name: snapshot_date,          type: date,    required: true }    # entity table: the cut-off
+      - { name: num_products,           type: integer }                    # entity table
+      - { name: has_paperless_billing,  type: integer }                    # entity table
+      - { name: churned,                type: integer, allowed: [0, 1] }   # entity table: the label
+      - { name: tenure_months,          type: integer }                    # customer_profile
+      - { name: monthly_charges,        type: float }                      # customer_profile
+      - { name: total_charges,          type: float }                      # customer_profile
+      - { name: contract_length_months, type: integer }                    # customer_profile
+      - { name: num_support_tickets,    type: integer }                    # support_activity
+      - { name: avg_monthly_usage_gb,   type: float }                      # support_activity
+  label: { column: churned }
+  split: { strategy: time, time_column: snapshot_date }
+
+  # Features from feature tables, owned by whoever produces them (here, loaded by data/load_tables.sh into your
+  # dataset). Each table has the entity column, a feature_timestamp saying when a value became true, and one
+  # column per feature; a customer has a row each time a value changes. A run's entity row dated 2026-01-31 gets
+  # the newest values dated before 2026-01-31 00:00 UTC, never one from after it.
+  features_from:
+    entity: { columns: [customer_id], time_column: snapshot_date }
+    sources:
+      - table: bq://${resources.bigquery_dataset}.{{table_prefix}}customer_profile
+        features: [tenure_months, monthly_charges, total_charges, contract_length_months]
+      - table: bq://${resources.bigquery_dataset}.{{table_prefix}}support_activity
+        features: [num_support_tickets, avg_monthly_usage_gb]
+
+features:
+  exclude: [customer_id]                 # every other contract column except the label and time is a feature

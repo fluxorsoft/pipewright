@@ -206,7 +206,8 @@ def record_monitoring(
         "retrain_status": retrain_status, "details_json": summary,
         "monitored_at": datetime.now(timezone.utc).isoformat(),
     }
-    write_table(ml_config["monitoring"]["output_table"], [row], ml_config, project, bq_dataset, run_id)
+    if ml_config["monitoring"]["output_table"]:          # monitoring off: no table, the event still records the run
+        write_table(ml_config["monitoring"]["output_table"], [row], ml_config, project, bq_dataset, run_id)
     summary_event = {k: row[k] for k in ("model_version_id", "rows_scored", "max_feature_psi", "drifted_features",
                                          "prediction_psi", "performance_metric", "performance_value", "triggers",
                                          "retrain_status")}

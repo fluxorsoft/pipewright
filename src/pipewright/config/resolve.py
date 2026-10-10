@@ -194,6 +194,15 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     retrain_source = ml["retraining"].get("source_uri")
     if retrain_source and "${" not in retrain_source and sources.problem(retrain_source):
         problems.append(f"retraining.source_uri: {sources.problem(retrain_source)}")
+    if ml["data"].get("features_from"):
+        # The run's source is then the entity table, read with a query: a gs:// file cannot be one.
+        if triggers["landing"]:
+            problems.append("triggers.landing delivers gs:// files, but with data.features_from a run's source is "
+                            "the entity table (bq://); use a schedule or `pipewright run --source-uri bq://...`")
+        named = [(f"triggers.schedules[{s['name']}].source_uri", s.get("source_uri")) for s in triggers["schedules"]]
+        for where, uri in [*named, ("retraining.source_uri", retrain_source)]:
+            if uri and uri.startswith("gs://"):
+                problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
     _retraining_policy(ml["retraining"], approvals, env, problems)
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
     registry = ml["registry"]
