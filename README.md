@@ -265,6 +265,10 @@ data:
   not the label, a date or timestamp cut-off) and refuses landing-file triggers, since the source must be a
   `bq://` table; `doctor` checks each feature table has the columns, with types the contract accepts.
 
+- **The platform decides where features may come from** (manifest): `tenants.<t>.features.datasets` lists a
+  tenant's feature datasets, and `features.required: true` makes feature tables the only source of model
+  features. `validate` refuses anything else.
+
 Why tables and not a feature store product: the offline store of Google's Agent Platform Feature Store is
 BigQuery itself, and its training-data fetch is still in Preview. Registered feature groups are planned as a second
 kind of source that resolves to the same tables. `pipewright new-usecase --from features` starts from an example

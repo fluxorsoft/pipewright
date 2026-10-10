@@ -285,6 +285,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-78 | **Standalone Ray clusters for development, a cluster per run for pipelines.** Data scientists develop on standalone clusters of their own (console, notebook, Ray Client); every Pipewright run gets its own cluster (D-77). Pipewright has no standing mode: `ray.mode` has one value, `per_run`. A Terraform-managed standing cluster would also wait for the Google provider (no Ray settings on `google_vertex_ai_persistent_resource`) or a GKE blueprint (KubeRay) | What is released, gated and audited runs on clusters Pipewright made for it; development stays free | Active (2026-10-10) |
 | D-79 | **Pipewright consumes features; it never produces them.** Feature tables (entity columns, a timestamp, feature columns), their views and any Feature Store registration belong to the features' owners (D-17). A use case names features; the run's source becomes the entity table (entity IDs, the cut-off time per row, the label); ingest joins the two and everything after ingest is unchanged | One owner per feature; the data contract, validation, training, gates and monitoring keep working as they are | Active (2026-10-10) |
 | D-80 | **Feature sources are pluggable; BigQuery feature tables first.** A source is a BigQuery table or view named in the use case. The point-in-time join is SQL Pipewright generates and runs as the runner with CMEK (D-44): for each distinct (entity, cut-off) the newest row dated at or before the cut-off, joined back on (entity, cut-off). A registered Feature Store feature group is a later kind of source that resolves to the same table and columns; the SDK's Preview fetch is not used. Online serving, when built, uses Bigtable | Google is thinning the managed product (section 8.11); BigQuery is the stable part, so Pipewright depends only on it | Active (2026-10-10) |
+| D-81 | **The platform decides where features may come from, in the manifest.** `tenants.<t>.features.datasets` lists a tenant's feature datasets; `features.required` makes `data.features_from` the only source of model features. Both are checked at `validate`, so a use case that breaks them never releases | Access is the platform's decision and reaches teams the same way as every other platform setting; a refusal at validate names what to change | Active (2026-10-10) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -555,6 +556,17 @@ data:
   and types the contract accepts.
 - `read_source` refuses an entity table without the entity columns, or one that already has a feature's column.
 
+**What the platform decides (manifest, D-81):**
+
+- `tenants.<t>.features.datasets` lists the `project.dataset` feature datasets a tenant's use cases may read.
+  `validate` refuses a feature table anywhere else, and names the datasets that are allowed.
+- `features.required: true` means every model feature must come from `data.features_from`. `validate` refuses a
+  use case without the block, and any model feature taken from the entity table.
+- Both keys are optional and appear only when the platform sets them. Without them, a use case may read any table
+  its runner can.
+- Pipewright Enterprise grants access to the listed datasets (Terraform, nothing created) and checks each run's reads
+  (EV-14).
+
 **What stays with the features' owners:** computing features, freshness, erasure in feature tables (`pipewright data
 erase` covers the use case's own tables), and Feature Store registration if they use it.
 
@@ -564,7 +576,6 @@ erase` covers the use case's own tables), and Feature Store registration if they
   table and columns, then the same query.
 - **Online serving from Bigtable**, on demand: Feature Store Bigtable online serving (which syncs BigQuery to
   Bigtable), or Pipewright's own export. The serving handler would read by entity ID.
-- **Enterprise:** grants, a policy and evidence (Enterprise CONTEXT, section 8.12).
 
 **Example:** `examples/features/` (`new-usecase --from features`): the churn sample split into an entity table and
 two feature tables, each with rows dated after the cut-off that must never be used. `data/load_tables.sh` loads
@@ -621,6 +632,7 @@ launcher directly from inside the network), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and th
 | `approver_groups` | `{name: {topic, subscription, description?}}` |
 | `observability` | `events_topic`, `evidence_dataset`, `evidence_uri`, `log_sinks`, `otlp_endpoint` |
 | `security` | `kms_key`, `bigquery_kms_key`, `network`, `reserved_ip_ranges`, `perimeter` |
+| `features` (optional) | `required`: every model feature from `data.features_from`; per tenant, `tenants.<t>.features.datasets`: the `project.dataset` feature datasets its use cases may read |
 | `ray` (optional; also per tenant, `tenants.<t>.ray`) | `enabled`, `mode` (`per_run`), `ray_version`, `python_version`, `image`, `network_attachment`, `limits{max_workers, machines, accelerators, max_minutes}` |
 
 **Compatibility rule:** additive, optional fields only. The schema forbids unknown properties, so the launcher and
