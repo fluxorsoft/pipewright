@@ -155,3 +155,53 @@ def test_deploy_approval(repo):
     with pytest.raises(ConfigError, match="is not an approver"):
         check_approval(uc, "someone@acme.example", approved=True)
     check_approval(uc, "lead@acme.example", approved=True)
+
+
+def test_a_changed_template_is_a_new_release_even_on_the_same_commit(repo, monkeypatch, tmp_path):
+    """Contracts are write-once: same commit, images and templates reuse the contract; a template that compiles
+    differently (a Pipewright upgrade) gets a new release ID instead of the old contract."""
+    from types import SimpleNamespace
+
+    from pipewright.config import load_environment, resolve_usecase
+    from pipewright.release import service
+
+    path = repo.write()
+    uc = resolve_usecase(path, load_environment(repo.root, "dev"))
+    env = load_environment(repo.root, "dev")
+    store, spec = {}, tmp_path / "training.yaml"
+    spec.write_text("template: 1\n")
+    image = f"europe-west2-docker.pkg.dev/acme-ml-dev/ml-images/churn-components@{DIGEST}"
+
+    def compile_pinned(uc, component_image, out_dir):
+        return {"training": SimpleNamespace(name="churn-training", spec_path=spec,
+                                            parameters={"project", "region", "source_uri", "run_id"})}
+
+    def upload(info, repository, uc, release_id, creds):
+        digest = "sha256:" + __import__("hashlib").sha256(info.spec_path.read_bytes()).hexdigest()
+        return f"https://europe-west2-kfp.pkg.dev/acme-ml-dev/ml-pipelines/churn-training/{digest}", digest
+
+    class FakeGcp:
+        session = SimpleNamespace(credentials=None)
+
+        def identity(self):
+            return "ci@acme"
+
+    monkeypatch.setattr(service, "release_id_for", lambda d: ("abc123", "abc123full"))
+    monkeypatch.setattr(service, "read_pointer", lambda gcp, env, name: (None, 0))
+    monkeypatch.setattr(service, "gcs_read", lambda gcp, bucket, name: (store.get(name), 1))
+    monkeypatch.setattr(service, "gcs_write", lambda gcp, bucket, name, text, **k: store.__setitem__(name, text))
+    monkeypatch.setattr(service, "_token", lambda gcp: "tok")
+    monkeypatch.setattr(service.images, "build_and_push", lambda *a, **k: image)
+    monkeypatch.setattr(service.publish, "compile_pinned", compile_pinned)
+    monkeypatch.setattr(service.publish, "upload_template", upload)
+    monkeypatch.setattr(service, "verify", lambda contract, gcp, creds: [])
+    monkeypatch.setattr(service.events, "emit", lambda *a, **k: None)
+    logs = []
+    first = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
+    again = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
+    assert first.contract.release_id == again.contract.release_id == "abc123"
+    assert any("already published with these images and templates" in m for m in logs)
+    spec.write_text("template: 2\n")                         # the same commit compiles differently
+    changed = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
+    assert changed.contract.release_id.startswith("abc123-") and changed.contract.template_digest != \
+        first.contract.template_digest

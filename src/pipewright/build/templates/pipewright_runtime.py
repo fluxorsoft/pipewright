@@ -7,6 +7,8 @@ read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or 
 write_table   writes rows to the use case's store (outputs.store): BigQuery, Parquet on GCS, or both
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
+ray_cluster   a Ray on Vertex AI cluster for this step of this run (steps.<step>.ray), deleted when the block ends
+ray_job       runs a Ray job on that cluster and waits for it (needs ray[default] and google-cloud-aiplatform[ray])
 
 Everything here takes the `ml_config` the component received; it needs only google-cloud-* and pandas/pyarrow,
 which the component image already has. Owned by the platform: do not edit in the use case.
@@ -218,6 +220,217 @@ def write_table(table: str, rows, ml_config: dict, project: str, dataset: str, r
         written.append(_write_gcs(df, table, fields, ml_config, project, run_id))
     log(f"wrote {len(df)} rows to {table}", ml_config, run_id=run_id, table=table, rows=len(df), locations=written)
     return written
+
+
+# --------------------------------------------------------------------- ray --
+# A cluster per Ray step of a run. The launcher creates it (it can act as the runner identity; the runner cannot
+# act as itself) from the live release's settings, so a step only names itself. Names: kept in step with
+# pipewright.ray_clusters.settings.cluster_id by a test.
+
+_RAY_NAME = re.compile(r"[^a-z0-9-]+")
+
+
+def ray_cluster_id(usecase: str, run_id: str, step: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(f"{usecase}|{run_id}|{step}".encode()).hexdigest()[:12]
+    stem = _RAY_NAME.sub("-", f"{usecase}-{step}".lower()).strip("-")[:44].rstrip("-")
+    return f"pw-{stem}-{digest}"
+
+
+def _session():
+    import google.auth
+    from google.auth.transport.requests import AuthorizedSession
+
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    return AuthorizedSession(creds)
+
+
+_METADATA = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts"
+
+
+def _metadata_id_token(audience: str, headers: dict, tried: list) -> str | None:
+    """One pass over the metadata server's accounts (named ones first, then `default`); None if none issues one."""
+    import requests
+
+    listed = requests.get(f"{_METADATA}/", headers=headers, timeout=10)
+    names = [n.strip("/") for n in listed.text.split()] if listed.status_code == 200 else []
+    if listed.status_code != 200:
+        tried.append(f"list {listed.status_code}")
+    for name in [n for n in names if n != "default"] + (["default"] if "default" in names else []):
+        r = requests.get(f"{_METADATA}/{name}/identity", params={"audience": audience, "format": "full"},
+                         headers=headers, timeout=10)
+        if r.status_code == 200 and r.text.count(".") == 2:
+            return r.text.strip()
+        tried.append(f"{name}: {r.status_code} {r.text.strip()[:80]}")
+    return None
+
+
+def _iam_id_token(audience: str, tried: list) -> str | None:
+    """An ID token the IAM Credentials API signs for this identity, with its access token (which Agent Platform
+    workers always have). Needs iam.serviceAccounts.getOpenIdToken on itself."""
+    import requests
+
+    headers = {"Metadata-Flavor": "Google"}
+    email = requests.get(f"{_METADATA}/default/email", headers=headers, timeout=10)
+    if email.status_code != 200:
+        tried.append(f"email {email.status_code}")
+        return None
+    session = _session()
+    r = session.post(f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{email.text.strip()}"
+                     ":generateIdToken", json={"audience": audience, "includeEmail": True}, timeout=30)
+    if r.status_code == 200:
+        return r.json()["token"]
+    tried.append(f"iam generateIdToken {r.status_code} {r.text.strip()[:120]}")
+    return None
+
+
+def id_token(audience: str, attempts: int = 3, wait: float = 10.0) -> str:
+    """An ID token for this identity, to call the launcher.
+
+    On an Agent Platform worker: the metadata server's identity endpoint, which is not reliable there (it refuses
+    tokens on some workers, "please provide a user-specified service account"), then the IAM Credentials API, signed
+    for this identity with its access token. Elsewhere (workstations, Cloud Run): the usual call."""
+    import time
+
+    import requests
+
+    headers, tried = {"Metadata-Flavor": "Google"}, []
+    try:
+        requests.get(f"{_METADATA}/", headers=headers, timeout=5)
+    except requests.RequestException:
+        import google.auth.transport.requests
+        import google.oauth2.id_token
+
+        return google.oauth2.id_token.fetch_id_token(google.auth.transport.requests.Request(), audience)
+    for attempt in range(attempts):
+        token = _metadata_id_token(audience, headers, tried) or _iam_id_token(audience, tried)
+        if token:
+            return token
+        if attempt < attempts - 1:
+            time.sleep(wait)
+    raise RuntimeError(f"no ID token for {audience} after {attempts} tries (the runner needs "
+                       "roles/iam.serviceAccountOpenIdTokenCreator on itself): " + "; ".join(tried[-4:]))
+
+
+def _ray_request(ml_config: dict, action: str, step: str, run_id: str) -> None:
+    """Asks the launcher to create or delete the step's cluster: over Pub/Sub inside a private perimeter (the
+    message carries this identity's ID token), otherwise by calling the launcher."""
+    platform = ml_config.get("platform") or {}
+    url = (platform.get("launcher_url") or "").rstrip("/")
+    if not url:
+        raise RuntimeError("Ray clusters need the launcher, and the environment manifest has no launcher.url")
+    token = id_token(url)
+    body = {"action": action, "usecase": ml_config["usecase"], "run_id": run_id, "step": step}
+    topic = platform.get("run_requests_topic")
+    if topic:
+        message = {"data": base64.b64encode(json.dumps({**body, "kind": "ray.cluster", "id_token": token}).encode())
+                   .decode(), "attributes": {"usecase": ml_config["usecase"], "kind": "ray.cluster"}}
+        region = platform.get("region")
+        host = f"{region}-pubsub.googleapis.com" if region else "pubsub.googleapis.com"
+        r = _session().post(f"https://{host}/v1/{topic}:publish", json={"messages": [message]}, timeout=60)
+    else:
+        import requests
+
+        r = requests.post(f"{url}/ray/clusters", json=body, timeout=120,
+                          headers={"Authorization": f"Bearer {token}"})
+    if r.status_code != 200:
+        raise RuntimeError(f"Ray cluster {action} for {step} refused: {r.status_code} {r.text[:300]}")
+
+
+def _ray_state(name: str, region: str) -> dict:
+    r = _session().get(f"https://{region}-aiplatform.googleapis.com/v1/{name}", timeout=30)
+    if r.status_code == 404:
+        return {}
+    r.raise_for_status()
+    return r.json()
+
+
+class _RayCluster:
+    def __init__(self, ml_config: dict, step: str, run_id: str):
+        platform = ml_config.get("platform") or {}
+        steps = (platform.get("ray") or {}).get("steps") or {}
+        if step not in steps:
+            raise ValueError(f"step {step!r} has no Ray cluster: set steps.{step}.ray in the use case "
+                             f"(Ray steps: {', '.join(steps) or 'none'})")
+        self.ml_config, self.step, self.run_id = ml_config, step, run_id
+        self.region = platform["region"]
+        self.minutes = int(steps[step]["max_minutes"])
+        self.name = (f"projects/{platform['project']}/locations/{self.region}/persistentResources/"
+                     f"{ray_cluster_id(ml_config['usecase'], run_id, step)}")
+
+    def __enter__(self) -> str:
+        import time
+
+        log(f"asking for Ray cluster {self.name.rsplit('/', 1)[-1]} ({self.step})", self.ml_config,
+            run_id=self.run_id, ray_cluster=self.name)
+        _ray_request(self.ml_config, "create", self.step, self.run_id)
+        deadline, state = time.time() + 60 * min(self.minutes, 45), "PENDING"
+        asked, resends = time.time(), 0
+        while time.time() < deadline:
+            current = _ray_state(self.name, self.region)
+            state = current.get("state", "PENDING")
+            if state == "RUNNING":
+                log(f"Ray cluster {self.name.rsplit('/', 1)[-1]} is running", self.ml_config, run_id=self.run_id)
+                return self.name
+            if state == "ERROR":
+                break
+            if not current and time.time() - asked > 180:
+                # Still no cluster: the request may have been dropped (a dead-lettered message, a refusal). The ID is
+                # fixed for the run, so asking again is safe; after three tries, stop and say where to look.
+                if resends == 3:
+                    raise RuntimeError(f"the launcher has not created Ray cluster {self.name} after "
+                                       f"{resends + 1} requests: see the launcher's logs ('ray create')")
+                _ray_request(self.ml_config, "create", self.step, self.run_id)
+                asked, resends = time.time(), resends + 1
+                log(f"asked again for Ray cluster {self.name.rsplit('/', 1)[-1]} ({resends})", self.ml_config,
+                    "WARNING", self.run_id)
+            time.sleep(20)
+        self.__exit__(None, None, None)
+        error = _ray_state(self.name, self.region).get("error") or {}
+        raise RuntimeError(f"Ray cluster {self.name} did not start (state {state}): {error.get('message', '')}")
+
+    def __exit__(self, *exc) -> bool:
+        try:
+            _ray_request(self.ml_config, "delete", self.step, self.run_id)
+            log(f"Ray cluster {self.name.rsplit('/', 1)[-1]} deleted", self.ml_config, run_id=self.run_id)
+        except Exception as e:  # noqa: BLE001 - the launcher's cleanup removes it once the run ends
+            log(f"Ray cluster delete failed (cleanup removes it after the run): {e}", self.ml_config, "WARNING",
+                self.run_id)
+        return False
+
+
+def ray_cluster(ml_config: dict, step: str, run_id: str) -> _RayCluster:
+    """with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster: ray_job(ml_config, cluster, ...)
+
+    The cluster's size is the release's steps.<step>.ray; it is deleted when the block ends, even on errors."""
+    return _RayCluster(ml_config, step, run_id)
+
+
+def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None = None, runtime_env: dict | None = None,
+            timeout_minutes: int = 60) -> str:
+    """Runs `entrypoint` on the cluster's head node (the use case's modules are importable there), streams its
+    status, and returns its logs. Raises when the job fails or runs out of time."""
+    import time
+
+    from ray.job_submission import JobStatus, JobSubmissionClient
+
+    client = JobSubmissionClient(f"vertex_ray://{cluster}")
+    job = client.submit_job(entrypoint=entrypoint, runtime_env=runtime_env or {})
+    log(f"Ray job {job}: {entrypoint}", ml_config, run_id=run_id, ray_job=job)
+    deadline, status = time.time() + 60 * timeout_minutes, None
+    while time.time() < deadline:
+        status = client.get_job_status(job)
+        if status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.STOPPED):
+            break
+        time.sleep(15)
+    logs = client.get_job_logs(job)
+    print(logs[-20000:], flush=True)
+    if status != JobStatus.SUCCEEDED:
+        if status not in (JobStatus.FAILED, JobStatus.STOPPED):
+            client.stop_job(job)
+        raise RuntimeError(f"Ray job {job} ended {status}: {logs[-1000:]}")
+    return logs
 
 
 if __name__ == "__main__":       # `python pipewright_runtime.py` prints the format version (image smoke test)

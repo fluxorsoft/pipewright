@@ -14,7 +14,10 @@ Routes:
                      /pubsub/run)
   POST /retraining/decide    a person's decision: a Pub/Sub push from an approver group's subscription (the message
                      carries the person's ID token), or a direct call by the deciding identity
-  POST /retraining/tick      {"digest"?}: snooze and decline expiry, escalation, the weekly digest (Cloud Scheduler)
+  POST /retraining/tick      {"digest"?}: snooze and decline expiry, escalation, the weekly digest (Cloud Scheduler);
+                     also removes Ray clusters whose run ended or whose deadline passed
+  POST /ray/clusters {"action": "create" | "delete", "usecase", "run_id", "step"}: a Ray step's cluster, from the use
+                     case's runner identity (also as kind ray.cluster on /pubsub/run, with the runner's "id_token")
   GET  /health   live use cases and their releases (Cloud Run reserves paths ending in "z", e.g. /healthz)
 """
 
@@ -44,6 +47,7 @@ from pipewright.launcher.routing import (
     target_for,
 )
 from pipewright.observability import events
+from pipewright.ray_clusters.service import RayClusters, RayRequestError
 from pipewright.release.contract import ReleaseContract
 from pipewright.retraining import identity
 from pipewright.retraining.service import Decisions
@@ -171,7 +175,42 @@ def create_app(registry: Registry | None = None) -> Flask:
     def retraining_tick():
         body = request.get_json(silent=True) or {}
         digest = bool(body.get("digest")) or request.args.get("digest") in ("1", "true")
-        return jsonify(results=decisions().tick(reg().live(), digest=digest)), 200
+        results = decisions().tick(reg().live(), digest=digest)
+        m = reg().manifest
+        ray = rays().reap(m["project"], m["region"]) if m.get("project") and m.get("region") else []
+        return jsonify(results=results, ray=ray), 200
+
+    # ---------------------------------------------------------------------------------- Ray clusters --
+    def rays() -> RayClusters:
+        if "rays" not in state:
+            state["rays"] = RayClusters(reg().gcp, lambda: reg().manifest)
+        return state["rays"]
+
+    def _ray(body: dict, caller: str | None):
+        contract = reg().get(body.get("usecase") or "")
+        if contract is None:
+            return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 404
+        action = body.get("action")
+        if action not in ("create", "delete"):
+            return jsonify(status="error", reason="action must be create or delete"), 400
+        try:
+            result = getattr(rays(), action)(contract, body.get("step") or "", body.get("run_id") or "", caller)
+            if "record" in result:
+                _event("ray.cluster.created", contract, body.get("run_id"), **result.pop("record"))
+        except RayRequestError as e:
+            log.warning("ray %s for %s refused: %s", action, contract.usecase, e)
+            return jsonify(status="refused", reason=str(e)), e.status
+        except Exception as e:  # noqa: BLE001 - retried by the step (or Pub/Sub)
+            log.exception("ray %s for %s failed", action, contract.usecase)
+            return jsonify(status="error", reason=str(e)[:300]), 500
+        return jsonify(result), 200
+
+    @app.post("/ray/clusters")
+    def ray_clusters():
+        caller = identity.cloud_run_caller(request.headers.get("Authorization"))
+        if not caller:
+            return jsonify(status="refused", reason="no caller identity"), 401
+        return _ray(request.get_json(silent=True) or {}, caller)
 
     @app.post("/pubsub")
     def pubsub():
@@ -229,6 +268,16 @@ def create_app(registry: Registry | None = None) -> Flask:
         if body.get("kind") == "retrain.proposal":
             response, code = _propose(body)
             return response, (503 if code == 404 else code)
+        if body.get("kind") == "ray.cluster":
+            # Pub/Sub does not say who published: the message carries the runner's ID token.
+            try:
+                caller = identity.verify(body.get("id_token") or "", [launcher_url()])
+            except identity.NotVerified as e:
+                log.warning("ray request for %s dropped: %s", body.get("usecase"), e)
+                return jsonify(status="dropped", reason=str(e)), 200
+            response, code = _ray(body, caller)
+            # Refusals never get better: acknowledge. No live release or a failed call: let Pub/Sub retry.
+            return response, (200 if code in (400, 403) else 503 if code == 404 else code)
         response, code = _run(body)
         # A bad request never gets better: acknowledge it. No live release (404) or a submit error (5xx) may:
         # Pub/Sub redelivers with backoff, then dead-letters. Duplicates are rejected by job ID.

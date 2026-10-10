@@ -32,6 +32,7 @@ class Environment:
     observability: dict = field(default_factory=dict)
     security: dict = field(default_factory=dict)  # private profiles: kms_key, network, reserved_ip_ranges
     approver_groups: dict = field(default_factory=dict)   # name -> {topic, subscription}: retrain decisions
+    ray: dict = field(default_factory=dict)       # Ray clusters: mode, version, image, network attachment, limits
     promotion_from: str | None = None
     manifest_source: str | None = None
     source: str = ""
@@ -61,7 +62,8 @@ def environment_from_manifest(ref: str, base_dir: Path = Path(".")) -> Environme
         landing_bucket=manifest.get("landing_bucket"), launcher=manifest.get("launcher", {}),
         policies=manifest.get("policies", {}), tenants=manifest.get("tenants", {}),
         observability=manifest.get("observability") or {}, security=manifest.get("security") or {},
-        approver_groups=manifest.get("approver_groups") or {}, manifest_source=source, source=source,
+        approver_groups=manifest.get("approver_groups") or {}, ray=manifest.get("ray") or {},
+        manifest_source=source, source=source,
     )
 
 
@@ -109,6 +111,7 @@ def load_environment(root: Path, name: str) -> Environment:
         observability=manifest.get("observability") or {},
         security=manifest.get("security") or {},
         approver_groups=manifest.get("approver_groups") or {},
+        ray=manifest.get("ray") or {},
         promotion_from=spec.get("promotion", {}).get("from"),
         manifest_source=manifest_source,
         source=str(path),

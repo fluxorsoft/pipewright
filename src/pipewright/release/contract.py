@@ -2,6 +2,9 @@
 
 v3 adds `pipelines` (training, inference, ...): one compiled template per pipeline, all released together.
 The top-level template fields always describe the training pipeline, so v2 contracts still read the same way.
+Optional `ray` (no version change; older launchers ignore it): the release's Ray image by digest, the Ray version and
+each Ray step's cluster ({step: {head_machine, worker_machine, workers, accelerator, max_minutes}}). The launcher
+builds a step's cluster from this, never from the request (pipewright.ray_clusters).
 
 gs://<artifacts>/contracts/<usecase>/<release_id>.json   one contract per release (never changed)
 gs://<artifacts>/contracts/<usecase>/current.json        pointer: which release is live, plus history
@@ -91,11 +94,12 @@ class ReleaseContract:
     # Who owns it and what it is for (owner, objective, description, contacts, model): read by tools that have no
     # checkout of the MLOps repo, e.g. evidence packs. Optional; older launchers ignore it.
     metadata: dict = field(default_factory=dict)
+    ray: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> ReleaseContract:
         known = set(cls.__dataclass_fields__)
-        optional = {"source_commit", "created_at", "labels", "blueprint", "pipelines", "metadata"}
+        optional = {"source_commit", "created_at", "labels", "blueprint", "pipelines", "metadata", "ray"}
         missing = sorted(known - optional - set(data))
         if missing:
             raise ConfigError(f"contract is missing fields: {missing}")
@@ -145,6 +149,11 @@ class ReleaseContract:
             problems.append(f"a trigger starts pipeline {w!r}, which this release does not have")
         if "@sha256:" not in self.component_image:
             problems.append("component_image must be pinned by digest")
+        if self.ray:
+            if "@sha256:" not in (self.ray.get("image") or ""):
+                problems.append("ray.image must be pinned by digest")
+            if not self.ray.get("steps"):
+                problems.append("ray.steps is empty: a release with a Ray image has at least one Ray step")
         if not self.pipeline_root.startswith("gs://"):
             problems.append("pipeline_root must be a gs:// URI")
         if self.orchestrator not in ("vertex", "kfp"):

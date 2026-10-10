@@ -129,7 +129,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 |---|---|
 | Configure | Multi-file use cases (one concern per file), JSON Schema validation with path-qualified errors, `${...}` references to manifest names, per-environment overrides on a fixed list of keys, `resolve` to print the effective configuration |
 | Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
-| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change |
+| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray on Vertex AI** for a step that needs a cluster: one cluster per run, sized in `steps.<step>.ray` within the platform's limits, deleted when the step ends |
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
 | Run | A shared, multi-tenant launcher on Cloud Run: file drops, schedules (Cloud Scheduler), API calls and Pub/Sub run requests; deterministic run IDs, so retries never start duplicates |
@@ -161,7 +161,7 @@ Teams write their pipelines and ML code their own way. Pipewright needs only a s
 | | Free (your choice) | Fixed (the contract) |
 |---|---|---|
 | Layout | Pipeline file and function names, the components folder, how config is split into files (`include:` patterns), table schema file names | `usecases/<name>/usecase.yaml`, with `metadata.name` equal to the folder; overrides in `usecases/<name>/environments/<env>.yaml` |
-| Pipelines | Steps, libraries, frameworks, models; anything inside a step (Ray on Vertex AI included) | Kubeflow Pipelines v2 (`kfp` pinned to the version Pipewright compiles with); every pipeline accepts `project`, `region`, `source_uri` and `run_id`; components take their image from `COMPONENT_IMAGE` |
+| Pipelines | Steps, libraries, frameworks, models; anything inside a step, including Ray jobs on a cluster Pipewright makes for the step (`ray_cluster()`, below) | Kubeflow Pipelines v2 (`kfp` pinned to the version Pipewright compiles with); every pipeline accepts `project`, `region`, `source_uri` and `run_id`; components take their image from `COMPONENT_IMAGE` |
 | Configuration | Which sections you use; most have defaults | Optional `ml_config` parameter: when a pipeline declares it, it receives the resolved configuration (data contract, gates, monitoring, retraining) |
 | Evaluation | How you compute metrics | Training writes an **evaluation record**, `evaluation.json` next to the model artifacts, with the metrics, slices and champion comparison (see below) |
 | Files | | Configuration files end in `.yaml`; a `.yml` file is refused with a message to rename it |
@@ -183,6 +183,55 @@ promote a failing model, and `pipewright model list` shows each version's result
 
 `slices` is needed for slice gates; `champion` holds the champion's metrics on the same test data, or `null` when
 there was no champion yet. The churn example writes this record in its evaluate and register steps.
+
+## Ray steps
+
+A step that needs a cluster asks for one in configuration and uses it in code. The cluster exists only for that
+step of that run:
+
+```yaml
+steps:
+  tune-on-ray:
+    ray: { head_machine: n1-standard-4, workers: 1 }   # within the platform's limits; may differ per environment
+components:
+  ray_requirements: ray-requirements.txt               # extra packages for the cluster's nodes
+```
+
+```python
+from pipewright_runtime import ray_cluster, ray_job
+
+with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by the launcher, deleted after
+    ray_job(ml_config, cluster, f"python -m ray_tune_job {trials.uri}", run_id=run_id)
+```
+
+- **Who makes the cluster:** the launcher, as the tenant's runner identity, from the live release (the step only
+  names itself). It applies the environment's key and network, and labels the cluster with the run.
+- **What it runs:** a Ray image `pipewright release` builds for the use case, on the platform's Ray on Vertex AI
+  base image, with the component code and `ray_requirements`.
+- **Cleanup:** the step deletes the cluster when it ends, even on errors; the launcher's tick deletes any cluster
+  whose run ended or whose `max_minutes` passed, so a killed step never leaves one running.
+- **The platform's side:** an optional `ray` block in the manifest (environment and per tenant): whether Ray is on,
+  the Ray version, base image, a Private Service Connect network attachment, and limits on machines, workers,
+  accelerators and minutes. Without it: a cluster per run on a public endpoint, the runner identity, a prebuilt
+  image, small limits.
+- **What the platform must grant (not in the starter Terraform):**
+  - the launcher's identity: `aiplatform.persistentResources.create`, `delete`, `get` and `list` (a custom role;
+    `roles/aiplatform.user` only gets and lists);
+  - each tenant runner, on itself: `roles/iam.serviceAccountUser` (it reaches its own cluster's job API only if it
+    may act as itself) and `roles/iam.serviceAccountOpenIdTokenCreator` (the step signs the ID token it asks the
+    launcher with: Agent Platform workers' metadata server does not reliably issue one).
+
+  Pipewright Enterprise's Terraform grants all of it, with the Private Service Connect network for private
+  environments.
+- **A Ray head needs 16 vCPUs:** a cluster with a smaller head runs, but its job API never answers (found live).
+  `validate` checks it, with more than 18 GB of memory.
+- **A Ray step does not size itself:** no `cpu`, `memory` or `gpu` on a Ray step (Agent Platform runs sized steps where the metadata server issues no ID tokens, so the step could not ask the launcher); size the cluster.
+- **Checks:** `validate` refuses a step over the limits and a Ray client that does not match the clusters
+  (`ray[default]` pinned in the component requirements, with `google-cloud-aiplatform[ray]`).
+
+`pipewright new-usecase --from ray` starts from an example that runs the churn tuning trials in parallel on Ray.
+
+**Development and pipelines:** while developing, data scientists use a standalone Ray cluster of their own (made in the console, used from a notebook with `ray.init("vertex_ray://<cluster>")`, Python and Ray versions matching the cluster). Pipelines never use it: every run, dev to prod, gets its own cluster from Pipewright. The same Ray code runs in both; only who owns the cluster changes.
 
 ## Getting started
 
@@ -287,7 +336,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
 | OpenTelemetry export, per-tenant pipeline roots | Planned |
 | PyPI release (`pipewright-mlops`) | Planned |
-| Ray on Vertex AI as compute inside the full lifecycle (Terraform for the Ray cluster, then an end-to-end test) | Planned |
+| Ray on Vertex AI, a cluster per Ray step of a run | Built |
+| Standing (long-lived) Ray clusters | Not planned: standalone clusters are for development, outside Pipewright; pipelines use a cluster per run |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 

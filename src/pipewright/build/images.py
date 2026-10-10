@@ -55,11 +55,14 @@ def build_context(uc: ResolvedUseCase, dest: Path) -> Path:
     requirements = uc.requirements or (uc.components_dir / "requirements.txt")
     if not requirements.is_file():
         raise ConfigError(f"no requirements file for the component image (looked for {requirements})")
-    from pipewright.checks import kfp_version
+    from pipewright.checks import kfp_version, ray_version
 
     pin = kfp_version.check(uc)
     if not pin.ok:
         raise ConfigError(f"kfp version: {pin.message}")
+    ray_pin = ray_version.check(uc)
+    if not ray_pin.ok:
+        raise ConfigError(f"ray version: {ray_pin.message}")
     shutil.copytree(uc.components_dir, dest / "components",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "kfp_config.ini", "requirements*.txt"))
     shutil.copy(requirements, dest / "requirements.txt")
@@ -109,6 +112,47 @@ def existing_digest(gcp, repository: str, package: str, tag: str) -> str | None:
     return version.rsplit("/", 1)[-1] if "/versions/sha256:" in version else None
 
 
+def ray_build_context(uc: ResolvedUseCase, dest: Path) -> Path:
+    """The Ray image's context: the component modules (Ray jobs import them) and components.ray_requirements."""
+    shutil.copytree(uc.components_dir, dest / "components",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "kfp_config.ini", "requirements*.txt"))
+    templates = resources.files("pipewright.build.templates")
+    runtime = templates.joinpath("pipewright_runtime.py").read_text(encoding="utf-8")
+    (dest / "components" / "pipewright_runtime.py").write_text(runtime, encoding="utf-8")
+    extra = uc.ray_requirements.read_text(encoding="utf-8") if uc.ray_requirements else ""
+    (dest / "requirements.txt").write_text(extra, encoding="utf-8")
+    (dest / "Dockerfile").write_text(templates.joinpath("ray.Dockerfile").read_text(encoding="utf-8"),
+                                     encoding="utf-8")
+    return dest
+
+
+def _build_and_push(ctx: Path, repository: str, package: str, uc: ResolvedUseCase, release_id: str,
+                    base_image: str | None, verbose: bool, gcp, log, what: str) -> str:
+    ref = f"{repository}/{package}"
+    tag_name = f"{release_id}-{context_hash(ctx, release_id, uc.name, base_image or '')[:12]}"
+    tag = f"{ref}:{tag_name}"
+    if gcp is not None:
+        digest = existing_digest(gcp, repository, package, tag_name)
+        if digest:
+            log(f"{what} {tag_name} already pushed: reusing it")
+            return f"{ref}@{digest}"
+    args = ["build", "-t", tag, "--build-arg", f"RELEASE_ID={release_id}", "--build-arg", f"USECASE={uc.name}"]
+    if base_image:
+        args += ["--build-arg", f"BASE_IMAGE={base_image}"]
+    ca_bundle = os.environ.get("PIPEWRIGHT_BUILD_CA_BUNDLE")
+    if ca_bundle:
+        if not Path(ca_bundle).is_file():
+            raise ConfigError(f"PIPEWRIGHT_BUILD_CA_BUNDLE is set but {ca_bundle} is not a file")
+        args += ["--secret", f"id=pip_ca,src={ca_bundle}"]
+    _docker(*args, str(ctx), quiet=not verbose)
+    _docker("push", tag, quiet=not verbose)
+    digests = _docker("inspect", "--format", "{{range .RepoDigests}}{{println .}}{{end}}", tag).split()
+    for d in digests:
+        if d.startswith(ref + "@sha256:"):
+            return d
+    raise ConfigError(f"pushed {tag} but found no digest for {ref} (got {digests})")
+
+
 def build_and_push(uc: ResolvedUseCase, repository: str, release_id: str, token: str,
                    base_image: str | None = None, verbose: bool = False, gcp=None, log=print) -> str:
     """Returns the pushed image as repository/name@sha256:digest.
@@ -116,30 +160,18 @@ def build_and_push(uc: ResolvedUseCase, repository: str, release_id: str, token:
     The tag is <release_id>-<context hash>, never moved (repositories with immutable tags work; contracts pin the
     digest anyway). Re-releasing the same commit with the same Pipewright and dependencies reuses the pushed
     image; a changed context (e.g. a Pipewright upgrade) gets its own tag."""
-    package = f"{uc.name}-components"
-    ref = f"{repository}/{package}"
     docker_login(repository.split("/", 1)[0], token)
     with tempfile.TemporaryDirectory(prefix="pipewright-build-") as tmp:
         ctx = build_context(uc, Path(tmp))
-        tag_name = f"{release_id}-{context_hash(ctx, release_id, uc.name, base_image or '')[:12]}"
-        tag = f"{ref}:{tag_name}"
-        if gcp is not None:
-            digest = existing_digest(gcp, repository, package, tag_name)
-            if digest:
-                log(f"component image {tag_name} already pushed: reusing it")
-                return f"{ref}@{digest}"
-        args = ["build", "-t", tag, "--build-arg", f"RELEASE_ID={release_id}", "--build-arg", f"USECASE={uc.name}"]
-        if base_image:
-            args += ["--build-arg", f"BASE_IMAGE={base_image}"]
-        ca_bundle = os.environ.get("PIPEWRIGHT_BUILD_CA_BUNDLE")
-        if ca_bundle:
-            if not Path(ca_bundle).is_file():
-                raise ConfigError(f"PIPEWRIGHT_BUILD_CA_BUNDLE is set but {ca_bundle} is not a file")
-            args += ["--secret", f"id=pip_ca,src={ca_bundle}"]
-        _docker(*args, str(ctx), quiet=not verbose)
-    _docker("push", tag, quiet=not verbose)
-    digests = _docker("inspect", "--format", "{{range .RepoDigests}}{{println .}}{{end}}", tag).split()
-    for d in digests:
-        if d.startswith(ref + "@sha256:"):
-            return d
-    raise ConfigError(f"pushed {tag} but found no digest for {ref} (got {digests})")
+        return _build_and_push(ctx, repository, f"{uc.name}-components", uc, release_id, base_image, verbose, gcp,
+                               log, "component image")
+
+
+def build_and_push_ray(uc: ResolvedUseCase, repository: str, release_id: str, token: str, base_image: str,
+                       verbose: bool = False, gcp=None, log=print) -> str:
+    """The use case's Ray image (<name>-ray), on the platform's Ray base image; same tagging as build_and_push."""
+    docker_login(repository.split("/", 1)[0], token)
+    with tempfile.TemporaryDirectory(prefix="pipewright-ray-build-") as tmp:
+        ctx = ray_build_context(uc, Path(tmp))
+        return _build_and_push(ctx, repository, f"{uc.name}-ray", uc, release_id, base_image, verbose, gcp, log,
+                               "Ray image")

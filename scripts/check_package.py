@@ -15,6 +15,7 @@ REQUIRED = [
     "pipewright/config/schemas/environment.schema.json",
     "pipewright/config/schemas/manifest.schema.json",
     "pipewright/config/schemas/reference.yaml",
+    "pipewright/build/templates/ray.Dockerfile",
     "pipewright/build/templates/components.Dockerfile",
     "pipewright/build/templates/pipewright_runtime.py",
     "pipewright/scaffold/ci_templates/action.yml",
@@ -28,6 +29,9 @@ REQUIRED = [
     "pipewright/examples/churn/data/sample_customers.csv",
     "pipewright/examples/minimal/example.yaml",
     "pipewright/examples/minimal/usecase.yaml.tmpl",
+    "pipewright/examples/ray/example.yaml",
+    "pipewright/examples/ray/usecase.yaml.tmpl",
+    "pipewright/examples/ray/components/ray_tune_job.py",
 ]
 FORBIDDEN = ("__pycache__", ".pyc", ".pipewright/", ".pytest_cache")
 

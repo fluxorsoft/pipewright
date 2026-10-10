@@ -1,0 +1,21 @@
+# The data contract: what a training file must look like. A file that breaks it stops the run before training.
+# `pipewright new-usecase --from-bq <project.dataset.table> --label <column>` drafts this file from a table.
+data:
+  contract:
+    columns:
+      - { name: customer_id,            type: string,  required: true }
+      - { name: snapshot_date,          type: date,    required: true }
+      - { name: tenure_months,          type: integer }
+      - { name: monthly_charges,        type: float }
+      - { name: total_charges,          type: float }
+      - { name: contract_length_months, type: integer }
+      - { name: num_support_tickets,    type: integer }
+      - { name: num_products,           type: integer }
+      - { name: has_paperless_billing,  type: integer }
+      - { name: avg_monthly_usage_gb,   type: float }
+      - { name: churned,                type: integer, allowed: [0, 1] }
+  label: { column: churned }             # what the model predicts: 0 or 1 for this example's model
+  split: { strategy: time, time_column: snapshot_date, validation_fraction: 0.15 }   # trials score on validation
+
+features:
+  exclude: [customer_id]                 # every other contract column except the label and time is a feature

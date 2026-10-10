@@ -81,6 +81,11 @@ def verify(contract: ReleaseContract, gcp: Gcp, creds) -> list[str]:
         passed.append("component image exists (by digest)")
     else:
         problems.append(f"component image not found: {contract.component_image}")
+    if contract.ray:
+        if image_exists(gcp, contract.ray["image"]):
+            passed.append(f"Ray image exists (by digest), for {', '.join(contract.ray['steps'])}")
+        else:
+            problems.append(f"Ray image not found: {contract.ray['image']}")
 
     for name in contract.pipeline_names:
         target = contract.pipeline(name)

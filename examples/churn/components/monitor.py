@@ -159,12 +159,11 @@ def request_retraining(
                                            usecase=ml_config["usecase"]).result(60)
             return f"proposed ({', '.join(fired)}): message {message_id}"
 
-        import google.auth.transport.requests
-        import google.oauth2.id_token
         import requests
+        from pipewright_runtime import id_token
 
         url = platform["launcher_url"].rstrip("/")
-        token = google.oauth2.id_token.fetch_id_token(google.auth.transport.requests.Request(), url)
+        token = id_token(url)              # also works on Agent Platform workers (by the account's name)
         r = requests.post(f"{url}/retraining/propose", data=json.dumps(body, default=str),
                           headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                           timeout=120)

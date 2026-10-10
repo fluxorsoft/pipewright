@@ -25,6 +25,7 @@ pipelines.inference.function: The name of the inference pipeline function in tha
 components: Where the pipeline components' code lives. It is built into the component image every step runs in.
 components.dir: The folder of component code, relative to the use case folder.
 components.requirements: The requirements file installed into the component image.
+components.ray_requirements: Extra packages for the use case's Ray image (the clusters' nodes), such as torch. The image is built at release on the platform's Ray base image, with the component code.
 framework: The ML framework of the component image.
 
 triggers: What starts a run, and which pipeline it starts.
@@ -51,6 +52,14 @@ resources_per_step.<name>.gpu.type: The accelerator type, for example NVIDIA_TES
 resources_per_step.<name>.gpu.count: How many accelerators.
 resources_per_step.<name>.retries: How many times a failed step is retried.
 resources_per_step.<name>.cache: Whether the step may reuse a cached result from an identical earlier run.
+resources_per_step.<name>.ray: A Ray on Vertex AI cluster for this step, for this run only. The launcher creates it, sized within the platform's limits, and deletes it when the step ends.
+resources_per_step.<name>.ray.head_machine: The head node's machine type, with at least 16 vCPUs and more than 18 GB (for example n1-standard-16). Left out, the first allowed machine type that is big enough.
+resources_per_step.<name>.ray.worker_machine: The worker nodes' machine type. Left out, the same as the head.
+resources_per_step.<name>.ray.workers: How many worker nodes, besides the head; 0 runs everything on the head. At most the platform's max_workers.
+resources_per_step.<name>.ray.accelerator: An accelerator on each worker (on the head when there are no workers), if the platform allows one.
+resources_per_step.<name>.ray.accelerator.type: The accelerator type, for example NVIDIA_TESLA_T4.
+resources_per_step.<name>.ray.accelerator.count: How many accelerators per node.
+resources_per_step.<name>.ray.max_minutes: The longest the cluster may live; after that, plus a grace period, the launcher removes it. At most the platform's limit.
 steps: Compute and behaviour per pipeline step, applied to the compiled pipeline; no pipeline code change needed.
 steps.<name>: A step, by its component name with dashes (train-model for train_model).
 steps.<name>.cpu: CPUs for the step, for example 4 or "500m".
@@ -60,6 +69,14 @@ steps.<name>.gpu.type: The accelerator type, for example NVIDIA_TESLA_T4.
 steps.<name>.gpu.count: How many accelerators.
 steps.<name>.retries: How many times a failed step is retried.
 steps.<name>.cache: Whether the step may reuse a cached result from an identical earlier run.
+steps.<name>.ray: A Ray on Vertex AI cluster for this step, for this run only. The launcher creates it, sized within the platform's limits, and deletes it when the step ends. The step itself takes no cpu, memory or gpu.
+steps.<name>.ray.head_machine: The head node's machine type, with at least 16 vCPUs and more than 18 GB (for example n1-standard-16). Left out, the first allowed machine type that is big enough.
+steps.<name>.ray.worker_machine: The worker nodes' machine type. Left out, the same as the head.
+steps.<name>.ray.workers: How many worker nodes, besides the head; 0 runs everything on the head. At most the platform's max_workers.
+steps.<name>.ray.accelerator: An accelerator on each worker (on the head when there are no workers), if the platform allows one.
+steps.<name>.ray.accelerator.type: The accelerator type, for example NVIDIA_TESLA_T4.
+steps.<name>.ray.accelerator.count: How many accelerators per node.
+steps.<name>.ray.max_minutes: The longest the cluster may live; after that, plus a grace period, the launcher removes it. At most the platform's limit.
 
 data: The data contract, the label and how data is split. Passed to pipelines in ml_config.
 data.contract: What the input data must look like. A run whose data breaks the contract stops before training.

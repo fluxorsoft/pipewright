@@ -97,6 +97,7 @@ src/pipewright/             the Python package, one subpackage per responsibilit
   scaffold/ci_templates/    GitHub Actions workflows written by `pipewright ci init`
 examples/churn/             the reference use case copied by `pipewright new-usecase`
 examples/minimal/           the churn training code with only the required configuration (example.yaml)
+examples/ray/               the churn training code with the tuning trials run in parallel on a Ray cluster
 images/launcher.Dockerfile  the launcher image, built from the wheel
 tests/                      offline unit tests (fakes for Google Cloud)
 scripts/                    check_package.py (wheel contents), smoke_test.sh (installed CLI, no cloud)
@@ -127,6 +128,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-11 | Sources may be CSV or Parquet on GCS, or BigQuery tables and views (`bq://`) | Met | `pipewright_runtime.read_source` |
 | FR-12 | Training: data contract checks, splits (random, stratified, time), tuning with parallel trials, experiments | Met | example, `config/ml.py` |
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
+| FR-45 | **Ray on Vertex AI inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
 | FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
 | FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
@@ -278,6 +280,8 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-74 | **One description per key, next to the schema.** `schemas/reference.yaml` holds one line per dotted use case key; it is merged into the schemas the editor reads and into `pipewright explain`, and a test fails when a key has no description or a description has no key | The schemas say what is valid, not what it means; one source keeps hover text, `explain` and the docs from drifting apart | Active (2026-10-09) |
 | D-75 | **Editor schemas are files in the MLOps repo**, `.pipewright-schemas/`, written by `pipewright schemas` and `new-usecase`, with a `yaml-language-server` line in each YAML file pointing at its schema by relative path | Works offline, in any editor that uses the YAML language server, and matches the installed Pipewright version; no hosted schema URL to keep in step | Active (2026-10-09) |
 | D-76 | **`--from-bq` drafts; it does not decide.** From the table come the columns, types, required columns, the label's 0/1 values, a time split when there is a date column, and non-numeric columns excluded from features. Ranges, allowed values, uniqueness and personal data are left to the team, with a note on columns that look like identifiers | The schema cannot know what a column means; a draft that guessed would be trusted without review | Active (2026-10-09) |
+| D-77 | **A Ray cluster per Ray step of a run, made by the launcher from the release.** The step names itself; the launcher checks the caller is the use case's runner, takes the size from the live contract (checked against the platform's limits at release) and the image from the release, and creates the cluster as the runner with the environment's key and network attachment. Requests travel like run requests (Pub/Sub inside a perimeter, with the runner's ID token; HTTP otherwise). Clusters carry run labels and a deadline; the tick deletes clusters of ended runs | Creating a cluster that runs as the runner needs permission to act as it, which the launcher has and tenants do not; sizing from the reviewed release means a request cannot ask for more | Active (2026-10-10) |
+| D-78 | **Standalone Ray clusters for development, a cluster per run for pipelines.** Data scientists develop on standalone clusters of their own (console, notebook, Ray Client); every Pipewright run gets its own cluster (D-77). Pipewright has no standing mode: `ray.mode` has one value, `per_run`. A Terraform-managed standing cluster would also wait for the Google provider (no Ray settings on `google_vertex_ai_persistent_resource`) or a GKE blueprint (KubeRay) | What is released, gated and audited runs on clusters Pipewright made for it; development stays free | Active (2026-10-10) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -290,7 +294,8 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 |---|---|
 | `config` | Load and merge files, JSON Schema validation, `${...}` references, ML defaults and cross-checks, resolution into `ResolvedUseCase`; `environment_from_manifest` for services with no repository |
 | `build` | Compile pipelines, patch `steps` into the compiled template, build the component image (injects `pipewright_runtime.py`) |
-| `checks` | `doctor`, the `kfp` pin check |
+| `checks` | `doctor`, the `kfp` and Ray client pin checks |
+| `ray_clusters` | Ray on Vertex AI: the platform's settings and limits and a step's cluster (`settings`), the launcher's create, delete and cleanup (`service`) |
 | `release` | Contract v3, pointers, template upload, verify gate, release and rollback |
 | `launcher` | Flask app, pure routing, live contract registry |
 | `adapters` | Orchestrator submit (`vertex`; `kfp` later), applying the manifest `security` block |
@@ -355,7 +360,8 @@ them (`retraining.when`, not `on`) and accepts `false` where `off` is meant (`re
 | `POST /pubsub/run` | The same body in a Pub/Sub push envelope; also carries retrain proposals (`kind: retrain.proposal`). Bad request: acknowledged and dropped. No live release: 503, retried then dead-lettered |
 | `POST /retraining/propose` | A retrain proposal sent directly: `{usecase, run_id, observation, champion}` |
 | `POST /retraining/decide` | A decision: pushed from an approver group's subscription (the message carries the person's ID token), or a direct call by the deciding identity for cases with no required groups |
-| `POST /retraining/tick` | Snooze and decline expiry, escalation; with `{"digest": true}` the weekly digest |
+| `POST /retraining/tick` | Snooze and decline expiry, escalation; with `{"digest": true}` the weekly digest; deletes Ray clusters of ended runs or past their deadline |
+| `POST /ray/clusters` | `{action: create or delete, usecase, run_id, step}` from the use case's runner identity: a Ray step's cluster, sized from the live release; also `kind: ray.cluster` on `/pubsub/run`, with the runner's `id_token` |
 | `GET /health` | Live use cases and their releases |
 
 - **Idempotent run IDs:** a landing run ID hashes the use case, bucket, object and generation. Schedules use their
@@ -371,6 +377,7 @@ them (`retraining.when`, not `on`) and accepts `false` where `off` is meant (`re
 - `bigquery_client`: queries with the environment's key.
 - `log`: labelled JSON lines.
 - `emit_event`: a log line plus a regional Pub/Sub publish. It never raises.
+- `ray_cluster`, `ray_job`: a Ray step's cluster for the run (asked of the launcher, deleted when the block ends) and a Ray job on it (needs `ray[default]` and `google-cloud-aiplatform[ray]` in the component image).
 
 ### 8.6 Events
 
@@ -454,7 +461,29 @@ The core has no private-network code paths of its own; it applies what the manif
   launcher, so the launcher can run with internal ingress only.
 - Regional Pub/Sub publishing everywhere.
 
-### 8.9 Plugins
+### 8.9 Ray clusters
+
+A step that declares `steps.<step>.ray` gets a Ray on Vertex AI cluster for one run (D-77):
+
+1. **Release:** the step's cluster is resolved and checked against the platform's limits (manifest `ray`, the
+   tenant's `ray` over the environment's). `release` builds the use case's Ray image (`<name>-ray`, from
+   `ray.Dockerfile`: the platform's Ray base image, the component code on `PYTHONPATH`, `components.ray_requirements`)
+   and records `ray {image, ray_version, steps}` in the contract.
+2. **Run:** `ray_cluster()` asks the launcher to create the cluster, waits for it to run, yields its name, and asks
+   for its deletion when the block ends. Cluster IDs are deterministic (use case, run, step), so retries reuse one.
+3. **Launcher:** checks the caller is the runner, builds the persistent resource from the contract (pools, the Ray
+   image, the runner identity, CMEK from `security.kms_key`, the PSC interface from `ray.network_attachment`, labels
+   with the run and a deadline of `max_minutes` plus 30 minutes) and emits `ray.cluster.created` with what it used.
+4. **Cleanup:** the tick deletes Pipewright clusters whose run ended, whose deadline passed, or whose run ID no
+   pipeline job has.
+
+**Platform prerequisites:** the launcher's identity needs `aiplatform.persistentResources.create`, `delete`, `get` and `list` (a custom role: `roles/aiplatform.user` only gets and lists); each tenant runner needs, on itself, `roles/iam.serviceAccountUser` (to reach its own cluster's job API) and `roles/iam.serviceAccountOpenIdTokenCreator` (the step signs its own ID token through the IAM Credentials API: the metadata server's identity endpoint on Agent Platform workers refuses tokens on some workers). A Ray head needs at least 16 vCPUs (with 8, the cluster runs but its job API and Ray Client endpoint never answer). The open-source starter grants none of this (it stays unchanged); Enterprise Terraform grants all of it. Found live on 2026-10-10, with two more: a step with its own `cpu` or `memory` (or any `resources` block, even empty) runs where the metadata server issues no ID tokens, so Ray steps take no size and `steps` only writes a `resources` block for cpu, memory or a GPU; and a release reuses a contract only when its images and compiled templates are unchanged.
+
+Without a `ray` block in the manifest, Ray is on with defaults (public endpoint, the runner identity, a prebuilt
+image, at most 2 workers on n1-standard-4 or -8, 120 minutes). A private blueprint writes `ray.enabled: false`
+unless its platform file turns Ray on. `ray.mode` accepts only `per_run` (D-78).
+
+### 8.10 Plugins
 
 Entry point group `pipewright.commands`; each entry point is a callable `register(subparsers, common)` that adds
 subcommands. Plugin API v1. A plugin that fails to load is skipped with a warning; `pipewright plugins` lists what
@@ -489,6 +518,7 @@ launcher directly from inside the network), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and th
 | `approver_groups` | `{name: {topic, subscription, description?}}` |
 | `observability` | `events_topic`, `evidence_dataset`, `evidence_uri`, `log_sinks`, `otlp_endpoint` |
 | `security` | `kms_key`, `bigquery_kms_key`, `network`, `reserved_ip_ranges`, `perimeter` |
+| `ray` (optional; also per tenant, `tenants.<t>.ray`) | `enabled`, `mode` (`per_run`), `ray_version`, `python_version`, `image`, `network_attachment`, `limits{max_workers, machines, accelerators, max_minutes}` |
 
 **Compatibility rule:** additive, optional fields only. The schema forbids unknown properties, so the launcher and
 CLI must be upgraded **before** a platform publishes new fields (R-05).
@@ -576,7 +606,7 @@ Changes that affect behaviour on Google Cloud should also be exercised against a
 | Promotion of a release between environments by digest (FR-29) | Planned |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |
-| Ray on Vertex AI as compute inside the full Pipewright lifecycle, with releases, gates, the registry and monitoring as today: a cluster per Ray step, created and deleted by the launcher within limits the platform sets in the manifest (an optional `ray` block; without it, the runner identity, a prebuilt Ray image and conservative sizes, so the starter needs no change), cleaned up by run label if a step is killed | Next |
+| Ray on Vertex AI, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
 | Iceberg (BigLake) tables for row-level deletes | Design only |
 | Feature store integration | Under review |

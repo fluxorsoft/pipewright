@@ -201,3 +201,23 @@ def test_compile_all_pipelines_with_steps_and_ml_config(repo):
     uc = resolve_usecase(path, load_environment(repo.root, "dev"))
     with pytest.raises(ConfigError, match="steps: no task named evaluate"):
         compile_all(uc)
+
+
+def test_steps_without_a_size_get_no_resources_block():
+    """Agent Platform runs a step with any resources block (even empty) on its sized-step backend, where the metadata
+    server issues no ID tokens: only cpu, memory or a GPU may add one."""
+    from pipewright.build.spec_patch import apply_steps
+
+    def spec():
+        return {"root": {"dag": {"tasks": {"tune": {"componentRef": {"name": "comp-tune"},
+                                                    "taskInfo": {"name": "tune"}}}}},
+                "components": {"comp-tune": {"executorLabel": "exec-tune"}},
+                "deploymentSpec": {"executors": {"exec-tune": {"container": {"image": "i"}}}}}
+
+    s = spec()
+    apply_steps(s, {"tune": {"retries": 1, "cache": False, "ray": {"workers": 1}}})
+    assert "resources" not in s["deploymentSpec"]["executors"]["exec-tune"]["container"]
+    assert s["root"]["dag"]["tasks"]["tune"]["retryPolicy"]["maxRetryCount"] == 1
+    s = spec()
+    apply_steps(s, {"tune": {"cpu": 2}})
+    assert s["deploymentSpec"]["executors"]["exec-tune"]["container"]["resources"]["cpuLimit"] == 2.0

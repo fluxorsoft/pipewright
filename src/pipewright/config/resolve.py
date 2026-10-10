@@ -152,6 +152,11 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         requirements = (directory / eff["components"]["requirements"]).resolve()
         if not requirements.is_file():
             problems.append(f"components.requirements not found: {eff['components']['requirements']}")
+    ray_requirements = None
+    if eff["components"].get("ray_requirements"):
+        ray_requirements = (directory / eff["components"]["ray_requirements"]).resolve()
+        if not ray_requirements.is_file():
+            problems.append(f"components.ray_requirements not found: {eff['components']['ray_requirements']}")
 
     # Tables.
     tables: dict[str, Table] = {}
@@ -200,6 +205,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                         "registry.set_default (it then follows the approval) or set promote_model: auto")
 
     steps = deep_merge(eff.get("resources_per_step", {}), eff.get("steps", {}))
+    ray = _ray(steps, tenant, env, problems)
 
     # Where tables are written (section 7.4): BigQuery, Parquet on GCS, or both.
     outputs_cfg = eff.get("outputs", {})
@@ -240,9 +246,24 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   "events_topic": env.observability.get("events_topic"),
                   "run_requests_topic": env.launcher.get("run_requests_topic"),
                   "kms_key": env.security.get("kms_key"),
-                  "bigquery_kms_key": env.security.get("bigquery_kms_key")},
-        outputs=outputs,
+                  "bigquery_kms_key": env.security.get("bigquery_kms_key"),
+                  **({"ray": ray} if ray else {})},
+        outputs=outputs, ray_requirements=ray_requirements,
     )
+
+
+def _ray(steps: dict, tenant: str, env: Environment, problems: list[str]) -> dict | None:
+    """Ray steps against the platform's limits: {mode, ray_version, python_version, steps}, or None without any."""
+    from pipewright.ray_clusters import settings as ray_settings
+
+    if not any(isinstance(cfg, dict) and "ray" in cfg for cfg in steps.values()):
+        return None
+    settings = ray_settings.platform_settings(env.ray or None, (env.tenants.get(tenant) or {}).get("ray"),
+                                              private=bool(env.security.get("network")))
+    clusters, found = ray_settings.resolve_steps(steps, settings)
+    problems += found
+    return {"mode": settings["mode"], "ray_version": settings["ray_version"],
+            "python_version": settings["python_version"], "steps": clusters}
 
 
 def _retraining_policy(retraining: dict, approvals: dict, env: Environment, problems: list[str]) -> None:

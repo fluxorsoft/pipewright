@@ -1,0 +1,9 @@
+# The Ray example: the churn example's training code, with the tuning trials run in parallel on a Ray on Vertex AI
+# cluster that exists only for that step of the run. `pipewright new-usecase --from ray` copies these paths from
+# the churn example, then this folder's files (which replace components/requirements.txt).
+code_from: churn
+code:
+  - components/
+  - schemas/raw_customers.json
+  - schemas/model_metrics.json
+  - data/sample_customers.csv

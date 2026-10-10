@@ -54,6 +54,12 @@ class ResolvedUseCase:
     platform: dict = field(default_factory=dict)  # launcher_url, project, region, bigquery_dataset, events_topic,
     #                                               run_requests_topic, kms_key
     outputs: dict = field(default_factory=dict)   # store, gcs {format, external_tables, uri}, tables {name: fields}
+    ray_requirements: Path | None = None           # extra packages for the Ray image (components.ray_requirements)
+
+    @property
+    def ray(self) -> dict | None:
+        """Ray steps and settings ({mode, ray_version, python_version, steps}), or None when no step uses Ray."""
+        return self.platform.get("ray")
 
     # Older single-pipeline accessors (training).
     @property

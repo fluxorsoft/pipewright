@@ -5,6 +5,7 @@ release: tables sync -> component image -> compile + upload templates -> contrac
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 import time
@@ -81,6 +82,21 @@ class ReleaseResult:
     checks: list[str]
 
 
+def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp, log) -> str:
+    """The use case's Ray image, on the base image the platform set for its tenant."""
+    from pipewright.ray_clusters import settings as ray_settings
+
+    settings = ray_settings.platform_settings(env.ray or None, (env.tenants.get(uc.tenant) or {}).get("ray"),
+                                              private=bool(env.security.get("network")))
+    gpu = any(c.get("accelerator") for c in uc.ray["steps"].values())
+    base = ray_settings.base_image(settings, env.region, gpu)
+    log(f"building Ray image on {base} (docker)...")
+    image = images.build_and_push_ray(uc, env.artifact_registry["docker"], release_id, _token(gcp), base, gcp=gcp,
+                                      log=log)
+    log(f"Ray image: {image}")
+    return image
+
+
 def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, component_image: str | None = None,
             skip_tables: bool = False, build_dir: Path | None = None, log=print) -> ReleaseResult:
     gcp = gcp or Gcp()
@@ -103,30 +119,43 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
         component_image = images.build_and_push(uc, env.artifact_registry["docker"], release_id, _token(gcp),
                                                 gcp=gcp, log=log)
         log(f"component image: {component_image}")
+    ray_image = _ray_image(uc, env, release_id, gcp, log) if uc.ray else None
 
-    # Contracts are write-once (evidence points at them). The same commit with the same image is a retry: reuse
-    # the contract. The same commit with a different image (e.g. a Pipewright upgrade) is a new release.
+    # Contracts are write-once (evidence points at them). The same commit with the same images and templates is a
+    # retry: reuse the contract. The same commit with anything different (e.g. a Pipewright upgrade that changes an
+    # image or how templates compile) is a new release. Templates are compared by digest, the sha256 of the file.
+    out_dir = build_dir or (uc.directory / ".pipewright" / "build")
+    infos = publish.compile_pinned(uc, component_image, out_dir)
+    digests = {n: "sha256:" + hashlib.sha256(info.spec_path.read_bytes()).hexdigest() for n, info in infos.items()}
+
+    def same(c: ReleaseContract) -> bool:
+        released = {n: c.pipeline(n).template_digest for n in c.pipeline_names}
+        return (c.component_image == component_image and (c.ray or {}).get("image") == ray_image
+                and released == digests)
+
     existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
     existing = ReleaseContract.from_json(existing_text) if existing_text else None
-    if existing is not None and existing.component_image != component_image:
-        release_id = f"{release_id}-{component_image.rsplit(':', 1)[-1][:8]}"
-        log(f"release {uc.name}: same commit, new component image: released as {release_id}")
+    if existing is not None and not same(existing):
+        what = "|".join([component_image, ray_image or "", *(f"{n}={d}" for n, d in sorted(digests.items()))])
+        release_id = f"{release_id}-{hashlib.sha256(what.encode()).hexdigest()[:8]}"
+        log(f"release {uc.name}: same commit, new images or templates: released as {release_id}")
         existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
         existing = ReleaseContract.from_json(existing_text) if existing_text else None
+        if existing is not None and not same(existing):
+            raise ConfigError(f"contract {release_id} of {uc.name} exists but differs from this build")
 
     name = contract_name(uc.name, release_id)
     if existing is not None:
         contract = existing
-        log(f"contract {release_id} already published with this image: reusing it")
+        log(f"contract {release_id} already published with these images and templates: reusing it")
     else:
-        out_dir = build_dir or (uc.directory / ".pipewright" / "build")
-        infos = publish.compile_pinned(uc, component_image, out_dir)
         uploaded = {}
         for pipeline, info in infos.items():
             uploaded[pipeline] = publish.upload_template(info, env.artifact_registry["kfp"], uc, release_id,
                                                          gcp.session.credentials)
             log(f"template ({pipeline}): {uploaded[pipeline][0]}")
-        contract = publish.build_contract(uc, env, infos, uploaded, component_image, release_id, commit)
+        contract = publish.build_contract(uc, env, infos, uploaded, component_image, release_id, commit,
+                                          ray_image=ray_image)
         try:
             gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
         except PreconditionFailed:

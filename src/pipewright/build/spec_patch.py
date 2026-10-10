@@ -54,8 +54,12 @@ def apply_steps(spec: dict, steps: dict) -> list[str]:
             if label is None:
                 raise ConfigError(f"steps.{step}: {display} is a group (loop or condition), not a step")
             container = executors[label]["container"]
-            res = container.setdefault("resources", {}) or {}
-            container["resources"] = res
+            # Only a step that sets cpu, memory or a GPU gets a resources block: Agent Platform runs any step with one
+            # (even empty) on its sized-step backend, where the metadata server issues no ID tokens.
+            sizing = any(k in settings for k in ("cpu", "memory", "gpu"))
+            res = (container.setdefault("resources", {}) or {}) if sizing else (container.get("resources") or {})
+            if sizing:
+                container["resources"] = res
             if "cpu" in settings:
                 res["cpuLimit"] = float(settings["cpu"])
                 res["resourceCpuLimit"] = str(settings["cpu"])

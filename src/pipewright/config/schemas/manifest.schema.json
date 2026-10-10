@@ -211,6 +211,17 @@
             ],
             "pattern": "^projects/[^/]+/subscriptions/[^/]+$",
             "description": "subscription with this tenant's retrain decision events (use cases opt in with retraining.decisions.publish)"
+          },
+          "ray": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ray"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "this tenant's Ray settings, over the environment's"
           }
         }
       }
@@ -332,6 +343,98 @@
           },
           "description": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "ray": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ray"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "ray": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Ray on Vertex AI clusters for use cases' Ray steps (optional; without it: a cluster per run, the runner identity, a prebuilt image, public endpoint, small limits)",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "false: no Ray clusters in this environment (or for this tenant)"
+        },
+        "mode": {
+          "enum": [
+            "per_run"
+          ],
+          "description": "per_run: a cluster per Ray step of a run, created and deleted by the launcher (standing clusters are planned)"
+        },
+        "ray_version": {
+          "enum": [
+            "2.33",
+            "2.42",
+            "2.47"
+          ]
+        },
+        "python_version": {
+          "enum": [
+            "3.10",
+            "3.11"
+          ]
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "base image for use cases' Ray images (default: the prebuilt Ray on Vertex AI image)"
+        },
+        "network_attachment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[^/]+/regions/[^/]+/networkAttachments/[^/]+$",
+          "description": "Private Service Connect interface for clusters (private environments)"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "what a use case's Ray step may ask for",
+          "properties": {
+            "max_workers": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "most worker nodes in one cluster"
+            },
+            "machines": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "machine types allowed for head and worker nodes"
+            },
+            "accelerators": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "accelerator types allowed (empty: none)"
+            },
+            "max_minutes": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 1440,
+              "description": "longest a cluster may live; cleanup removes it after this plus a grace period"
+            }
           }
         }
       }

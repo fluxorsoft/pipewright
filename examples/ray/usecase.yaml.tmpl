@@ -1,0 +1,57 @@
+# {{usecase}}: created from the Pipewright Ray example (pipewright new-usecase --from ray).
+# The minimal example plus tuning on Ray: the tuning trials run in parallel on a Ray on Vertex AI cluster that
+# exists only while the tune-on-ray step of a run is running. The cluster's size is steps.tune-on-ray.ray, within
+# the limits your platform team sets; `pipewright explain steps.<name>.ray` lists the settings.
+apiVersion: pipewright/v1
+kind: UseCase
+metadata:
+  name: {{usecase}}
+  owner: {{owner}}
+
+spec:
+  tenant: {{tenant}}                      # given to you by the platform team
+  include: [config/*.yaml]               # config/data.yaml: the data contract, label and split
+
+  pipelines:
+    training: { file: training_pipeline.py, function: churn_ray_training_pipeline }
+  components:
+    dir: components/
+    requirements: components/requirements.txt     # the step images, with the Ray client
+    ray_requirements: ray-requirements.txt        # extra packages for the cluster's nodes
+
+  model:
+    name: {{model_name}}
+
+  triggers:
+    landing: { suffixes: [.csv], pipeline: training }   # a CSV under your landing prefix trains
+    api: true                            # or `pipewright run --source-uri gs://... or bq://...`
+
+  parameters:                            # the training pipeline's own parameters
+    bq_dataset: ${resources.bigquery_dataset}
+    model_display_name: ${model.name}
+    raw_table: {{table_prefix}}raw_customers
+    metrics_table: {{table_prefix}}model_metrics
+
+  steps:
+    tune-on-ray:                         # the step itself only submits the job and waits: size the cluster
+      ray: { head_machine: n1-standard-16, worker_machine: n1-standard-4, workers: 1 }   # a Ray head needs 16 vCPUs
+
+  training:
+    hyperparameters: { hidden_units: 32, epochs: 40, learning_rate: 0.003, dropout: 0.1 }   # trial 1, and the defaults
+    tuning:
+      enabled: true
+      max_trials: 8                      # the first trial is always the defaults
+      search_space:
+        learning_rate: { type: double, min: 0.0005, max: 0.02, scale: log }
+        hidden_units:  { type: discrete, values: [16, 32, 64] }
+        dropout:       { type: double, min: 0.0, max: 0.3 }
+
+  evaluation:
+    gates:
+      - { metric: auc, min: 0.7 }        # a model below this is not registered
+
+  outputs:                               # tables the pipeline writes, created by `pipewright tables sync`
+    bigquery:
+      tables:
+        {{table_prefix}}raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
+        {{table_prefix}}model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }

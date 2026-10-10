@@ -34,11 +34,14 @@ def cmd_validate(args) -> int:
     for name, path in selected.items():
         try:
             uc = resolve_usecase(path, env)
-            from pipewright.checks import kfp_version
+            from pipewright.checks import kfp_version, ray_version
 
             pin = kfp_version.check(uc)
             if not pin.ok:
                 raise ConfigError(f"kfp version: {pin.message}", source=f"{path} ({env.name})")
+            ray_pin = ray_version.check(uc)
+            if not ray_pin.ok:
+                raise ConfigError(f"ray version: {ray_pin.message}", source=f"{path} ({env.name})")
             print(f"OK    {name} ({env.name})")
         except ConfigError as e:
             failed += 1

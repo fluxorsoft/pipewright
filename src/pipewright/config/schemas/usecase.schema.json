@@ -63,7 +63,8 @@
           "required": ["dir"],
           "properties": {
             "dir": { "type": "string", "minLength": 1 },
-            "requirements": { "type": "string", "minLength": 1 }
+            "requirements": { "type": "string", "minLength": 1 },
+            "ray_requirements": { "type": "string", "minLength": 1 }
           }
         },
         "framework": { "enum": ["pytorch"] },
@@ -253,7 +254,26 @@
             }
           },
           "retries": { "type": "integer", "minimum": 0, "maximum": 10 },
-          "cache": { "type": "boolean" }
+          "cache": { "type": "boolean" },
+          "ray": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "head_machine": { "type": "string", "minLength": 1 },
+              "worker_machine": { "type": "string", "minLength": 1 },
+              "workers": { "type": "integer", "minimum": 0 },
+              "accelerator": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "count"],
+                "properties": {
+                  "type": { "type": "string", "minLength": 1 },
+                  "count": { "type": "integer", "minimum": 1 }
+                }
+              },
+              "max_minutes": { "type": "integer", "minimum": 5 }
+            }
+          }
         }
       }
     },

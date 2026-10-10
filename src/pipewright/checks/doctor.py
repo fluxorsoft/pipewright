@@ -230,8 +230,16 @@ def _check_template(uc: ResolvedUseCase, report: Report) -> None:
     from pipewright.checks import kfp_version
 
     s = f"Pipelines of {uc.name} ({', '.join(uc.pipelines)})"
+    from pipewright.checks import ray_version
+
     pin = kfp_version.check(uc)
     report.add(s, Result(INFO if pin.skipped else (OK if pin.ok else FAIL), "kfp version", pin.message))
+    if uc.ray:
+        ray_pin = ray_version.check(uc)
+        report.add(s, Result(OK if ray_pin.ok else FAIL, "ray version", ray_pin.message))
+        sizes = ", ".join(f"{step}: head {c['head_machine']} + {c['workers']} x {c['worker_machine']}"
+                          for step, c in uc.ray["steps"].items())
+        report.add(s, Result(OK, "ray clusters", f"a cluster per run ({sizes}), Ray {uc.ray['ray_version']}"))
     try:
         infos = compile_all(uc)          # also applies `steps`: an unknown step name fails here
     except ConfigError as e:

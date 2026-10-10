@@ -45,7 +45,8 @@ def upload_template(info: TemplateInfo, kfp_repository: str, uc: ResolvedUseCase
 
 
 def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, TemplateInfo], uploaded: Uploaded,
-                   component_image: str, release_id: str, source_commit: str | None) -> ReleaseContract:
+                   component_image: str, release_id: str, source_commit: str | None,
+                   ray_image: str | None = None) -> ReleaseContract:
     experiment = uc.ml["training"]["experiment"]["name"] if uc.ml else None
     pipelines = {
         name: {"pipeline_name": info.name, "template_uri": uploaded[name][0], "template_digest": uploaded[name][1],
@@ -85,6 +86,8 @@ def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, Templ
         pipelines=pipelines,
         metadata={"owner": uc.owner, "objective": uc.objective, "description": uc.description,
                   "contacts": list(uc.contacts), "model": uc.model["name"]},
+        ray=({"image": ray_image, "ray_version": uc.ray["ray_version"], "steps": uc.ray["steps"]}
+             if uc.ray and ray_image else {}),
     )
     contract.validate()
     return contract

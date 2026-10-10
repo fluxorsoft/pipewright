@@ -1,0 +1,5 @@
+# Extra packages for the Ray image (the cluster's nodes), on top of the platform's Ray base image. The component
+# code (mlkit, churn_net, ray_tune_job) is added by `pipewright release`.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
+google-cloud-storage>=2.18,<4

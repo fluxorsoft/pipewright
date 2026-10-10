@@ -30,6 +30,7 @@ YAML
 "$PW" --version
 "$PW" new-usecase --name smoke-churn --tenant smoke --owner smoke-team
 "$PW" new-usecase --name smoke-lite --tenant smoke --owner smoke-team --from minimal
+"$PW" new-usecase --name smoke-ray --tenant smoke --owner smoke-team --from ray
 test -f .pipewright-schemas/usecase.schema.json
 "$PW" explain data.split.strategy | grep -q "allowed:   random, stratified, time"
 "$PW" validate --env dev

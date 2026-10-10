@@ -50,6 +50,8 @@ team-mlops/
 Tables live in BigQuery by default. `outputs.store: gcs` writes them as Parquet under your tenant's outputs
 location instead (with BigQuery external tables of the same names, so SQL keeps working), and `both` does both.
 
+A step that needs a Ray cluster sets `steps.<step>.ray` (machines and workers, within limits the platform team sets in the manifest's `ray` block) and wraps its work in `with ray_cluster(ml_config, "<step>", run_id)`; the cluster exists only for that step of that run. The README's "Ray steps" has the details.
+
 Your pipeline and component code is yours: file names, libraries and models are your choice. The contract is
 small (see the README, "Your code and Pipewright"): the four launcher parameters, the component image, and an
 evaluation record (`evaluation.json` next to the model) from which Pipewright re-checks your gates before a
@@ -79,7 +81,7 @@ TLS-intercepting proxy also set `REQUESTS_CA_BUNDLE`.
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `pipewright new-usecase --name <usecase> --tenant <tenant> --owner <team>` | Copies the churn example: two pipelines, components, config, schemas, tests, sample data. Table names get the prefix `<usecase>_`. `--from minimal` starts smaller (training only, required keys only); `--from-bq <project.dataset.table> --label <column>` also drafts the data contract from a BigQuery table |
+| 1 | `pipewright new-usecase --name <usecase> --tenant <tenant> --owner <team>` | Copies the churn example: two pipelines, components, config, schemas, tests, sample data. Table names get the prefix `<usecase>_`. `--from minimal` starts smaller (training only, required keys only); `--from-bq <project.dataset.table> --label <column>` also drafts the data contract from a BigQuery table; `--from ray` runs the tuning trials on a Ray cluster made for each run |
 | 2 | edit `config/`, `usecase.yaml`, components | Your data contract, features, gates, monitoring; your model code |
 | 2b | `pipewright test --env <env>` | Runs `tests.command` (the example's helper unit tests) |
 | 3 | `pipewright validate --env <env>` | Schema, overrides, references, files, table schemas |

@@ -42,7 +42,20 @@ First open-source release.
 - **Data contract from BigQuery** (`new-usecase --from-bq <project.dataset.table> --label <column>`): drafts
   `config/data.yaml` and the raw table's schema from a table or view.
 
+- **Ray on Vertex AI steps.** `steps.<step>.ray` gives a step a Ray cluster for one run, within the platform's
+  limits (manifest `ray`, per environment and tenant), created by the launcher as the runner identity with the
+  environment's key and Private Service Connect network attachment, and always deleted (by the step, or by the
+  launcher's tick). `pipewright release` builds the use case's Ray image; `ray_cluster()` and `ray_job()` in the
+  component runtime; a Ray client version check; `new-usecase --from ray`; a `ray.cluster.created` event records
+  what each cluster used.
+
 ### Fixed
+
+- **Steps with only `retries` or `cache`** no longer get an empty `resources` block in the compiled template: Agent
+  Platform ran them on its sized-step backend, where the metadata server issues no ID tokens.
+- **A release reuses a contract only when its images and compiled templates are unchanged**, so a Pipewright
+  upgrade that changes how templates compile is released (as `<commit>-<hash>`) instead of silently reusing the old
+  template.
 
 - A pipeline job that cannot join its Agent Platform experiment (for example in a new project) is reported as
   submitted with a warning, instead of failing the trigger and being retried as a duplicate.

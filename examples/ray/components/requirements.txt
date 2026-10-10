@@ -1,0 +1,22 @@
+# Runtime dependencies of the pipeline component image.
+# kfp must match the version used to compile the pipeline (mlops/requirements-dev.txt).
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+kfp==2.17.0
+google-cloud-aiplatform[ray]==2.3.0
+google-cloud-bigquery==3.46.1
+google-cloud-storage>=2.18,<4
+# Retrain requests over Pub/Sub in private environments (monitor.py).
+google-cloud-pubsub>=2.23,<3
+pandas==2.2.3
+pyarrow==18.1.0
+db-dtypes==1.3.1
+numpy==2.1.3
+# CPU-only wheel. Must match the Agent Platform prebuilt serving image in register.py
+# (pytorch-cpu.2-4) so the TorchScript model loads in the serving runtime.
+torch==2.4.1+cpu
+# Packages model.pt + handler into the model.mar TorchServe expects.
+torch-model-archiver==0.12.0
+# The Ray client: submits the tuning job to the run's cluster. Must match the platform's Ray version (2.47 by
+# default); `pipewright validate` checks it.
+ray[default]==2.47.1
