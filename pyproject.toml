@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Rakesh Gupta", email = "rakesh.gupta@fluxorsoft.com" }]
-maintainers = [{ name = "Fluxor Software Limited", email = "rakesh.gupta@fluxorsoft.com" }]
+authors = [{ name = "Fluxor Software Limited", email = "enterprise@fluxorsoft.com" }]
+maintainers = [{ name = "Fluxor Software Limited", email = "enterprise@fluxorsoft.com" }]
 keywords = ["mlops", "google-cloud", "vertex-ai", "kubeflow-pipelines", "machine-learning", "governance"]
 classifiers = [
     "Development Status :: 3 - Alpha",
