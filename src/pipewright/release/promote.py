@@ -26,6 +26,7 @@ from pipewright.release import publish
 from pipewright.release.contract import ReleaseContract, contract_name, new_pointer, pointer_name
 from pipewright.release.service import _git, _quiet, read_contract, read_pointer
 from pipewright.release.verify import verify
+from pipewright.tables import sync as tables_sync
 
 GCS = "https://storage.googleapis.com/storage/v1"
 _MANIFEST_TYPES = ", ".join([
@@ -211,6 +212,16 @@ def _objects(gcp: Gcp, uri: str) -> list[dict]:
             return [dict(o, bucket=bucket, relative=o["name"][len(prefix):]) for o in out]
 
 
+def _sha256(gcp: Gcp, bucket: str, name: str) -> str:
+    h = hashlib.sha256()
+    r = gcp.session.get(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}", params={"alt": "media"}, stream=True, timeout=600)
+    if r.status_code != 200:
+        raise ConfigError(f"cannot read gs://{bucket}/{name}: {r.status_code}")
+    for chunk in r.iter_content(1 << 20):
+        h.update(chunk)
+    return "sha256:" + h.hexdigest()
+
+
 def copy_model_files(gcp: Gcp, source_uri: str, dest_uri: str, log=print) -> list[dict]:
     """Copies every file under the model's artifact URI (rewrite API: the destination bucket's key applies) and
     checks each copy's CRC32C, which does not depend on the key. Returns [{file, crc32c, size}]."""
@@ -234,10 +245,18 @@ def copy_model_files(gcp: Gcp, source_uri: str, dest_uri: str, log=print) -> lis
             body = r.json()
             token = body.get("rewriteToken")
             done = body.get("resource") if body.get("done") else None
-        if done.get("crc32c") != f.get("crc32c"):
-            raise ConfigError(f"{dname}: checksum {done.get('crc32c')} after copying, {f.get('crc32c')} before")
-        copied.append({"file": f["relative"], "crc32c": f["crc32c"], "size": f.get("size")})
-    log(f"model files: {len(copied)} copied to {dest_uri}, checksums equal")
+        entry = {"file": f["relative"], "crc32c": done.get("crc32c"), "size": f.get("size")}
+        if f.get("crc32c"):
+            if done.get("crc32c") != f["crc32c"]:
+                raise ConfigError(f"{dname}: checksum {done.get('crc32c')} after copying, {f['crc32c']} before")
+        else:
+            # Some writers (e.g. a FUSE mount) leave no stored checksum: compare the bytes themselves.
+            before, after = _sha256(gcp, f["bucket"], f["name"]), _sha256(gcp, dbucket, dname)
+            if before != after:
+                raise ConfigError(f"{dname}: SHA-256 {after} after copying, {before} before")
+            entry["sha256"] = after
+        copied.append(entry)
+    log(f"model files: {len(copied)} copied to {dest_uri}, contents verified")
     return copied
 
 
@@ -325,7 +344,7 @@ def _check_checkout(uc: ResolvedUseCase, commit: str | None) -> None:
 
 def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp: Gcp | None = None,
             release_id: str | None = None, model_version: str | None = None, accept_template_change: bool = False,
-            build_dir: Path | None = None, log=print) -> Promotion:
+            skip_tables: bool = False, approve: bool = False, build_dir: Path | None = None, log=print) -> Promotion:
     gcp = gcp or Gcp()
     who = gcp.identity()
 
@@ -388,7 +407,26 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     policy.append("templates equal to the source's with the registry address rewritten" if not differences else
                   f"template differences accepted by {who}: {sum(len(d) for d in differences.values())}")
 
-    # 5. Copy and verify the images.
+    # Model Registry makes a model's first version its default. Under a manual approval policy that version must be
+    # approved explicitly, by the promoter, as part of the promotion (recorded); it is refused before any copy.
+    first_version = mode == "model" and _find_model(gcp, dst_env, uc_dst.model["name"]) is None
+    manual = uc_dst.approvals.get("promote_model", "manual") != "auto"
+    if first_version and manual and not approve:
+        raise ConfigError(f"{uc_dst.model['name']} has no version in {dst_env.name} yet, and Model Registry makes a "
+                          "model's first version its default: approvals.promote_model is manual there, so approve it "
+                          "with this promotion (--approve, recorded as your approval); nothing was promoted")
+    if first_version:
+        policy.append(f"first version in {dst_env.name}: approved by {who} with the promotion"
+                      if manual else f"first version in {dst_env.name}: the default (promote_model auto)")
+
+    # 5. The destination's tables, as a release creates them (configuration, additive only).
+    if not skip_tables:
+        results = tables_sync.sync(uc_dst, dst_env, gcp)
+        log(tables_sync.render(results, uc_dst, dry_run=False))
+        if any(r.error or r.plan.action == "blocked" for r in results):
+            raise ConfigError(f"tables sync in {dst_env.name} failed: fix the table plan; nothing was promoted")
+
+    # 5b. Copy and verify the images.
     copy_image(gcp, source.component_image, dst_image, log)
     if dst_ray:
         copy_image(gcp, source.ray["image"], dst_ray, log)
@@ -429,6 +467,11 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
         raise ConfigError(f"the {dst_env.name} pointer of {uc_dst.name} moved while promoting; the contract is "
                           "written but not live. Re-run to finish.") from None
     log(f"live in {dst_env.name}: {rid}" + (f" (was {pointer.release_id})" if pointer else " (first release)"))
+    if model and first_version and manual:
+        events.emit(events.event("model.approved", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None,
+                                 model=model["name"], version=model["version"], previous=None, by=who,
+                                 via="promotion", source_environment=src_env.name), dst_env.observability.get(
+                                     "events_topic"), gcp, stream=_quiet(), region=dst_env.region)
     events.emit(events.event("release.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None, by=who,
                              previous=pointer.release_id if pointer else None, source_environment=src_env.name,
                              source_contract_sha256=source_sha, component_image=dst_image,

@@ -377,7 +377,7 @@ def cmd_promote(args) -> int:
     path = _selected(root, [args.usecase])[args.usecase]
     src, dst = load_environment(root, args.source), load_environment(root, args.to)
     result = promote.promote(path, src, dst, release_id=args.release, model_version=args.model_version,
-                             accept_template_change=args.accept_template_change)
+                             accept_template_change=args.accept_template_change, approve=args.approve)
     if result.unchanged:
         return 0
     for c in result.checks:
@@ -490,6 +490,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--model-version", help="the source model version (default: its default, approved version)")
     sp.add_argument("--accept-template-change", action="store_true",
                     help="promote even if the destination compiles the pipelines differently (recorded)")
+    sp.add_argument("--approve", action="store_true",
+                    help="approve the model as part of the promotion (needed for a model's first version under a "
+                         "manual approval policy; recorded)")
     sp.set_defaults(func=cmd_promote)
 
     sp = sub.add_parser("new-usecase", help="start a use case from a Pipewright example")

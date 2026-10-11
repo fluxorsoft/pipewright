@@ -34,7 +34,7 @@ def setup(repo, monkeypatch, tmp_path):
                                     "kfp": "https://europe-west2-kfp.pkg.dev/acme-ml-prod/ml-pipelines"})
     repo.environments["prod"]["promotion"] = {"from": "dev"}
     state = SimpleNamespace(calls=[], store={}, dst_template=TEMPLATE.replace("{image}", DST_IMAGE),
-                            model_error=None, repo=repo)
+                            model_error=None, repo=repo, dst_model={"name": "m"})
     src = source_contract()
     state.store[("acme-ml-dev-artifacts", "contracts/churn/abc123.json")] = (src.to_json(), 1)
     state.store[("acme-ml-dev-artifacts", "contracts/churn/current.json")] = (
@@ -69,6 +69,7 @@ def setup(repo, monkeypatch, tmp_path):
     monkeypatch.setattr(promote, "_download_template", lambda target, creds: TEMPLATE.replace("{image}", SRC_IMAGE))
     monkeypatch.setattr(promote, "copy_image", lambda gcp, s, d, log=print: state.calls.append(f"copy image {d}"))
     monkeypatch.setattr(promote, "promote_model", promote_model)
+    monkeypatch.setattr(promote, "_find_model", lambda gcp, env, name: state.dst_model)
     monkeypatch.setattr(promote.publish, "compile_pinned", compile_pinned)
     monkeypatch.setattr(promote.publish, "upload_template", lambda info, repo_, uc, rid, creds: (
         f"{repo_}/churn-training/{DIGEST}", DIGEST))
@@ -80,7 +81,8 @@ def setup(repo, monkeypatch, tmp_path):
     def run(src="dev", dst="prod", **kw):
         path = repo.write()
         return promote.promote(path, load_environment(repo.root, src), load_environment(repo.root, dst),
-                               gcp=state.gcp, build_dir=tmp_path / "build", log=lambda m: None, **kw)
+                               gcp=state.gcp, build_dir=tmp_path / "build", log=lambda m: None, skip_tables=True,
+                               **kw)
 
     state.run = run
     return state
@@ -269,3 +271,39 @@ def test_only_the_approved_model_of_that_release_is_promoted(repo, monkeypatch):
         promote.promote_model(None, src, dst, uc, "abc123", "2", log=lambda m: None)
     with pytest.raises(ConfigError, match="was trained by release other, not abc123"):
         promote.promote_model(None, src, dst, uc, "abc123", None, log=lambda m: None)
+
+
+def test_files_without_a_stored_checksum_are_compared_byte_for_byte():
+    listed = {"items": [{"name": "r/model/model.pt", "size": "3"}]}               # no crc32c on the source
+    contents = {"a": b"same", "b": b"same"}
+
+    class G:
+        def get(self, url, **kw):
+            return SimpleNamespace(ok=True, body=listed)
+
+    class S:
+        def post(self, url, **kw):
+            return SimpleNamespace(status_code=200, json=lambda: {"done": True, "resource": {"crc32c": "DST="}})
+
+        def get(self, url, **kw):
+            body = contents["a" if "/b/a/" in url else "b"]
+            return SimpleNamespace(status_code=200, iter_content=lambda n: [body])
+
+    g = G()
+    g.session = S()
+    out = promote.copy_model_files(g, "gs://a/r/model", "gs://b/x/model", log=lambda m: None)
+    assert out[0]["crc32c"] == "DST=" and out[0]["sha256"].startswith("sha256:")
+    contents["b"] = b"different"
+    with pytest.raises(ConfigError, match="SHA-256 .* after copying"):
+        promote.copy_model_files(g, "gs://a/r/model", "gs://b/x/model", log=lambda m: None)
+
+
+# A model's first version becomes the default in Model Registry: under a manual policy it needs --approve.
+def test_a_first_model_version_needs_an_explicit_approval(setup):
+    setup.dst_model = None
+    with pytest.raises(ConfigError, match="has no version in prod yet.*--approve"):
+        setup.run()
+    assert setup.calls == []
+    result = setup.run(approve=True)
+    assert "event model.approved" in setup.calls
+    assert any("approved by promoter@acme.example with the promotion" in p for p in result.record["policy"])
