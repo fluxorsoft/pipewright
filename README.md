@@ -6,9 +6,10 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: alpha (0.4.0.dev0).** Working end to end on Google Cloud, including private environments with
-> customer-managed keys and enforced organization policies, but the configuration format may still change before
-> 1.0. Install from source for now; the package will be published to PyPI as `pipewright-mlops`.
+> **Status: 1.0.0 (private beta).** Working end to end on Google Cloud, including private environments with
+> customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
+> configuration format is stable ([STABILITY.md](STABILITY.md)). Releases are on GitHub (the wheel as a release
+> file, the launcher image in GitHub Container Registry); PyPI follows when the repository goes public.
 
 ## At a glance
 
@@ -306,6 +307,19 @@ release live in test (and its approved model) to production without rebuilding a
   above and its environment manifest. [docs/ONBOARDING.md](docs/ONBOARDING.md) lists what the platform team hands to
   each ML team.
 
+### Install a release
+
+Releases are on GitHub: the package is a file on each release. With read access to the repository:
+
+```bash
+gh release download v1.0.0 -R fluxorsoft/pipewright --pattern '*.whl'
+pip install "pipewright_mlops-1.0.0-py3-none-any.whl[gcp]"
+```
+
+Teams usually put the wheel in their organization's package index and pin `pipewright-mlops[gcp]==1.0.0`
+everywhere, CI included. The launcher image for platform teams is in GitHub Container Registry
+(`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
+
 ### Install from source
 
 ```bash
@@ -315,8 +329,9 @@ uv sync --all-extras                # Python 3.11 virtual environment with the g
 uv run pipewright --help
 ```
 
-Or install the CLI into another environment from the checkout: `pip install "./pipewright[gcp]"`. Once it is on
-PyPI: `pip install "pipewright-mlops[gcp]"` (the command is still `pipewright`).
+Or install the CLI into another environment from the checkout: `pip install "./pipewright[gcp]"`. When the
+repository is public it will also be on PyPI: `pip install "pipewright-mlops[gcp]"` (the command is still
+`pipewright`).
 
 ### Your first use case
 
@@ -397,8 +412,10 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Private-environment support (CMEK, VPC, internal launcher, Pub/Sub run requests) | Built and used end to end |
 | Promotion of a release and its approved model between environments | Built |
 | Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
-| OpenTelemetry export, per-tenant pipeline roots | Planned |
-| PyPI release (`pipewright-mlops`) | Planned |
+| Per-tenant pipeline roots | Built |
+| OpenTelemetry export | Planned |
+| 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Next |
+| PyPI release (`pipewright-mlops`) | When the repository is public |
 | Ray on Agent Platform, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |

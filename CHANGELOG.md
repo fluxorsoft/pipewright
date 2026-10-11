@@ -1,11 +1,11 @@
 # Changelog
 
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
-follow [semantic versioning](https://semver.org/) once 1.0 is released.
+follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [0.4.0] - unreleased
+## [1.0.0] - unreleased
 
-First open-source release.
+First release.
 
 ### Added
 
@@ -78,5 +78,7 @@ First open-source release.
   upgrade that changes how templates compile is released (as `<commit>-<hash>`) instead of silently reusing the old
   template.
 
+- **Generated CI workflows fail when a command fails.** Steps run as `bash -eo pipefail`, so a `pipewright ...`
+  piped to `tee` no longer passes when the command fails.
 - A pipeline job that cannot join its Agent Platform experiment (for example in a new project) is reported as
   submitted with a warning, instead of failing the trigger and being retried as a duplicate.
