@@ -276,6 +276,26 @@ source that resolves to the same tables: `- feature_group: customer_profile` wit
 from the Feature Registry at each run. `pipewright new-usecase --from features` starts from an example with two
 feature tables.
 
+## Promotion between environments
+
+What runs in production is what was tested: `pipewright promote --from test --to prod --usecase <name>` takes the
+release live in test (and its approved model) to production without rebuilding anything.
+
+- **Allowed source:** only from the environment the destination names (`promotion: { from: test }` in its
+  environment file), and from a clean checkout of the source release's commit.
+- **Destination policies first:** the use case is resolved under production's manifest (approval policies, feature
+  rules, Ray limits); a refusal stops before anything is copied.
+- **The same code:** images are copied by digest and checked. Templates are compiled for production and must equal
+  the tested ones with only the registry address changed; an override that changes a pipeline's shape is refused
+  unless accepted with `--accept-template-change` (recorded).
+- **The same model** (`model.promotion: model`): the approved version's files, verified, registered in production as
+  a candidate; `pipewright model approve` there makes it the default. A model's first version needs `--approve`
+  with the promotion, since Model Registry makes it the default. With `model.promotion: retrain`, production trains
+  its own candidate.
+- **Safe to repeat, recorded, reversible:** the contract is written once and the pointer moved last; repeating is a
+  no-op; `promoted_from` and a `release.promoted` event record what came from where, by whom; `pipewright rollback`
+  goes back without rebuilding.
+
 ## Getting started
 
 ### What you need
@@ -375,7 +395,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Shared launcher, release contract v3, multi-pipeline releases | Built and used end to end |
 | Retrain decisions | Built and used end to end |
 | Private-environment support (CMEK, VPC, internal launcher, Pub/Sub run requests) | Built and used end to end |
-| Promotion of a release between environments by digest | Planned |
+| Promotion of a release and its approved model between environments | Built |
 | Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
 | OpenTelemetry export, per-tenant pipeline roots | Planned |
 | PyPI release (`pipewright-mlops`) | Planned |

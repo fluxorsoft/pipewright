@@ -65,6 +65,11 @@ First open-source release.
   artifacts bucket, so each tenant's runner can be granted its own prefix only. Existing releases keep their root
   until re-released.
 
+- **`pipewright promote`.** A tested release, and optionally its approved model, from one environment to the next:
+  destination policies first, images by digest, templates checked equal (or an accepted, recorded difference), model
+  files verified, the contract written once with `promoted_from`, the pointer moved last; idempotent; a
+  `release.promoted` event. Models now carry the release that trained them (a `release` label).
+
 ### Fixed
 
 - **Steps with only `retries` or `cache`** no longer get an empty `resources` block in the compiled template: Agent
