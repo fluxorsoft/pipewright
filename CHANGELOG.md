@@ -42,7 +42,7 @@ First open-source release.
 - **Data contract from BigQuery** (`new-usecase --from-bq <project.dataset.table> --label <column>`): drafts
   `config/data.yaml` and the raw table's schema from a table or view.
 
-- **Ray on Vertex AI steps.** `steps.<step>.ray` gives a step a Ray cluster for one run, within the platform's
+- **Ray on Agent Platform steps.** `steps.<step>.ray` gives a step a Ray cluster for one run, within the platform's
   limits (manifest `ray`, per environment and tenant), created by the launcher as the runner identity with the
   environment's key and Private Service Connect network attachment, and always deleted (by the step, or by the
   launcher's tick). `pipewright release` builds the use case's Ray image; `ray_cluster()` and `ray_job()` in the

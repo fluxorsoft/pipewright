@@ -52,7 +52,7 @@ resources_per_step.<name>.gpu.type: The accelerator type, for example NVIDIA_TES
 resources_per_step.<name>.gpu.count: How many accelerators.
 resources_per_step.<name>.retries: How many times a failed step is retried.
 resources_per_step.<name>.cache: Whether the step may reuse a cached result from an identical earlier run.
-resources_per_step.<name>.ray: A Ray on Vertex AI cluster for this step, for this run only. The launcher creates it, sized within the platform's limits, and deletes it when the step ends.
+resources_per_step.<name>.ray: A Ray on Agent Platform cluster for this step, for this run only. The launcher creates it, sized within the platform's limits, and deletes it when the step ends.
 resources_per_step.<name>.ray.head_machine: The head node's machine type, with at least 16 vCPUs and more than 18 GB (for example n1-standard-16). Left out, the first allowed machine type that is big enough.
 resources_per_step.<name>.ray.worker_machine: The worker nodes' machine type. Left out, the same as the head.
 resources_per_step.<name>.ray.workers: How many worker nodes, besides the head; 0 runs everything on the head. At most the platform's max_workers.
@@ -69,7 +69,7 @@ steps.<name>.gpu.type: The accelerator type, for example NVIDIA_TESLA_T4.
 steps.<name>.gpu.count: How many accelerators.
 steps.<name>.retries: How many times a failed step is retried.
 steps.<name>.cache: Whether the step may reuse a cached result from an identical earlier run.
-steps.<name>.ray: A Ray on Vertex AI cluster for this step, for this run only. The launcher creates it, sized within the platform's limits, and deletes it when the step ends. The step itself takes no cpu, memory or gpu.
+steps.<name>.ray: A Ray on Agent Platform cluster for this step, for this run only. The launcher creates it, sized within the platform's limits, and deletes it when the step ends. The step itself takes no cpu, memory or gpu.
 steps.<name>.ray.head_machine: The head node's machine type, with at least 16 vCPUs and more than 18 GB (for example n1-standard-16). Left out, the first allowed machine type that is big enough.
 steps.<name>.ray.worker_machine: The worker nodes' machine type. Left out, the same as the head.
 steps.<name>.ray.workers: How many worker nodes, besides the head; 0 runs everything on the head. At most the platform's max_workers.

@@ -129,7 +129,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-11 | Sources may be CSV or Parquet on GCS, or BigQuery tables and views (`bq://`) | Met | `pipewright_runtime.read_source` |
 | FR-12 | Training: data contract checks, splits (random, stratified, time), tuning with parallel trials, experiments | Met | example, `config/ml.py` |
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
-| FR-45 | **Ray on Vertex AI inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
+| FR-45 | **Ray on Agent Platform inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
 | FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
 | FR-47 | **Features by registered name:** a source may name a Feature Store feature group; the Feature Registry gives its table, columns and each feature's column at run time, and the same point-in-time query runs | Met | `pipewright_runtime.resolve_feature_groups`, `checks/doctor.py`, section 8.11 |
 | FR-48 | **The closed retrain loop across environments:** a case opened in production trains in test on production-eligible data, is compared with the model production serves, is validated in test, promoted, approved and verified in production, and the case closes with the final production model; one case ID end to end | Planned (roadmap, D-85) | section 8.13 |
@@ -307,7 +307,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | `config` | Load and merge files, JSON Schema validation, `${...}` references, ML defaults and cross-checks, resolution into `ResolvedUseCase`; `environment_from_manifest` for services with no repository |
 | `build` | Compile pipelines, patch `steps` into the compiled template, build the component image (injects `pipewright_runtime.py`) |
 | `checks` | `doctor`, the `kfp` and Ray client pin checks |
-| `ray_clusters` | Ray on Vertex AI: the platform's settings and limits and a step's cluster (`settings`), the launcher's create, delete and cleanup (`service`) |
+| `ray_clusters` | Ray on Agent Platform: the platform's settings and limits and a step's cluster (`settings`), the launcher's create, delete and cleanup (`service`) |
 | `release` | Contract v3, pointers, template upload, verify gate, release and rollback |
 | `launcher` | Flask app, pure routing, live contract registry |
 | `adapters` | Orchestrator submit (`vertex`; `kfp` later), applying the manifest `security` block |
@@ -475,7 +475,7 @@ The core has no private-network code paths of its own; it applies what the manif
 
 ### 8.9 Ray clusters
 
-A step that declares `steps.<step>.ray` gets a Ray on Vertex AI cluster for one run (D-77):
+A step that declares `steps.<step>.ray` gets a Ray on Agent Platform cluster for one run (D-77):
 
 1. **Release:** the step's cluster is resolved and checked against the platform's limits (manifest `ray`, the
    tenant's `ray` over the environment's). `release` builds the use case's Ray image (`<name>-ray`, from
@@ -912,7 +912,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Roadmap (D-85) |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |
-| Ray on Vertex AI, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
+| Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
 | Iceberg (BigLake) tables for row-level deletes | Design only |
 | Features from BigQuery feature tables, point in time, for training and batch scoring (FR-46, D-79, D-80, section 8.11) | Built 2026-10-10 |

@@ -2,8 +2,8 @@
 
 The platform sets `ray` in the environment manifest, for the environment and optionally per tenant
 (`tenants.<tenant>.ray`, which wins key by key). Without it, every tenant gets DEFAULTS: a cluster per run, running
-as the tenant's runner identity, from a prebuilt Ray on Vertex AI image, on a public endpoint, with small limits. So
-an environment built before Ray existed needs no change. A private environment (the manifest sets
+as the tenant's runner identity, from a prebuilt Ray on Agent Platform image, on a public endpoint, with small limits.
+So an environment built before Ray existed needs no change. A private environment (the manifest sets
 `security.network`) without a `ray` block has Ray off: public clusters never appear where pipelines are private.
 
 A use case asks for a cluster per step, under `steps.<step>.ray` (so the size may differ per environment):
@@ -36,7 +36,7 @@ DEFAULTS = {
 # Ray client versions that match each cluster version (google-cloud-aiplatform[ray] supports these).
 RAY_RELEASES = {"2.33": "2.33.0", "2.42": "2.42.0", "2.47": "2.47.1"}
 STEP_KEYS = ("head_machine", "worker_machine", "workers", "accelerator", "max_minutes")
-HEAD_MIN_MEMORY_GB = 18      # Ray on Vertex AI refuses a head node with less ("larger than 18GB")
+HEAD_MIN_MEMORY_GB = 18      # Ray on Agent Platform refuses a head node with less ("larger than 18GB")
 HEAD_MIN_CPUS = 16           # found live (2026-10-10): with an 8-vCPU head the cluster runs, but its dashboard and
 #                              Ray Client endpoint never answer; 16 vCPUs (the console's default) work
 # GB of memory per vCPU, by machine family and shape (Compute Engine predefined types).
@@ -77,7 +77,7 @@ def platform_settings(manifest_ray: dict | None, tenant_ray: dict | None, privat
 
 
 def prebuilt_image(region: str, ray_version: str, python_version: str, gpu: bool = False) -> str:
-    """The Ray on Vertex AI prebuilt image (the same names the Agent Platform SDK uses)."""
+    """The Ray on Agent Platform prebuilt image (the same names the Agent Platform SDK uses)."""
     area = region.split("-")[0] if region.split("-")[0] in ("us", "europe", "asia") else "us"
     kind = "ray-gpu" if gpu else "ray-cpu"
     return (f"{area}-docker.pkg.dev/vertex-ai/training/{kind}.{ray_version.replace('.', '-')}."

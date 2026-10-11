@@ -1,6 +1,6 @@
 """Ray version alignment between a use case's component image (the Ray client) and its clusters.
 
-A Ray step submits work from the component image to a Ray on Vertex AI cluster. The client and the cluster must run
+A Ray step submits work from the component image to a Ray on Agent Platform cluster. The client and the cluster must run
 the same Ray release, so components/requirements.txt has to pin `ray[default]` to the platform's version, and
 include `google-cloud-aiplatform[ray]` (it resolves `vertex_ray://` cluster addresses).
 """

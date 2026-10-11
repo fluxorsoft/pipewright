@@ -8,7 +8,7 @@ read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or 
 write_table   writes rows to the use case's store (outputs.store): BigQuery, Parquet on GCS, or both
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
-ray_cluster   a Ray on Vertex AI cluster for this step of this run (steps.<step>.ray), deleted when the block ends
+ray_cluster   a Ray on Agent Platform cluster for this step of this run (steps.<step>.ray), deleted when the block ends
 ray_job       runs a Ray job on that cluster and waits for it (needs ray[default] and google-cloud-aiplatform[ray])
 
 Everything here takes the `ml_config` the component received; it needs only google-cloud-* and pandas/pyarrow,

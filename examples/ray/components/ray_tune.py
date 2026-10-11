@@ -1,4 +1,4 @@
-"""Tuning on Ray (training.tuning): the trials run in parallel on a Ray on Vertex AI cluster made for this step of
+"""Tuning on Ray (training.tuning): the trials run in parallel on a Ray on Agent Platform cluster made for this step of
 this run (steps.tune-on-ray.ray), which is deleted when the step ends. Same trials and choice as tune.py."""
 
 import os

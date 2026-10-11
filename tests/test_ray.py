@@ -1,4 +1,4 @@
-"""Ray on Vertex AI: a cluster per Ray step of a run (pipewright.ray_clusters, the launcher's /ray/clusters, the
+"""Ray on Agent Platform: a cluster per Ray step of a run (pipewright.ray_clusters, the launcher's /ray/clusters, the
 runtime helpers, release and the Ray example)."""
 
 import base64

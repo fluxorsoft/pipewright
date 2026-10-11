@@ -129,7 +129,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 |---|---|
 | Configure | Multi-file use cases (one concern per file), JSON Schema validation with path-qualified errors, `${...}` references to manifest names, per-environment overrides on a fixed list of keys, `resolve` to print the effective configuration |
 | Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, **features from feature tables** joined point in time (no value from after a row's cut-off reaches training), tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
-| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray on Vertex AI** for a step that needs a cluster: one cluster per run, sized in `steps.<step>.ray` within the platform's limits, deleted when the step ends |
+| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray on Agent Platform** for a step that needs a cluster: one cluster per run, sized in `steps.<step>.ray` within the platform's limits, deleted when the step ends |
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
 | Run | A shared, multi-tenant launcher on Cloud Run: file drops, schedules (Cloud Scheduler), API calls and Pub/Sub run requests; deterministic run IDs, so retries never start duplicates |
@@ -206,7 +206,7 @@ with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by
 
 - **Who makes the cluster:** the launcher, as the tenant's runner identity, from the live release (the step only
   names itself). It applies the environment's key and network, and labels the cluster with the run.
-- **What it runs:** a Ray image `pipewright release` builds for the use case, on the platform's Ray on Vertex AI
+- **What it runs:** a Ray image `pipewright release` builds for the use case, on the platform's Ray on Agent Platform
   base image, with the component code and `ray_requirements`.
 - **Cleanup:** the step deletes the cluster when it ends, even on errors; the launcher's tick deletes any cluster
   whose run ended or whose `max_minutes` passed, so a killed step never leaves one running.
@@ -399,7 +399,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
 | OpenTelemetry export, per-tenant pipeline roots | Planned |
 | PyPI release (`pipewright-mlops`) | Planned |
-| Ray on Vertex AI, a cluster per Ray step of a run | Built |
+| Ray on Agent Platform, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
