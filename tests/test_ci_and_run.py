@@ -27,6 +27,15 @@ def test_render_orders_release_jobs_by_environment():
         assert "@@" not in text
 
 
+def test_a_failing_command_fails_its_step_even_when_piped():
+    # GitHub runs `run:` steps as `bash -e` unless the shell is named; only `shell: bash` adds -o pipefail, without
+    # which `pipewright release ... | tee` passes when the release fails (found by the first CI run, R-01).
+    files = ci.render(["dev"])
+    for name in ("pipewright-pr.yml", "pipewright-release.yml", "pipewright-operate.yml"):
+        doc = yaml.safe_load(files[f".github/workflows/{name}"])
+        assert doc["defaults"]["run"]["shell"] == "bash", name
+
+
 def test_render_rejects_bad_environments():
     with pytest.raises(ConfigError, match="at least one"):
         ci.render([])

@@ -18,4 +18,4 @@ load() {
 load entities "customer_id:STRING,snapshot_date:DATE,churned:INT64"
 load customer_profile "customer_id:STRING,feature_timestamp:TIMESTAMP,tenure_months:INT64,monthly_charges:FLOAT64,total_charges:FLOAT64,contract_length_months:INT64,num_products:INT64,has_paperless_billing:INT64"
 load support_activity "customer_id:STRING,feature_timestamp:TIMESTAMP,num_support_tickets:INT64,avg_monthly_usage_gb:FLOAT64"
-echo "train with: pipewright run --env <env> <usecase> --source-uri bq://$project.$dataset.${prefix}entities"
+echo "train with: pipewright run --env <env> --usecase <usecase> --source-uri bq://$project.$dataset.${prefix}entities"

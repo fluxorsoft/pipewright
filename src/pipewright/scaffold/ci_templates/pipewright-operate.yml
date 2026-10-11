@@ -44,6 +44,11 @@ on:
         type: string
         default: ""
 
+# bash -eo pipefail: a failing pipewright command fails its step even when its output is piped to tee.
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
   id-token: write

@@ -132,6 +132,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-45 | **Ray on Vertex AI inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
 | FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
 | FR-47 | **Features by registered name:** a source may name a Feature Store feature group; the Feature Registry gives its table, columns and each feature's column at run time, and the same point-in-time query runs | Met | `pipewright_runtime.resolve_feature_groups`, `checks/doctor.py`, section 8.11 |
+| FR-48 | **The closed retrain loop across environments:** a case opened in production trains in test on production-eligible data, is compared with the model production serves, is validated in test, promoted, approved and verified in production, and the case closes with the final production model; one case ID end to end | Planned (roadmap, D-85) | section 8.13 |
 | FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
 | FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
@@ -291,6 +292,8 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-82 | **A feature group is resolved through the Feature Registry at each run, not pinned at release.** The registry is the owners' source of truth: when they move a group to a new table, runs follow it. The event records what each run actually read (group and table), and the tenant's datasets bound where a group may point | Registration is what makes a feature defined once; copying its resolution into each release would let use cases drift from it | Active (2026-10-10) |
 | D-83 | **Newer manifest fields are ignored with a warning; policies carry `requires`.** Unknown keys are pruned using the schema itself, then the rest is validated in full; `requires` (a version specifier) makes an older version refuse the manifest when a key must not be skipped | App teams pin their CLI in CI; a platform adding a field must not break every team, and a policy must never be silently ignored. Built before the first release, because the oldest released version is the one that has to tolerate newer manifests | Active (2026-10-10) |
 | D-84 | **Promotion keeps the code identical and resolves the configuration for the destination.** Images move by digest; templates are recompiled for the destination and must equal the source's with only the registry address changed; `ml_config` comes from the destination's resolution of the same commit. A model is promoted as its files, checksum-verified, because Model Registry copies only within a project | A byte-identical template cannot point at the destination's own registry, and configuration is legitimately per environment; claiming either is identical would be false. What must not change, the code and the model, is verified | Active (2026-10-11) |
+| D-85 | **The closed retrain loop waits for real use.** Each half is built (retrain decisions in one environment; promotion between environments) and a person can carry a case across them with today's commands. The open choices (comparison policy, what counts as validated in test, health checks, ground truth per use case) are best settled by a team running real use cases | Building on guesses would fix policies before anyone has used the halves | Active (2026-10-11) |
+| D-86 | **The first release is 1.0, through 1.0.0rc1.** Nothing was ever published, so no one depends on a 0.x. `1.0.0rc1` goes to a first team (a design partner) for a few weeks, then `1.0.0`. From 1.0 a breaking change to the stable surface means 2.0: the use case and environment YAML (`pipewright/v1`), the manifest fields the CLI reads, release contract v3, CLI commands, flags and exit codes, lifecycle event types and fields, plugin API v1. Not covered: Python internals, undocumented runtime helpers, message wording, generated workflow contents. Removals are deprecated (a warning) for at least one minor release first | The interfaces already carry v1 versions; regulated buyers read 0.x as not production; a release candidate lets a real team find the awkward key or missing flag while fixing it is still free | Active (2026-10-11); done at release time |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -706,9 +709,61 @@ pointer to an earlier contract and never rebuilds.
 - **A model's first version:** Model Registry makes it the default. Under a manual policy the first promotion now needs `--approve`, recorded as a `model.approved` event. The first live promotion, made before the fix, became the default without an approval, and the evidence pack flagged it (EV-06).
 - **Template refusal:** a production-only override (a bigger training machine) made the training template differ. It was refused, naming the difference, and then promoted with `--accept-template-change`, which is recorded.
 
-**Not in FR-29 (later, open decisions):** the cross-environment retrain loop (drift seen in production, the retrain
+**Not in FR-29 (later, open decisions; see section 8.13):** the cross-environment retrain loop (drift seen in production, the retrain
 run in the training environment, then a promotion), and production data access for the training environment
 (which environment trains on production data, whether production may train, whether dev stays on sample data).
+
+### 8.13 The closed retrain loop (FR-48, planned)
+
+Requested as a user story on 2026-10-11 (retraining, candidate against champion, test validation, controlled
+promotion, deployment checks, rollback, production feedback, one audit record per loop). Kept on the roadmap
+(D-85): teams use the two halves first.
+
+**Where it stands against the story's acceptance criteria:**
+
+| # | Criterion | Today |
+|---|---|---|
+| 1 | Retraining trigger | Met in one environment (schedules, landings, API, drift or performance cases, quorum, run keys). Gap: a production case cannot start training in test |
+| 2 | Data validation | Partial: data contract, point-in-time features, personal data never a feature. Gaps: freshness and label-availability gates; no data snapshot |
+| 3 | Reproducible training | Mostly met (contract pins commit, digests, resolved configuration). Gap: data snapshot |
+| 4 | Candidate against champion | Met in one environment. Gap: in test the champion is test's own default, not what production serves |
+| 5 | Validation in test | Partial: promotion needs a live test release and a test-approved model. Gap: no "ran in test" precondition (batch scoring or canary) |
+| 6 | Controlled promotion | Met (gates recomputed, production policies first, approvals, EV-15) |
+| 7 | Safe rejection | Met, tested live |
+| 8 | Deployment verification | Partial: canary, promote, undeploy. Gap: automatic health checks after deploy |
+| 9 | Rollback | Release rollback tested live. Gap: model rollback (default and traffic) as one tested procedure |
+| 10 | Production feedback | Partial: drift in production; the decision pack shows labelled outcomes and label delay (R-19). Gap: an agreed ground-truth path per use case |
+| 11 | Auditability | Partial: events, contracts, evidence packs, `promoted_from`. Gap: one record per loop; the case ID does not cross environments |
+| 12 | Operational readiness | Partial: alerts, dead-letter topics, retries, `mode: off` and snooze. Gap: runbooks and a tested pause |
+| 13 | Failure isolation | Met (pointer last, write-once, the champion untouched by a failed run) |
+
+**Intended shape:** production never trains. It detects, decides, approves and serves; training happens in test
+on production-eligible data. A case opened in production, once approved, starts a training run in test with the
+case ID as run key. The candidate passes the gates and is compared with the version production serves: that
+version was promoted from test, so test already holds identical files (EV-15) and finds it through production's
+`promoted_from`. A rejected candidate closes the case without touching production. An approved candidate runs in
+test, is promoted, approved in production, deployed by canary and checked, and the case closes with the final
+production model. The case ID travels in events, model labels and `promoted_from`, so evidence packs and Fleet
+View show one loop as one record.
+
+**Today, by hand:** the whole path works with existing commands: production case, training in test on a chosen
+window, rejection or approval, a test inference run, `pipewright promote`, production approval, canary, promote,
+rollback. A person carries the case across.
+
+**Open decisions:**
+
+1. Where retraining for a production case runs (proposed: test).
+2. Production data access for test: a read-only grant or a copy, who approves it, whether dev stays on sample data.
+3. Comparison policy: beat the production model, or no worse than it by more than a margin; on a fixed holdout or
+   the latest labelled window.
+4. What counts as validated in test before promotion: a batch scoring run, a canary, or both.
+5. Health checks after deploy (error rate, latency, prediction distribution); automatic or human rollback.
+6. Ground truth per use case: source, delay, the minimum labelled volume before performance opens a case.
+7. Data versioning: a BigQuery snapshot per run or a recorded time-travel timestamp (seven days of history).
+
+**Delivery, when started:** phase 1 a manually started loop end to end with rejection and rollback; phase 2
+scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
+approval for production; phase 4 monitoring-driven retraining with deduplication and safeguards.
 
 ---
 
@@ -849,11 +904,12 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 | Item | Status |
 |---|---|
-| First open-source release (0.4.0), wheel and launcher image | Next |
+| First open-source release: `1.0.0rc1` to a design partner, then `1.0.0` (D-86); wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Next |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
 | OpenTelemetry export from the launcher | Planned |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
+| The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Roadmap (D-85) |
 | `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
 | Value-free error messages (NFR-18, D-65) | Planned |
 | Ray on Vertex AI, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
