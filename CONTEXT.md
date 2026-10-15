@@ -296,6 +296,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-86 | **The first release is 1.0.0 stable, no release candidate.** Nothing was ever published, so no one depends on a 0.x. From 1.0 a breaking change to the stable surface means 2.0: the use case and environment YAML (`pipewright/v1`), the manifest fields the CLI reads, release contract v3, CLI commands, flags and exit codes, lifecycle event types and fields, plugin API v1. Not covered: Python internals, undocumented runtime helpers, message wording, generated workflow contents. Removals are deprecated (a warning) for at least one minor release first. A throwaway pre-release tag rehearses the release workflow before `v1.0.0` | Fluxor's proof of concept with a very large customer gave positive feedback, which is the outside use a release candidate or a 0.9 would have waited for; the roadmap is additive (1.x); regulated buyers read 0.x as not production | Active (2026-10-11, replaces the 1.0.0rc1 plan); done at release time |
 | D-87 | **No Iceberg (BigLake) tables.** Row-level deletes at scale are served by BigQuery tables and the feature team's feature tables, following the feature governance guidelines; Parquet outputs keep erasure by rewriting files with generation checks | The Feature Store path covers the need without a second table format | Active (2026-10-11) |
 | D-88 | **Private beta before open source.** 1.0.0 ships on GitHub to early champions and customers (read access to the private repositories; packages as release files, images in GitHub Container Registry), with Fluxor engagements to help them adopt it. Making the repository public, and PyPI, are decided after that | Real use with support shapes the product before it is public; it is the ideal path for regulated buyers | Active (2026-10-11) |
+| D-89 | **Kubernetes: `private-gke` next; on premises only on demand.** GKE keeps Google Cloud's data services and is private anyway, so it is the next platform. Plain Kubernetes on premises (no Google services) is not planned: it is built only when a large customer base asks, with one reference stack | No customer asks for on premises today; it would mean a second platform under Pipewright (section 8.14) | Active (2026-10-15) |
 | D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 
 ---
@@ -767,6 +768,56 @@ rollback. A person carries the case across.
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
 approval for production; phase 4 monitoring-driven retraining with deduplication and safeguards.
 
+### 8.14 Running on Kubernetes: GKE next, on-premises on request (design note, 2026-10-15)
+
+Two targets, very different in size:
+
+- **`private-gke` (next on the roadmap):** Kubernetes on Google Cloud. Compute moves into the cluster; Cloud
+  Storage, BigQuery, Artifact Registry, IAM, KMS and VPC Service Controls stay. GKE is private anyway, so it serves
+  the customers who want Kubernetes without leaving Google Cloud.
+- **Plain Kubernetes on premises:** no Google services at all; every building block needs a replacement. Not
+  planned: built only when a large customer base asks for it (D-89).
+
+**What stays the same on both:** the use case YAML (`pipewright/v1`), teams' pipeline code (already Kubeflow
+Pipelines v2), the release contract, gates and the champion comparison, retrain decisions and approvals,
+promotion, the CLI and the evidence questions.
+
+**Building blocks:**
+
+| Today (Google Cloud) | `private-gke` | On premises |
+|---|---|---|
+| Agent Platform Pipelines | Kubeflow Pipelines in the cluster (`kfp` adapter) | Same |
+| Cloud Run launcher | A Deployment in the cluster (same image) | Same |
+| Cloud Scheduler | CronJobs | Same |
+| Ray on Agent Platform | KubeRay, a RayCluster per run | Same |
+| Model Registry and endpoints | Agent Platform, or KServe | MLflow registry (aliases as the champion), KServe |
+| Cloud Storage | Stays | S3-compatible store (MinIO, Ceph) with object lock and conditional writes |
+| Pub/Sub | Stays | Kafka or NATS; bucket notifications for landings |
+| Artifact Registry | Stays | Harbor |
+| BigQuery (tables, predictions, monitoring, point-in-time features) | Stays | A warehouse adapter (Trino or Postgres, Parquet on S3); the point-in-time join per SQL dialect. The hardest part |
+| IAM, runner service accounts | Workload Identity per tenant namespace | Namespaces, RBAC, ServiceAccounts, store policies; OIDC (for example Keycloak) for people and approvers |
+| Cloud KMS | Stays | Vault Transit or storage-level encryption |
+| VPC Service Controls, organization policies | Stay, plus NetworkPolicies | NetworkPolicies, egress lock-down, Kyverno or Gatekeeper |
+| Logging, Monitoring, email alerts | Stay | Prometheus and Alertmanager, Loki or ELK (OpenTelemetry) |
+| Feature Store groups | Stay | Feature tables in the warehouse |
+
+**In the code:** Google Cloud is called from about 35 modules and there is one orchestrator adapter (`vertex`).
+`private-gke` adds the orchestrator, Ray and serving ports (`kfp`, KubeRay, KServe) and CronJob schedules;
+on premises would add ports for the object store, warehouse, registry, event bus and identity, with the component
+runtime (`read_source`, `write_table`) split the same way.
+
+**Enterprise:** the blueprint becomes Terraform plus Helm (D-11); evidence controls read cluster sources
+(Kubernetes audit logs, KubeRay, KServe); Fleet View gains a collector per platform; keyless CI reaches the cluster
+through Workload Identity.
+
+**Worth testing early on `private-gke`:** Ray under an enforced perimeter. KubeRay runs inside the cluster, so a
+step reaches its Ray head directly instead of through Agent Platform's dashboard tunnel, which is what blocks Ray
+under an enforced perimeter today (Enterprise R-23).
+
+**If on premises is ever built:** one opinionated reference stack (for example MinIO, Kafka, Harbor, MLflow,
+KServe, KubeRay, Trino or Postgres, Keycloak, Vault, Prometheus), shaped by the customer who asks, rather than
+pluggable backends; Enterprise only, as `private-gke` is.
+
 ---
 
 ## 9. Interfaces and contracts
@@ -912,7 +963,8 @@ deprecations page and the SDK 2.0.1 migration guide:
 | OpenTelemetry export from the launcher | Planned |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
 | The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Roadmap (D-85) |
-| `kfp` adapter for Kubeflow Pipelines on GKE (FR-30) | Planned |
+| `kfp` adapter for Kubeflow Pipelines on GKE (FR-30, `private-gke`, section 8.14) | Next (D-89) |
+| Plain Kubernetes on premises (section 8.14) | On demand only (D-89) |
 | Value-free error messages (NFR-18, D-65) | Planned |
 | Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
