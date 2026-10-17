@@ -11,7 +11,7 @@ We aim to acknowledge reports within three working days and to agree a fix and d
 
 ## Supported versions
 
-Pipewright is in alpha. Security fixes are made on the latest release and on `main`.
+Security fixes are made on the latest release (1.0.x) and on `main`.
 
 ## Scope notes
 

@@ -65,7 +65,8 @@ version), and support. Enterprise uses published extension points and never patc
 ## 2. Status
 
 "Built" means working code with tests. "Used end to end" means exercised on a real Google Cloud project, including a
-private environment with customer-managed keys and enforced organization policies.
+private environment with customer-managed keys, enforced organization policies and an enforced VPC Service Controls
+perimeter, on Agent Platform and on private GKE.
 
 | Area | Status |
 |---|---|
@@ -79,7 +80,9 @@ private environment with customer-managed keys and enforced organization policie
 | CI for app teams (`pipewright ci init`, self-hosted runners) | Built |
 | Product CI and release workflows (`.github/workflows/`) | Built |
 | Promotion between environments (`pipewright promote`) | Built, tested live 2026-10-11 |
-| `kfp` adapter (GKE), OpenTelemetry export | Planned |
+| First release, 1.0.0 (wheel as GitHub release files, launcher image in GitHub Container Registry) | Released 2026-10-17 |
+| Private GKE (section 8.15): orchestrator `kfp`, Ray on KubeRay per run or standing, KServe serving, CronJob schedules, the launcher as a pull worker, the read-only Kubeflow UI | Built, used end to end under an enforced perimeter (2026-10-17) |
+| OpenTelemetry export | Planned |
 | Terraform for the platform side | In a separate starter repository, shared on request (R-20) |
 
 ---
@@ -147,7 +150,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-23 | New use cases scaffolded from an example | Met | `scaffold/` |
 | FR-24 | Other packages can add CLI commands without patching the core | Met | `plugins.py` (D-36) |
 | FR-29 | **Promote a release between environments:** images copied by digest, templates checked equal, configuration resolved for the destination, the model copied unchanged (or retrained under the destination's approvals), destination policies applied first, the pointer moved last, idempotent, fully recorded | Met (live 2026-10-11) | `release/promote.py`, `pipewright promote`, section 8.12 |
-| FR-30 | Self-managed pipelines on GKE (Kubeflow Pipelines, KServe) | Planned | `kfp` adapter |
+| FR-30 | Self-managed pipelines on GKE (Kubeflow Pipelines, KServe) | Met 2026-10-17 | section 8.15, `adapters/kfp.py` |
 | FR-39 | **Retrain decision case with a decision pack:** drift or a performance drop opens a case holding what is needed to decide (is it real, is it a data problem, what would retraining use, the options) | Met | `retraining/` |
 | FR-40 | **Retraining modes per use case:** `off` (alerts only), `propose` (nothing trains until a person approves), `candidate` (trains a candidate, never promotes); the platform can limit the modes per environment | Met | `retraining/`, `config/ml.py` |
 | FR-41 | **Approver groups with a quorum:** several groups may be required, the platform can add required groups per environment, the proposer cannot approve, one identity counts once, approvals are authenticated actions by named identities | Met | `retraining/` |
@@ -310,13 +313,14 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | `config` | Load and merge files, JSON Schema validation, `${...}` references, ML defaults and cross-checks, resolution into `ResolvedUseCase`; `environment_from_manifest` for services with no repository |
 | `build` | Compile pipelines, patch `steps` into the compiled template, build the component image (injects `pipewright_runtime.py`) |
 | `checks` | `doctor`, the `kfp` and Ray client pin checks |
-| `ray_clusters` | Ray on Agent Platform: the platform's settings and limits and a step's cluster (`settings`), the launcher's create, delete and cleanup (`service`) |
+| `ray_clusters` | Ray clusters for steps, on Agent Platform or KubeRay, per run or standing: the platform's settings and limits and a step's cluster (`settings`), the launcher's create, delete and cleanup (`service`) |
 | `release` | Contract v3, pointers, template upload, verify gate, release and rollback |
-| `launcher` | Flask app, pure routing, live contract registry |
-| `adapters` | Orchestrator submit (`vertex`; `kfp` later), applying the manifest `security` block |
+| `launcher` | Flask app, pure routing, live contract registry; `pull`, the same routes from Pub/Sub pull subscriptions (the launcher in a private cluster) |
+| `adapters` | Orchestrator submit (`vertex`: Agent Platform Pipelines; `kfp`: Kubeflow Pipelines through the Kubernetes API), applying the manifest `security` block |
 | `retraining` | Retrain decisions: the case state machine (pure), the decision pack summary, the case store, ID token checks, the launcher's handling, the `retrain` CLI |
-| `tables`, `schedules`, `alerts` | Plans and syncs for BigQuery tables, Cloud Scheduler jobs, log-based alert policies |
-| `models`, `monitoring` | Registry list and approve, deploy with canary; `monitor status` |
+| `tables`, `schedules`, `alerts` | Plans and syncs for BigQuery tables, Cloud Scheduler jobs or Kubernetes CronJobs (`kubernetes`, `fire`), log-based alert policies |
+| `models`, `monitoring` | Registry list and approve, the gates recomputed from the evaluation record (`gates`), deploy to Agent Platform endpoints with canary or to KServe (`kserve`), `model predict`; `monitor status` |
+| `kube`, `pipelines_ui` (modules) | A small Kubernetes client (no kubeconfig); `pipewright pipelines-ui` |
 | `observability` | Lifecycle events (regional publish) |
 | `data` | Erasure in BigQuery and Parquet |
 | `runs` | `pipewright run` (Pub/Sub or HTTP) |
@@ -768,7 +772,7 @@ rollback. A person carries the case across.
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
 approval for production; phase 4 monitoring-driven retraining with deduplication and safeguards.
 
-### 8.14 Running on Kubernetes: GKE next, on-premises on request (design note, 2026-10-15)
+### 8.14 Running on Kubernetes: GKE next, on-premises on request (design note, 2026-10-15; GKE built: section 8.15)
 
 Two targets, very different in size:
 
@@ -820,6 +824,30 @@ pluggable backends; Enterprise only, as `private-gke` is.
 
 ---
 
+### 8.15 Private GKE as built (2026-10-17)
+
+The design in section 8.14, built and used end to end in a private GKE environment under an enforced VPC Service
+Controls perimeter. Everything is chosen by the manifest; a use case only says `model.serving.target: kserve` to
+serve on the cluster.
+
+| Part | How it works |
+|---|---|
+| Orchestrator `kfp` (`adapters/kfp.py`) | The launcher creates a run through the Kubernetes API's service proxy to the Kubeflow Pipelines v2beta1 API, from the same compiled template, parameters and pipeline root, as the tenant's Kubernetes service account (bound to its runner by Workload Identity). The deterministic job ID is the run's display name, so a duplicate delivery is refused; labels are compact JSON in the description (Kubeflow keeps 255 characters); tasks inside `dsl.OneOf` branches run uncached (Kubeflow cannot resolve a branch whose task was a cache hit) |
+| Kubernetes client (`kube.py`) | The cluster's DNS endpoint (IAM authorized, reachable through the restricted Google APIs) or private endpoint and CA from the manifest, Google access tokens with the `userinfo.email` scope (without it GKE names a caller by a numeric ID and RBAC refuses it), retries; no kubeconfig. `PIPEWRIGHT_KUBERNETES_ENDPOINT` overrides the endpoint inside the cluster |
+| Ray on KubeRay (`ray_clusters/`) | The same `ray_cluster()` and `ray_job()`: a RayCluster per run on the Ray node pool, sized from the machine names in `steps.<step>.ray`, created and deleted by the launcher, the job submitted inside the cluster; or the tenant's standing cluster (`ray.mode: standing`, kept by the platform) that steps submit to with their release's code as `working_dir`. The contract records the mode; a mode change makes a new release |
+| Serving on KServe (`models/kserve.py`) | `deploy-model` creates or rolls over an InferenceService in the tenant's serving namespace from the registered version's container and Agent Platform environment, so requests and responses match Agent Platform endpoints; an internal load balancer when the manifest says `exposure: internal_lb`; no canary (refused); `model predict` for both targets |
+| Schedules as CronJobs (`schedules/kubernetes.py`, `fire.py`) | With `schedules.backend: kubernetes`, `schedules sync` writes a CronJob per schedule; its pod (the launcher image, a numeric non-root user) publishes the run request as Cloud Scheduler would |
+| The launcher in the cluster (`launcher/pull.py`) | Pub/Sub cannot push into a private cluster, so a pull worker reads the subscriptions Cloud Run would be pushed from and hands each message to the same route; a pulled decision is trusted as a push from the subscription. `--tick` and `--tick --digest` are the retrain CronJobs. `launcher.audiences` keeps ID tokens valid across a runtime switch |
+| Read-only Kubeflow UI (`pipelines_ui.py`) | `pipewright pipelines-ui` serves the UI on localhost, forwarding each request through the DNS endpoint as the caller; the platform's role allows GET only, so changes are refused by Kubernetes |
+| `doctor` | The CronJob path and the use case's KServe namespace and InferenceService |
+
+**Found while testing, and fixed:** the `userinfo.email` scope; the 255-character description; OneOf branches on cache
+hits; the Ray image's older numeric stack (pin the same versions in `ray-requirements.txt` as in the component image);
+a named image user Kubernetes cannot verify as non-root (now numeric); release reuse that ignored a Ray mode change;
+`alerts sync` repointing policies when another email channel had the same address (the channel Pipewright made now
+wins). The platform side (the cluster, Kubeflow and KubeRay from mirrored images, KServe, finished pods deleted a
+minute after they succeed so the logging agent keeps up) is the platform's, not this repository's.
+
 ## 9. Interfaces and contracts
 
 ### 9.1 CLI (`pipewright`)
@@ -828,7 +856,7 @@ pluggable backends; Enterprise only, as `private-gke` is.
 |---|---|
 | Configure | `new-usecase`, `validate`, `resolve`, `doctor`, `test` |
 | Release | `tables sync`, `release`, `rollback`, `status`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model approve`, `deploy-model`, `monitor status`, `data erase` |
+| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `data erase`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze` (with `--env` or `--manifest gs://...`) |
 | Extend | `plugins` |
 
@@ -836,7 +864,8 @@ pluggable backends; Enterprise only, as `private-gke` is.
 
 **Environment variables:** `GCLOUD_CONFIG` (refreshable gcloud credentials), `GOOGLE_OAUTH_ACCESS_TOKEN` (a fixed
 token), `PIPEWRIGHT_ID_TOKEN` (an ID token for the launcher or a decision), `PIPEWRIGHT_RUN_VIA=http` (call the
-launcher directly from inside the network), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and the CA variables in D-49.
+launcher directly from inside the network), `PIPEWRIGHT_KUBERNETES_ENDPOINT` (the Kubernetes API inside the
+cluster), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and the CA variables in D-49.
 
 ### 9.2 Environment manifest (`pipewright/v1`, `manifest.schema.json`)
 
@@ -848,7 +877,11 @@ launcher directly from inside the network), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and th
 | `observability` | `events_topic`, `evidence_dataset`, `evidence_uri`, `log_sinks`, `otlp_endpoint` |
 | `security` | `kms_key`, `bigquery_kms_key`, `network`, `reserved_ip_ranges`, `perimeter` |
 | `features` (optional) | `required`: every model feature from `data.features_from`; per tenant, `tenants.<t>.features.datasets`: the `project.dataset` feature datasets its use cases may read |
-| `ray` (optional; also per tenant, `tenants.<t>.ray`) | `enabled`, `mode` (`per_run`), `ray_version`, `python_version`, `image`, `network_attachment`, `limits{max_workers, machines, accelerators, max_minutes}` |
+| `ray` (optional; also per tenant, `tenants.<t>.ray`) | `enabled`, `mode` (`per_run`, or per tenant on GKE `standing` with `standing{cluster, address, image}`), `ray_version`, `python_version`, `image`, `network_attachment`, `limits{max_workers, machines, accelerators, max_minutes}` |
+| `orchestrator`, `kubernetes` (private GKE) | `orchestrator: kfp`; `kubernetes{endpoint, dns_endpoint, cluster, ca_certificate, namespace}`; per tenant `tenants.<t>.kubernetes_service_account` |
+| `schedules` (optional) | `backend` (`cloud_scheduler` or `kubernetes`), `namespace`, `service_account`, `image`, `run_as_user` |
+| `kserve` (optional) | `mirror`, `service_account`, `namespaces` (per tenant), `exposure` (`cluster` or `internal_lb`) |
+| `launcher` (more) | `runtime` (`cloud_run` or `gke`), `namespace`, `audiences` |
 
 **Compatibility rule (R-05, built 2026-10-10):** manifest fields are added, never changed in meaning. A version
 that meets keys it does not know (anywhere the schema forbids extra keys) **ignores them and says so**: `validate`
@@ -957,17 +990,18 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 | Item | Status |
 |---|---|
-| First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Next |
+| First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Released 2026-10-17 |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
 | OpenTelemetry export from the launcher | Planned |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
 | The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Roadmap (D-85) |
-| `kfp` adapter for Kubeflow Pipelines on GKE (FR-30, `private-gke`, section 8.14) | Next (D-89) |
+| `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
+| `predict` in the generated operate workflow | Built 2026-10-17 |
 | Plain Kubernetes on premises (section 8.14) | On demand only (D-89) |
 | Value-free error messages (NFR-18, D-65) | Planned |
 | Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
-| Standing Ray clusters (a long-lived cluster per tenant, for example in dev): parked. The Terraform provider cannot create a Ray cluster yet, and Pipewright does not create platform infrastructure outside Terraform; revisit with a GKE blueprint (KubeRay) or when the provider supports Ray | Parked |
+| Standing Ray clusters, a long-lived cluster per tenant (section 8.15): on private GKE, kept by the platform as a KubeRay cluster whose workers scale to zero; a cluster per run stays the default. Not on Agent Platform | Built 2026-10-17 |
 | Features from BigQuery feature tables, point in time, for training and batch scoring (FR-46, D-79, D-80, section 8.11) | Built 2026-10-10 |
 | Feature Store feature groups as a feature source (D-82) | Built 2026-10-10 |
 | Online serving from Bigtable: endpoints read features by entity ID | Planned (on demand) |
