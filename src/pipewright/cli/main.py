@@ -221,6 +221,13 @@ def _one(args):
     return resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env), env
 
 
+def cmd_pipelines_ui(args) -> int:
+    from pipewright import pipelines_ui
+
+    pipelines_ui.serve(load_environment(Path(args.root), args.env), port=args.port)
+    return 0
+
+
 def cmd_model_predict(args) -> int:
     import json
 
@@ -585,6 +592,13 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--root", default=".")
         sp.add_argument("--env", required=True)
         sp.add_argument("--usecase", required=True)
+
+    sp = sub.add_parser("pipelines-ui", help="the Kubeflow Pipelines UI of a private-gke environment, on localhost "
+                                            "(read only, through the cluster's API as you)")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--env", required=True)
+    sp.add_argument("--port", type=int, default=8080)
+    sp.set_defaults(func=cmd_pipelines_ui)
 
     sp = sub.add_parser("model", help="Model Registry versions of a use case's model")
     msub = sp.add_subparsers(dest="model_command", required=True)
