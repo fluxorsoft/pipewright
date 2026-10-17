@@ -3,9 +3,28 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [1.0.0] - 2026-10-11
+## [1.0.0] - 2026-10-17
 
 First release.
+
+### Added (private GKE)
+
+- **Orchestrator `kfp`: Kubeflow Pipelines on private GKE.** The same use case YAML, compiled templates and release
+  contracts run on Kubeflow Pipelines inside the cluster, submitted through the Kubernetes API (no exposed endpoint)
+  as each tenant's Kubernetes service account, bound to its runner identity. Tasks inside `dsl.OneOf` branches run
+  uncached on Kubeflow (it cannot resolve a cached branch).
+- **Ray on KubeRay.** On GKE a step's cluster is a RayCluster per run on the platform's Ray node pool, reached
+  inside the cluster; or a tenant's **standing** cluster (`ray.mode: standing`), long-lived and autoscaling, to
+  which steps submit with their release's code. The release records the mode it was built for.
+- **Online serving on KServe** (`model.serving.target: kserve`): the registered container and its Agent Platform
+  environment as an InferenceService in the tenant's serving namespace, so requests and responses match Agent
+  Platform endpoints; gates, approvals, rolling updates, undeploy; exposure in the cluster or an internal load
+  balancer. `pipewright model predict` for either platform.
+- **Schedules as Kubernetes CronJobs** where the manifest says `schedules.backend: kubernetes`.
+- **The launcher as a pull worker** (`launcher.runtime: gke`): the same routes fed from the same subscriptions,
+  for a launcher inside the cluster; `launcher.audiences` so releases keep working across a switch.
+- **`pipewright pipelines-ui`**: the Kubeflow Pipelines UI on localhost, read only, through the cluster's API.
+- A small Kubernetes client (`pipewright.kube`); credentials ask for `userinfo.email` (GKE names callers by email).
 
 ### Added
 
