@@ -94,6 +94,8 @@ First release.
 
 ### Fixed
 
+- **`alerts sync` keeps its own notification channels.** Another email channel for the same address (a platform's
+  own alerts) made every sync try to repoint the use case's policies; the channel Pipewright made now wins.
 - **Steps with only `retries` or `cache`** no longer get an empty `resources` block in the compiled template: Agent
   Platform ran them on its sized-step backend, where the metadata server issues no ID tokens.
 - **A release reuses a contract only when its images and compiled templates are unchanged**, so a Pipewright

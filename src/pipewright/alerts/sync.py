@@ -150,7 +150,11 @@ def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run:
     except RuntimeError as e:
         plan.errors.append(str(e))
         return plan
-    by_email = {c["labels"].get("email_address"): c["name"] for c in live_channels}
+    # A project may have other email channels for the same address (a platform's own alerts): the one Pipewright
+    # made wins, so a new channel elsewhere never repoints the use case's policies.
+    mine = lambda c: (c.get("userLabels") or {}).get("pipewright-managed") == "true"  # noqa: E731
+    by_email = {c["labels"].get("email_address"): c["name"]
+                for c in sorted(live_channels, key=lambda c: (mine(c), c["name"]))}
     for email in emails:
         if email in by_email:
             plan.channels[email] = by_email[email]

@@ -84,6 +84,21 @@ def test_sync_creates_then_is_idempotent_then_deletes(repo):
     assert [p["displayName"] for p in mon.policies.values()] == ["pipewright churn dev: drift or performance alert"]
 
 
+def test_another_channel_for_the_same_address_changes_nothing(repo):
+    # A platform's own email channel for the same address (the GKE logging agent alert) must not repoint the use
+    # case's policies: found 2026-10-17, when every release's alerts sync tried to update all its policies.
+    mon = FakeMonitoring()
+    uc = uc_for(repo, notify=["team@acme.example"], events=["monitoring.alert"])
+    env = load_environment(repo.root, "dev")
+    alerts.sync(uc, env, mon)
+    mine = next(iter(mon.channels))
+    other = "projects/acme-ml-dev/notificationChannels/zzz-platform"
+    mon.channels[other] = {"name": other, "type": "email", "labels": {"email_address": "team@acme.example"}}
+    again = alerts.sync(uc, env, mon)
+    assert again.unchanged == ["monitoring.alert"] and not again.update and not again.channels_create
+    assert next(iter(mon.policies.values()))["notificationChannels"] == [mine]
+
+
 def test_no_recipients_removes_policies_and_dry_run_changes_nothing(repo):
     mon = FakeMonitoring()
     uc = uc_for(repo, notify=["team@acme.example"])
