@@ -108,6 +108,29 @@
           ],
           "pattern": "^projects/[^/]+/topics/[^/]+$",
           "description": "Pub/Sub topic for run requests from inside the perimeter (pushed to the launcher's /pubsub/run); used instead of calling /run when set"
+        },
+        "runtime": {
+          "enum": [
+            "cloud_run",
+            "gke"
+          ],
+          "description": "cloud_run (default): the launcher is a Cloud Run service fed by push subscriptions; gke: a Deployment in the cluster (private-gke) that pulls the same subscriptions"
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "runtime gke: the launcher's namespace"
+        },
+        "audiences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https://"
+          },
+          "description": "every name the launcher answers to (ID token audiences): its Cloud Run URL and its name in the cluster, so releases built under either runtime keep working"
         }
       }
     },

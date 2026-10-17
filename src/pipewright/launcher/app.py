@@ -96,6 +96,12 @@ def create_app(registry: Registry | None = None) -> Flask:
     def launcher_url() -> str:
         return ((reg().manifest.get("launcher") or {}).get("url") or request.url_root).rstrip("/")
 
+    def audiences() -> list[str]:
+        """Every name the launcher answers to: its URL and launcher.audiences (its Cloud Run URL and its name in the
+        cluster), so steps of releases built under either runtime keep working after the platform switches."""
+        extra = (reg().manifest.get("launcher") or {}).get("audiences") or []
+        return list(dict.fromkeys([launcher_url(), *(a.rstrip("/") for a in extra)]))
+
     def decisions() -> Decisions:
         if "decisions" not in state:
             r = reg()
@@ -108,7 +114,7 @@ def create_app(registry: Registry | None = None) -> Flask:
                 _event(event_type, contract, None, attributes=attributes, **data)
 
             def verify(token):
-                return identity.verify(token, [launcher_url(), identity.GCLOUD_CLIENT_ID])
+                return identity.verify(token, [*audiences(), identity.GCLOUD_CLIENT_ID])
 
             def champion_info(contract, champion):
                 name, version = champion.get("resource_name"), champion.get("version")
@@ -140,7 +146,11 @@ def create_app(registry: Registry | None = None) -> Flask:
     @app.post("/retraining/decide")
     def retraining_decide():
         body = request.get_json(silent=True) or {}
-        caller = identity.cloud_run_caller(request.headers.get("Authorization"))
+        if request.environ.get("pipewright.pulled"):
+            # Pulled from the subscription by the launcher itself (launcher.runtime gke): the same trust as a push.
+            caller = (reg().manifest.get("launcher") or {}).get("service_account", "").lower()
+        else:
+            caller = identity.cloud_run_caller(request.headers.get("Authorization"))
         if "message" in body:
             # Pushed from an approver group's subscription: only Pub/Sub (as the launcher identity) may push.
             if caller != (reg().manifest.get("launcher") or {}).get("service_account", "").lower():
@@ -272,7 +282,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         if body.get("kind") == "ray.cluster":
             # Pub/Sub does not say who published: the message carries the runner's ID token.
             try:
-                caller = identity.verify(body.get("id_token") or "", [launcher_url()])
+                caller = identity.verify(body.get("id_token") or "", audiences())
             except identity.NotVerified as e:
                 log.warning("ray request for %s dropped: %s", body.get("usecase"), e)
                 return jsonify(status="dropped", reason=str(e)), 200

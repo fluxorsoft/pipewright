@@ -46,6 +46,10 @@ class KubeClient:
         k = manifest.get("kubernetes") or {}
         if dns and k.get("dns_endpoint"):
             return cls(f"https://{k['dns_endpoint']}", None, gcp)
+        # Inside the cluster (the launcher on GKE): the in-cluster address, the same cluster CA.
+        inside = os.environ.get("PIPEWRIGHT_KUBERNETES_ENDPOINT")
+        if inside:
+            return cls(inside, k.get("ca_certificate"), gcp)
         if not k.get("endpoint"):
             raise KubeError(0, "the environment manifest has no kubernetes.endpoint (orchestrator kfp)")
         return cls(k["endpoint"], k.get("ca_certificate"), gcp)
