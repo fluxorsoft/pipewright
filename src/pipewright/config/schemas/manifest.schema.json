@@ -481,6 +481,46 @@
           "description": "kubernetes: the user ID the CronJobs run as (the image's non-root user; default 10001, the launcher image's)"
         }
       }
+    },
+    "kserve": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "description": "private-gke: KServe for use cases with model.serving.target kserve",
+      "properties": {
+        "mirror": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "image mirror in the environment's registry (serving images from elsewhere are pulled from it)"
+        },
+        "service_account": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "the Kubernetes service account model servers run as (bound to the tenant's read-only serving identity)"
+        },
+        "namespaces": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "description": "tenant => namespace of its InferenceServices"
+        },
+        "exposure": {
+          "enum": [
+            "cluster",
+            "internal_lb"
+          ],
+          "description": "cluster: reached inside the cluster; internal_lb: also an internal load balancer in the VPC"
+        }
+      }
     }
   },
   "$defs": {

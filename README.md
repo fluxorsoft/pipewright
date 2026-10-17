@@ -134,7 +134,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
 | Run | A shared, multi-tenant launcher on Cloud Run: file drops, schedules (Cloud Scheduler, or Kubernetes CronJobs where the platform's manifest says so), API calls and Pub/Sub run requests; deterministic run IDs, so retries never start duplicates |
-| Serve | Model Registry with the default version as the champion, promotion following an approval policy, online serving with an approval gate, canary, promote and undeploy |
+| Serve | Model Registry with the default version as the champion, promotion following an approval policy, online serving with an approval gate, canary, promote and undeploy (Agent Platform endpoints, or KServe on private GKE with the same request format), `pipewright model predict` |
 | Monitor | Feature drift and prediction drift (PSI) against training baselines, live performance once outcomes arrive, `monitor status`, email alerts configured in YAML |
 | Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps |
 | Observe | Lifecycle events on Pub/Sub and labelled structured logs for every key moment, with no vendor code in pipelines |

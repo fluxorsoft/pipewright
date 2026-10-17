@@ -215,6 +215,17 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
         else:
             report.add(s, Result(WARN, "landing notifications", error_text(resp)))
 
+    if uc.model["serving"]["enabled"] and uc.model["serving"]["target"] == "kserve":
+        from pipewright.models import kserve
+
+        try:
+            k = kserve.KServe(uc, env, gcp)
+            live = k.current()
+            running = ((live or {}).get("metadata", {}).get("labels") or {}).get("pipewright.dev/version")
+            report.add(s, Result(OK, f"serving: KServe in {k.s['namespace']}",
+                                 f"{k.name} serves v{running}" if running else f"{k.name} not deployed yet"))
+        except Exception as e:  # noqa: BLE001 - reported, not raised
+            report.add(s, Result(FAIL, "serving: KServe", str(e)[:300], "ask the platform team"))
     if uc.triggers["schedules"] and _schedule_backend(env) == "kubernetes":
         from pipewright.schedules import kubernetes
 
@@ -559,7 +570,7 @@ def _schedule_backend(env: Environment) -> str:
 def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
     s = "Permissions of the identity running doctor (what `release` will need)"
     wanted = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload"]
-    if uc.model["serving"]["enabled"]:
+    if uc.model["serving"]["enabled"] and uc.model["serving"]["target"] != "kserve":
         wanted += ["aiplatform.endpoints.deploy"]
     if uc.triggers["schedules"] and _schedule_backend(env) == "cloud_scheduler":
         wanted += ["cloudscheduler.jobs.create", "cloudscheduler.jobs.update"]

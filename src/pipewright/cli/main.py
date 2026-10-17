@@ -182,6 +182,19 @@ def cmd_deploy_model(args) -> int:
     env = load_environment(Path(args.root), args.env)
     uc = resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env)
     gcp = Gcp()
+    if uc.model["serving"]["target"] == "kserve":
+        from pipewright.models import kserve
+
+        if args.undeploy:
+            kserve.undeploy(uc, env, gcp)
+            return 0
+        if args.promote or args.undeploy_canary:
+            raise ConfigError("model.serving.target kserve has no canary to promote or remove (KServe in Standard "
+                              "mode cannot split traffic)")
+        if not args.dry_run:
+            deploy_model.check_approval(uc, gcp.identity(), args.approve)
+        kserve.deploy(uc, env, gcp, canary=args.canary, dry_run=args.dry_run)
+        return 0
     creds = gcp.session.credentials
     if args.undeploy:
         deploy_model.undeploy(uc, env, creds)
@@ -206,6 +219,41 @@ def cmd_deploy_model(args) -> int:
 def _one(args):
     env = load_environment(Path(args.root), args.env)
     return resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env), env
+
+
+def cmd_model_predict(args) -> int:
+    import json
+
+    from pipewright.gcp import Gcp
+
+    uc, env = _one(args)
+    text = Path(args.instances).read_text(encoding="utf-8") if Path(args.instances).is_file() else args.instances
+    try:
+        instances = json.loads(text)
+    except ValueError as e:
+        raise ConfigError(f"--instances is not JSON (a list of instances, or a file with one): {e}") from None
+    instances = instances.get("instances", instances) if isinstance(instances, dict) else instances
+    gcp = Gcp()
+    if uc.model["serving"]["target"] == "kserve":
+        from pipewright.models import kserve
+
+        result = kserve.KServe(uc, env, gcp).predict(instances)
+    else:
+        from pipewright.gcp import error_text
+        from pipewright.models.deploy import endpoint_name
+
+        api = f"https://{env.region}-aiplatform.googleapis.com/v1/projects/{env.project}/locations/{env.region}"
+        found = gcp.get(f"{api}/endpoints", filter=f'display_name="{endpoint_name(uc)}"')
+        endpoints = (found.body or {}).get("endpoints") or [] if found.ok else []
+        if not endpoints:
+            raise ConfigError(f"{endpoint_name(uc)} does not exist: run `pipewright deploy-model`")
+        r = gcp.post(f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoints[0]['name']}:predict",
+                     {"instances": instances})
+        if not r.ok:
+            raise ConfigError(f"prediction failed: {error_text(r)}")
+        result = r.body
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def cmd_model_list(args) -> int:
@@ -543,6 +591,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = msub.add_parser("list", help="versions, newest first; DEFAULT is the champion")
     one(sp)
     sp.set_defaults(func=cmd_model_list)
+    sp = msub.add_parser("predict", help="send instances to the use case's endpoint (Agent Platform or KServe)")
+    one(sp)
+    sp.add_argument("--instances", required=True,
+                    help='JSON list of instances, or a file with one (or {"instances": ...})')
+    sp.set_defaults(func=cmd_model_predict)
     sp = msub.add_parser("approve", help="make a version the default (approvals.promote_model)")
     one(sp)
     sp.add_argument("--version", required=True, help="version id, e.g. 4")
