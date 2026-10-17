@@ -1336,7 +1336,7 @@ wheels = [
 
 [[package]]
 name = "pipewright-mlops"
-version = "0.4.0.dev0"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
@@ -1371,7 +1371,7 @@ dev = [
 requires-dist = [
     { name = "flask", marker = "extra == 'launcher'", specifier = ">=3" },
     { name = "google-auth", marker = "extra == 'gcp'", specifier = ">=2.30" },
-    { name = "google-cloud-aiplatform", extras = ["pipelines"], marker = "extra == 'gcp'", specifier = ">=1.70" },
+    { name = "google-cloud-aiplatform", extras = ["pipelines"], marker = "extra == 'gcp'", specifier = ">=1.70,!=2.0.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'gcp'", specifier = ">=3.25" },
     { name = "google-cloud-storage", marker = "extra == 'gcp'", specifier = ">=2.18,<4" },
     { name = "gunicorn", marker = "extra == 'launcher'", specifier = ">=22" },
