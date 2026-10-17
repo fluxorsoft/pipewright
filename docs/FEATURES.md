@@ -79,7 +79,8 @@ data:
   Choose the cut-off as the moment the prediction would have been made.
 - **Scoring:** give the scoring table the cut-off column as the scoring date. It makes scores reproducible. A table
   without the column is cut off at the query time (the contract must then mark the column `required: false`).
-- **Nothing else changes:** validation, splits, training, gates, monitoring and the model card work as before.
+- **Nothing else changes:** validation, splits, training, gates, monitoring and the model card work as before, on
+  Agent Platform Pipelines and on Kubeflow Pipelines in private GKE alike.
 
 `pipewright new-usecase --from features` starts from a working example.
 

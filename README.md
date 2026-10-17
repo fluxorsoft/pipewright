@@ -17,6 +17,14 @@ Pipewright is open source under the [Apache License 2.0](LICENSE) and maintained
 
 <sub>Editable source: [docs/images/pipewright-architecture.drawio](docs/images/pipewright-architecture.drawio) (draw.io, official Google Cloud icons).</sub>
 
+**The same environment on private GKE.** One setting in the manifest (`orchestrator: kfp`) runs the same pipelines
+on Kubeflow Pipelines in a private GKE cluster, with Ray on KubeRay and online serving on KServe. Templates,
+contracts, the CLI and everything outside the cluster stay the same.
+
+![Pipewright (open source) on Google Cloud with private GKE: Kubeflow Pipelines, KubeRay and KServe in the cluster](docs/images/pipewright-gke-architecture.png)
+
+<sub>Editable source: [docs/images/pipewright-gke-architecture.drawio](docs/images/pipewright-gke-architecture.drawio).</sub>
+
 The platform team builds the environment once and publishes an **environment manifest**: the names of everything a
 team may use. ML teams then work only with their own configuration and code; the `pipewright` CLI and the shared
 launcher do the rest.
@@ -32,20 +40,21 @@ resources in each environment's project and describes them in the manifest
 | Artifacts bucket | Cloud Storage | The environment manifest, release contracts and live pointers, pipeline roots, retrain cases | Always |
 | Landing bucket | Cloud Storage, with a Pub/Sub notification | Files dropped under a team's prefix start runs | For file triggers |
 | Registries | Artifact Registry: a Docker and a KFP repository (Python optional) | Component images and compiled pipeline templates, pinned by digest | Always |
-| Pipelines | Agent Platform Pipelines (formerly Vertex AI Pipelines) | Training and inference runs | Always |
-| Models | Model Registry; endpoints for online serving | Versions, the champion, approvals; serving with canary | Always (endpoints optional) |
+| Pipelines | Agent Platform Pipelines (formerly Vertex AI Pipelines), or Kubeflow Pipelines v2 in a private GKE cluster (manifest `orchestrator: kfp`) | Training and inference runs | Always (one of the two) |
+| Kubernetes (private GKE only) | GKE: private nodes and endpoint, the API through its DNS endpoint, Workload Identity; Kubeflow Pipelines, KubeRay and optionally KServe installed, their images mirrored into Artifact Registry | Kubeflow runs as each team's identity, Ray clusters, online serving, optionally schedules as CronJobs and the launcher as a pull worker | With `orchestrator: kfp` |
+| Models | Model Registry; Agent Platform endpoints or KServe for online serving | Versions, the champion, approvals; serving (canary on endpoints) | Always (serving optional) |
 | Team data | BigQuery: one dataset per team | Raw data, predictions, metrics and monitoring tables | Always |
 | Launcher | Cloud Run, from `images/launcher.Dockerfile`, with its own service account | Turns files, schedules, API calls and run requests into pipeline runs; handles retrain decisions | Always |
 | Identities | IAM service accounts: the launcher, one runner per team, CI (Workload Identity Federation) | Every pipeline step runs as its team's runner; nothing uses keys | Always |
 | Messaging | Pub/Sub topics: landing events, run requests, lifecycle events, one per approver group | Triggers, runs from inside a private network, events for alerts and audit, approvals | Events and approvals recommended; run requests for private networks |
-| Schedules | Cloud Scheduler | Scheduled runs; the hourly retrain tick and weekly digest | For schedules and retrain decisions |
+| Schedules | Cloud Scheduler, or Kubernetes CronJobs on private GKE | Scheduled runs; the hourly retrain tick and weekly digest | For schedules and retrain decisions |
 | Alerts | Cloud Logging and Cloud Monitoring | Labelled logs, email alerts per use case, decision emails | Recommended |
 | Encryption | Cloud KMS (customer-managed keys) | Applied to pipeline jobs, models, endpoints and BigQuery queries | Optional (regulated environments) |
 | Private network | VPC, Private Service Connect, Private Services Access, VPC Service Controls | No public endpoints; pipeline workers peered with your network | Optional (regulated environments) |
 
 **APIs to enable:** `aiplatform`, `artifactregistry`, `bigquery`, `cloudscheduler`, `iam`, `iamcredentials`,
 `logging`, `monitoring`, `pubsub`, `run`, `storage` (all `.googleapis.com`), plus `cloudkms` for customer-managed
-keys.
+keys and `container` for private GKE.
 
 **Setting up the platform side.** This repository does not include Terraform for the environment. If you would like
 help building one, or the Terraform we use, email [hello@fluxorsoft.com](mailto:hello@fluxorsoft.com) or open a
@@ -130,10 +139,10 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 |---|---|
 | Configure | Multi-file use cases (one concern per file), JSON Schema validation with path-qualified errors, `${...}` references to manifest names, per-environment overrides on a fixed list of keys, `resolve` to print the effective configuration |
 | Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, **features from feature tables** joined point in time (no value from after a row's cut-off reaches training), tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
-| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray on Agent Platform** for a step that needs a cluster: one cluster per run, sized in `steps.<step>.ray` within the platform's limits, deleted when the step ends |
+| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray** for a step that needs a cluster: on Agent Platform, or on KubeRay in private GKE; one cluster per run, sized in `steps.<step>.ray` within the platform's limits and deleted when the step ends, or on private GKE a standing cluster per team that scales its workers to zero |
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
-| Run | A shared, multi-tenant launcher on Cloud Run: file drops, schedules (Cloud Scheduler, or Kubernetes CronJobs where the platform's manifest says so), API calls and Pub/Sub run requests; deterministic run IDs, so retries never start duplicates |
+| Run | A shared, multi-tenant launcher on Cloud Run, or inside a private GKE cluster pulling its subscriptions: file drops, schedules (Cloud Scheduler, or Kubernetes CronJobs where the platform's manifest says so), API calls and Pub/Sub run requests; deterministic run IDs, so retries never start duplicates |
 | Serve | Model Registry with the default version as the champion, promotion following an approval policy, online serving with an approval gate, canary, promote and undeploy (Agent Platform endpoints, or KServe on private GKE with the same request format), `pipewright model predict` |
 | Monitor | Feature drift and prediction drift (PSI) against training baselines, live performance once outcomes arrive, `monitor status`, email alerts configured in YAML |
 | Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps |
@@ -229,6 +238,11 @@ with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by
 - **A Ray step does not size itself:** no `cpu`, `memory` or `gpu` on a Ray step (Agent Platform runs sized steps where the metadata server issues no ID tokens, so the step could not ask the launcher); size the cluster.
 - **Checks:** `validate` refuses a step over the limits and a Ray client that does not match the clusters
   (`ray[default]` pinned in the component requirements, with `google-cloud-aiplatform[ray]`).
+- **On private GKE** (`orchestrator: kfp`): the same `ray_cluster()` and `ray_job()` calls get a KubeRay RayCluster
+  on the cluster's Ray node pool, from the mirrored Ray image, and the job is submitted inside the cluster. The
+  platform can instead give a team a **standing** cluster (`tenants.<t>.ray.mode: standing` in the manifest's `ray`
+  block): `ray-<tenant>`, kept by the platform, whose autoscaler adds workers for a job and removes them after the
+  idle minutes. A release records the mode, so changing it makes a new release. The step code is the same.
 
 `pipewright new-usecase --from ray` starts from an example that runs the churn tuning trials in parallel on Ray.
 
@@ -411,16 +425,16 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Retrain decisions | Built and used end to end |
 | Private-environment support (CMEK, VPC, internal launcher, Pub/Sub run requests) | Built and used end to end |
 | Promotion of a release and its approved model between environments | Built |
-| Kubeflow Pipelines on GKE (`kfp` adapter) | Planned |
+| Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
-| 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Next |
+| 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
 | PyPI release (`pipewright-mlops`) | When the repository is public |
-| Ray on Agent Platform, a cluster per Ray step of a run | Built |
+| Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
-| Standing (long-lived) Ray clusters | Not planned: standalone clusters are for development, outside Pipewright; pipelines use a cluster per run |
+| Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 
