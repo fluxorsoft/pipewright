@@ -423,6 +423,14 @@
           "type": "string",
           "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
           "description": "where Kubeflow Pipelines runs and Ray clusters run"
+        },
+        "cluster": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^projects/[^/]+/locations/[^/]+/clusters/[^/]+$",
+          "description": "the GKE cluster's resource name (evidence reads its node disk keys, secrets key and network)"
         }
       }
     }

@@ -201,3 +201,25 @@ def test_run_description_fits_kubeflows_column_and_round_trips():
     assert len(text) <= kfp.DESCRIPTION_MAX and kept["pipewright-usecase"] == "x" * 63 and "trigger" not in kept
     assert kfp.run_labels("not json") == {} and kfp.run_labels(None) == {}
     assert kfp.run_labels('{"labels": {"pipewright-usecase": "churn"}}') == {"pipewright-usecase": "churn"}
+
+
+def test_oneof_branch_tasks_run_uncached_on_kubeflow():
+    spec = {"pipeline_spec": {"root": {"dag": {"tasks": {
+                "prepare": {"cachingOptions": {"enableCache": True}},
+                "condition-branches-1": {"componentRef": {"name": "comp-condition-branches-1"}},
+                "train": {"cachingOptions": {"enableCache": True}}}}},
+            "components": {
+                "comp-condition-branches-1": {"dag": {"tasks": {
+                    "condition-3": {"componentRef": {"name": "comp-condition-3"}},
+                    "condition-4": {"componentRef": {"name": "comp-condition-4"}}}}},
+                "comp-condition-3": {"dag": {"tasks": {
+                    "for-loop-2": {"componentRef": {"name": "comp-for-loop-2"}},
+                    "select-best": {"cachingOptions": {"enableCache": True}}}}},
+                "comp-for-loop-2": {"dag": {"tasks": {"tune-trial": {"cachingOptions": {"enableCache": True}}}}},
+                "comp-condition-4": {"dag": {"tasks": {"use-defaults": {"cachingOptions": {"enableCache": True}}}}},
+                "comp-train": {"executorLabel": "exec-train"}}}}
+    assert sorted(kfp.uncache_branches(spec)) == ["select-best", "tune-trial", "use-defaults"]
+    tasks = spec["pipeline_spec"]["root"]["dag"]["tasks"]
+    assert tasks["prepare"]["cachingOptions"] == {"enableCache": True}            # outside the branches: unchanged
+    defaults = spec["pipeline_spec"]["components"]["comp-condition-4"]["dag"]["tasks"]["use-defaults"]
+    assert defaults["cachingOptions"] == {}

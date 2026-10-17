@@ -74,6 +74,35 @@ def template(gcp, template_uri: str) -> dict:
     return {"pipeline_spec": docs[0], "platform_spec": docs[1]}
 
 
+def uncache_branches(spec: dict) -> list[str]:
+    """Turns caching off for the tasks inside dsl.OneOf branches (components `comp-condition-branches-*` and
+    everything under them), in place; returns their names. Kubeflow Pipelines resolves a OneOf output only from a
+    branch task that ran: when the chosen branch's task was a cache hit, the next step fails ("No successful task
+    found for output key", found 2026-10-17 on 2.17.2). Agent Platform resolves cached branches, so templates keep
+    their caching and only runs on Kubeflow change."""
+    pipeline = spec.get("pipeline_spec", spec)
+    components = pipeline.get("components") or {}
+    changed: list[str] = []
+
+    def walk(component: str, seen: set) -> None:
+        if component in seen:
+            return
+        seen.add(component)
+        for name, task in ((components.get(component) or {}).get("dag") or {}).get("tasks", {}).items():
+            if (task.get("cachingOptions") or {}).get("enableCache"):
+                task["cachingOptions"] = {}
+                changed.append(name)
+            child = (task.get("componentRef") or {}).get("name")
+            if child:
+                walk(child, seen)
+
+    seen: set = set()
+    for component in components:
+        if component.startswith("comp-condition-branches-"):
+            walk(component, seen)
+    return changed
+
+
 def find(kube: KubeClient, namespace: str, display_name: str) -> dict | None:
     flt = json.dumps({"predicates": [{"key": "display_name", "operation": "EQUALS", "string_value": display_name}]})
     r = kube.get(f"{api_path(namespace)}/runs", filter=flt, page_size=5)
@@ -94,10 +123,14 @@ def submit(contract: ReleaseContract, target: PipelineTarget, parameters: dict, 
     kube = KubeClient.from_manifest(manifest, gcp)
     if find(kube, namespace, job_id):
         raise AlreadySubmitted(job_id)
+    spec = template(gcp, target.template_uri)
+    uncached = uncache_branches(spec)
+    if uncached:
+        log.info("kubeflow run %s: no caching for OneOf branch tasks %s", job_id, ", ".join(sorted(uncached)))
     body = {
         "display_name": job_id,
         "description": run_description(labels),
-        "pipeline_spec": template(gcp, target.template_uri),
+        "pipeline_spec": spec,
         "runtime_config": {"parameters": parameters, "pipeline_root": contract.pipeline_root},
         "service_account": service_account,
     }
