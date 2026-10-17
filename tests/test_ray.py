@@ -76,7 +76,7 @@ def test_cluster_ids_are_deterministic_and_match_the_runtime():
         assert runtime.ray_cluster_id(*args) == settings.cluster_id(*args)
 
 
-def test_manifest_schema_takes_ray_and_refuses_standing():
+def test_manifest_schema_takes_ray_per_run_and_standing():
     from tests.conftest import MANIFEST
 
     m = json.loads(json.dumps(MANIFEST))
@@ -84,8 +84,11 @@ def test_manifest_schema_takes_ray_and_refuses_standing():
                 "limits": {"max_workers": 4, "machines": ["n1-standard-8"], "accelerators": [], "max_minutes": 90}}
     m["tenants"]["churn"]["ray"] = {"limits": {"max_workers": 1}}
     validate(m, "manifest", "m")
-    m["tenants"]["churn"]["ray"] = {"mode": "standing"}
-    with pytest.raises(ConfigError, match="standing"):
+    m["tenants"]["churn"]["ray"] = {"mode": "standing", "standing": {
+        "cluster": "ray-churn", "address": "http://ray-churn-head-svc.kubeflow.svc:8265"}}
+    validate(m, "manifest", "m")                    # standing clusters (private-gke), kept by the platform
+    m["tenants"]["churn"]["ray"] = {"mode": "shared"}
+    with pytest.raises(ConfigError, match="shared"):
         validate(m, "manifest", "m")
 
 

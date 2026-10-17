@@ -278,8 +278,11 @@ def _ray(steps: dict, tenant: str, env: Environment, problems: list[str]) -> dic
                                               private=bool(env.security.get("network")))
     clusters, found = ray_settings.resolve_steps(steps, settings, orchestrator=env.orchestrator)
     problems += found
-    return {"mode": settings["mode"], "ray_version": settings["ray_version"],
-            "python_version": settings["python_version"], "steps": clusters}
+    out = {"mode": settings["mode"], "ray_version": settings["ray_version"],
+           "python_version": settings["python_version"], "steps": clusters}
+    if settings["mode"] == "standing":
+        out["standing"] = {k: (settings.get("standing") or {}).get(k) for k in ("cluster", "address", "image")}
+    return out
 
 
 def _feature_policy(ml: dict, env: Environment, tenant: str, problems: list[str]) -> None:

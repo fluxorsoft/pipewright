@@ -22,7 +22,7 @@ import re
 
 from pipewright.config.merge import deep_merge
 
-MODES = ("per_run",)
+MODES = ("per_run", "standing")
 DEFAULTS = {
     "enabled": True,                 # a private blueprint sets false until its platform file turns Ray on
     "mode": "per_run",
@@ -107,8 +107,13 @@ def check_step(step: str, cluster: dict, settings: dict, where: str, orchestrato
     if not settings.get("enabled", True):
         return [f"{label}: Ray clusters are not enabled in this environment for this tenant: ask the platform team"]
     if settings["mode"] not in MODES:
-        problems.append(f"{label}: Ray mode {settings['mode']!r} is not available; only per_run (a cluster per run) "
-                        "is supported (standing clusters are planned)")
+        problems.append(f"{label}: Ray mode {settings['mode']!r} is not available (per_run or standing)")
+    if settings["mode"] == "standing":
+        # The tenant's long-lived cluster (private-gke): its size is the platform's, so the step's is not checked.
+        if orchestrator != "kfp" or not (settings.get("standing") or {}).get("address"):
+            problems.append(f"{label}: Ray mode standing needs the tenant's standing cluster (private-gke): ask the "
+                            "platform team")
+        return problems
     allowed = limits.get("machines") or []
     for key in ("head_machine", "worker_machine"):
         if allowed and cluster[key] not in allowed:

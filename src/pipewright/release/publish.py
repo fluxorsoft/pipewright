@@ -92,7 +92,9 @@ def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, Templ
         pipelines=pipelines,
         metadata={"owner": uc.owner, "objective": uc.objective, "description": uc.description,
                   "contacts": list(uc.contacts), "model": uc.model["name"]},
-        ray=({"image": ray_image, "ray_version": uc.ray["ray_version"], "steps": uc.ray["steps"]}
+        ray=({"image": ray_image, "ray_version": uc.ray["ray_version"], "steps": uc.ray["steps"],
+              # the mode the release was built for (a standing release names its tenant's cluster)
+              **({"mode": "standing", "standing": uc.ray.get("standing")} if uc.ray.get("mode") == "standing" else {})}
              if uc.ray and ray_image else {}),
     )
     contract.validate()

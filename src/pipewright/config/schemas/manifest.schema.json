@@ -558,9 +558,10 @@
         },
         "mode": {
           "enum": [
-            "per_run"
+            "per_run",
+            "standing"
           ],
-          "description": "per_run: a cluster per Ray step of a run, created and deleted by the launcher (standing clusters are planned)"
+          "description": "per_run: a cluster per Ray step of a run, created and deleted by the launcher; standing (private-gke): the tenant's long-lived, autoscaling cluster (standing.address), which steps submit to"
         },
         "ray_version": {
           "enum": [
@@ -622,6 +623,32 @@
               "minimum": 5,
               "maximum": 1440,
               "description": "longest a cluster may live; cleanup removes it after this plus a grace period"
+            }
+          }
+        },
+        "standing": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "description": "mode standing: the tenant's cluster, kept by the platform",
+          "properties": {
+            "cluster": {
+              "type": "string",
+              "description": "the RayCluster's name"
+            },
+            "address": {
+              "type": "string",
+              "pattern": "^https?://",
+              "description": "the head's dashboard address inside the cluster"
+            },
+            "image": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the cluster's image (the tenant's packages)"
             }
           }
         }

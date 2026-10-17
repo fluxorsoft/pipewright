@@ -534,7 +534,13 @@ class _RayCluster:
         self.region = platform["region"]
         self.minutes = int(steps[step]["max_minutes"])
         self.kube = platform.get("orchestrator") == "kfp"
-        if self.kube:
+        standing = (platform.get("ray") or {}).get("standing") or {}
+        self.standing = (platform.get("ray") or {}).get("mode") == "standing"
+        if self.standing:
+            # The tenant's standing cluster (private-gke): kept by the platform, reached inside the cluster.
+            self.name = standing["address"].rstrip("/")
+            self.cluster, self.image = standing.get("cluster"), standing.get("image")
+        elif self.kube:
             # KubeRay on the environment's GKE cluster: the step reaches the head's dashboard inside the cluster.
             name = ray_kube_name(ml_config["usecase"], run_id, step)
             self.name = f"http://{name}-head-svc.{platform.get('kubernetes_namespace') or 'kubeflow'}.svc:8265"
@@ -568,6 +574,20 @@ class _RayCluster:
     def __enter__(self) -> str:
         import time
 
+        if self.standing:
+            deadline = time.time() + 600
+            while self._state().get("state") != "RUNNING":
+                if time.time() > deadline:
+                    raise RuntimeError(f"the tenant's standing Ray cluster {self.cluster} does not answer at "
+                                       f"{self.name}: ask the platform team")
+                time.sleep(15)
+            namespace = (self.ml_config.get("platform") or {}).get("kubernetes_namespace") or "kubeflow"
+            emit_event("ray.cluster.used", self.ml_config, self.run_id, step=self.step, mode="standing",
+                       cluster=f"kubernetes:{namespace}/rayclusters/{self.cluster}", service_account=_identity(),
+                       image=self.image)
+            log(f"using the standing Ray cluster {self.cluster} ({self.step})", self.ml_config, run_id=self.run_id)
+            return self.name
+
         log(f"asking for Ray cluster {self._label()} ({self.step})", self.ml_config,
             run_id=self.run_id, ray_cluster=self.name)
         _ray_request(self.ml_config, "create", self.step, self.run_id)
@@ -597,6 +617,8 @@ class _RayCluster:
         raise RuntimeError(f"Ray cluster {self.name} did not start (state {state}): {error.get('message', '')}")
 
     def __exit__(self, *exc) -> bool:
+        if self.standing:
+            return False            # the platform keeps it (it scales its workers down when idle)
         try:
             _ray_request(self.ml_config, "delete", self.step, self.run_id)
             log(f"Ray cluster {self._label()} deleted", self.ml_config, run_id=self.run_id)
@@ -604,6 +626,17 @@ class _RayCluster:
             log(f"Ray cluster delete failed (cleanup removes it after the run): {e}", self.ml_config, "WARNING",
                 self.run_id)
         return False
+
+
+def _identity() -> str | None:
+    """This step's service account email (the metadata server), for the evidence."""
+    import requests
+
+    try:
+        r = requests.get(f"{_METADATA}/default/email", headers={"Metadata-Flavor": "Google"}, timeout=5)
+        return r.text.strip() if r.status_code == 200 else None
+    except requests.RequestException:
+        return None
 
 
 def ray_cluster(ml_config: dict, step: str, run_id: str) -> _RayCluster:
@@ -623,7 +656,12 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
 
     # On GKE `cluster` is the head's dashboard address; on Agent Platform its resource name.
     client = JobSubmissionClient(cluster if cluster.startswith("http") else f"vertex_ray://{cluster}")
-    job = client.submit_job(entrypoint=entrypoint, runtime_env=runtime_env or {})
+    runtime_env = dict(runtime_env or {})
+    if ((ml_config.get("platform") or {}).get("ray") or {}).get("mode") == "standing":
+        # A standing cluster runs the tenant's image, not this release's: ship the release's component code.
+        runtime_env.setdefault("working_dir", os.path.dirname(os.path.abspath(__file__)))
+        runtime_env.setdefault("excludes", ["__pycache__", "*.pt", "*.mar", "*.parquet"])
+    job = client.submit_job(entrypoint=entrypoint, runtime_env=runtime_env)
     log(f"Ray job {job}: {entrypoint}", ml_config, run_id=run_id, ray_job=job)
     deadline, status = time.time() + 60 * timeout_minutes, None
     while time.time() < deadline:

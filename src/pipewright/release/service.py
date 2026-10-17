@@ -130,16 +130,19 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
 
     def same(c: ReleaseContract) -> bool:
         released = {n: c.pipeline(n).template_digest for n in c.pipeline_names}
+        ray_mode = (uc.ray or {}).get("mode", "per_run") if uc.ray else None
         return (c.component_image == component_image and (c.ray or {}).get("image") == ray_image
-                and released == digests and c.pipeline_root == publish.pipeline_root(env, uc))
+                and released == digests and c.pipeline_root == publish.pipeline_root(env, uc)
+                and ((c.ray or {}).get("mode", "per_run") if c.ray else None) == ray_mode)
 
     existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
     existing = ReleaseContract.from_json(existing_text) if existing_text else None
     if existing is not None and not same(existing):
         what = "|".join([component_image, ray_image or "", publish.pipeline_root(env, uc),
+                         (uc.ray or {}).get("mode", "") if uc.ray else "",
                          *(f"{n}={d}" for n, d in sorted(digests.items()))])
         release_id = f"{release_id}-{hashlib.sha256(what.encode()).hexdigest()[:8]}"
-        log(f"release {uc.name}: same commit, new images or templates: released as {release_id}")
+        log(f"release {uc.name}: same commit, new images, templates or Ray mode: released as {release_id}")
         existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
         existing = ReleaseContract.from_json(existing_text) if existing_text else None
         if existing is not None and not same(existing):

@@ -123,10 +123,15 @@ class RayClusters:
         if not run_id:
             raise RayRequestError("run_id is required")
         settings = self.settings(contract)
+        if (contract.ray or {}).get("mode") == "standing":
+            raise RayRequestError(f"{contract.usecase} release {contract.release_id} uses its tenant's standing Ray "
+                                  "cluster: steps submit to it, nothing is created")
         if not settings.get("enabled", True):
             raise RayRequestError(f"Ray clusters are not enabled for tenant {contract.tenant} in this environment")
-        if settings["mode"] != "per_run":
-            raise RayRequestError(f"Ray mode {settings['mode']} is not supported")
+        # The release's mode, not the tenant's current one: releases built per run keep their clusters when the
+        # tenant moves to a standing cluster, until they are released again.
+        if (contract.ray or {}).get("mode", "per_run") != "per_run":
+            raise RayRequestError(f"Ray mode {contract.ray.get('mode')} is not supported")
         if self.kubernetes():
             return self.kuberay().create(contract, step, run_id, settings)
         cid = cluster_id(contract.usecase, run_id, step)

@@ -223,3 +223,79 @@ def test_oneof_branch_tasks_run_uncached_on_kubeflow():
     assert tasks["prepare"]["cachingOptions"] == {"enableCache": True}            # outside the branches: unchanged
     defaults = spec["pipeline_spec"]["components"]["comp-condition-4"]["dag"]["tasks"]["use-defaults"]
     assert defaults["cachingOptions"] == {}
+
+
+# ---------------------------------------------------------------- standing clusters (private-gke)
+
+STANDING = {"cluster": "ray-nimbus", "address": "http://ray-nimbus-head-svc.kubeflow.svc:8265"}
+
+
+def test_standing_mode_needs_the_tenants_cluster_on_gke():
+    s = settings.platform_settings({"mode": "standing", "standing": STANDING}, None)
+    clusters, problems = settings.resolve_steps({"tune": {"ray": {"head_machine": "anything"}}}, s, orchestrator="kfp")
+    assert problems == [] and "tune" in clusters                       # the size is the platform's, not checked
+    _, problems = settings.resolve_steps({"tune": {"ray": {}}}, s, orchestrator="vertex")
+    assert problems and "standing cluster (private-gke)" in problems[0]
+    _, problems = settings.resolve_steps({"tune": {"ray": {}}}, settings.platform_settings({"mode": "standing"}, None),
+                                         orchestrator="kfp")
+    assert problems                                                     # no cluster named by the platform
+
+
+def test_the_launcher_creates_nothing_for_a_standing_release(fake):
+    rays = RayClusters(None, lambda: MANIFEST)
+    c = replace(contract(), ray={**contract().ray, "mode": "standing", "standing": STANDING})
+    with pytest.raises(RayRequestError, match="standing Ray cluster"):
+        rays.create(c, "tune-on-ray", "run-1", RUNNER)
+    assert not fake.clusters
+
+
+def test_a_step_uses_the_standing_cluster_and_ships_its_code(monkeypatch):
+    import sys
+    import types
+
+    runtime = runtime_module()
+    sent, events = [], []
+    monkeypatch.setattr(runtime, "_ray_request", lambda *a: sent.append(a))
+    monkeypatch.setattr(runtime, "log", lambda *a, **k: None)
+    monkeypatch.setattr(runtime, "emit_event", lambda t, cfg, run, **d: events.append((t, d)))
+    monkeypatch.setattr(runtime, "_identity", lambda: RUNNER)
+    monkeypatch.setattr(runtime._RayCluster, "_state", lambda self: {"state": "RUNNING"})
+    ml = {"usecase": "churn", "platform": {"project": "p", "region": "r", "orchestrator": "kfp",
+                                           "kubernetes_namespace": "kubeflow",
+                                           "ray": {"mode": "standing", "standing": STANDING,
+                                                   "steps": {"tune-on-ray": {"max_minutes": 60}}}}}
+    with runtime.ray_cluster(ml, "tune-on-ray", "run-1") as cluster:
+        assert cluster == STANDING["address"]
+    assert sent == []                                                   # nothing created, nothing deleted
+    assert events == [("ray.cluster.used", {"step": "tune-on-ray", "mode": "standing", "service_account": RUNNER,
+                                            "cluster": "kubernetes:kubeflow/rayclusters/ray-nimbus", "image": None})]
+
+    submitted = {}
+
+    class Client:
+        def __init__(self, address):
+            submitted["address"] = address
+
+        def submit_job(self, entrypoint, runtime_env):
+            submitted["runtime_env"] = runtime_env
+            return "job-1"
+
+        def get_job_status(self, job):
+            return "SUCCEEDED"
+
+        def get_job_logs(self, job):
+            return "done"
+
+    status = types.SimpleNamespace(SUCCEEDED="SUCCEEDED", FAILED="FAILED", STOPPED="STOPPED")
+    module = types.SimpleNamespace(JobSubmissionClient=Client, JobStatus=status)
+    monkeypatch.setitem(sys.modules, "ray", types.SimpleNamespace(job_submission=module))
+    monkeypatch.setitem(sys.modules, "ray.job_submission", module)
+    runtime.ray_job(ml, STANDING["address"], "python -m tune")
+    assert submitted["address"] == STANDING["address"]
+    assert Path(submitted["runtime_env"]["working_dir"]).parts[-2:] == ("build", "templates")
+
+
+def test_releases_built_per_run_keep_their_clusters_when_the_tenant_goes_standing(fake):
+    standing_tenant = {**MANIFEST, "ray": {"mode": "standing", "standing": STANDING}}
+    rays = RayClusters(None, lambda: standing_tenant)
+    assert rays.create(contract(), "tune-on-ray", "run-9", RUNNER)["status"] == "creating"   # its release: per run
