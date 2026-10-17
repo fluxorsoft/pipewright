@@ -256,6 +256,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   "events_topic": env.observability.get("events_topic"),
                   "run_requests_topic": env.launcher.get("run_requests_topic"),
                   "kms_key": env.security.get("kms_key"),
+                  "orchestrator": env.orchestrator,
+                  **({"kubernetes_namespace": (env.kubernetes or {}).get("namespace") or "kubeflow"}
+                     if env.orchestrator == "kfp" else {}),
                   "bigquery_kms_key": env.security.get("bigquery_kms_key"),
                   **({"ray": ray} if ray else {}),
                   # read_source refuses feature tables (and groups' tables) outside them
@@ -273,7 +276,7 @@ def _ray(steps: dict, tenant: str, env: Environment, problems: list[str]) -> dic
         return None
     settings = ray_settings.platform_settings(env.ray or None, (env.tenants.get(tenant) or {}).get("ray"),
                                               private=bool(env.security.get("network")))
-    clusters, found = ray_settings.resolve_steps(steps, settings)
+    clusters, found = ray_settings.resolve_steps(steps, settings, orchestrator=env.orchestrator)
     problems += found
     return {"mode": settings["mode"], "ray_version": settings["ray_version"],
             "python_version": settings["python_version"], "steps": clusters}

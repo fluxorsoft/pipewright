@@ -406,6 +406,15 @@ def ray_cluster_id(usecase: str, run_id: str, step: str) -> str:
     return f"pw-{stem}-{digest}"
 
 
+def ray_kube_name(usecase: str, run_id: str, step: str) -> str:
+    """The RayCluster name on GKE (orchestrator kfp)."""
+    import hashlib
+
+    digest = hashlib.sha256(f"{usecase}|{run_id}|{step}".encode()).hexdigest()[:12]
+    stem = _RAY_NAME.sub("-", f"{usecase}-{step}".lower()).strip("-")[:24].rstrip("-")
+    return f"pw-{stem}-{digest}"
+
+
 def _session():
     import google.auth
     from google.auth.transport.requests import AuthorizedSession
@@ -524,22 +533,51 @@ class _RayCluster:
         self.ml_config, self.step, self.run_id = ml_config, step, run_id
         self.region = platform["region"]
         self.minutes = int(steps[step]["max_minutes"])
-        self.name = (f"projects/{platform['project']}/locations/{self.region}/persistentResources/"
-                     f"{ray_cluster_id(ml_config['usecase'], run_id, step)}")
+        self.kube = platform.get("orchestrator") == "kfp"
+        if self.kube:
+            # KubeRay on the environment's GKE cluster: the step reaches the head's dashboard inside the cluster.
+            name = ray_kube_name(ml_config["usecase"], run_id, step)
+            self.name = f"http://{name}-head-svc.{platform.get('kubernetes_namespace') or 'kubeflow'}.svc:8265"
+        else:
+            self.name = (f"projects/{platform['project']}/locations/{self.region}/persistentResources/"
+                         f"{ray_cluster_id(ml_config['usecase'], run_id, step)}")
+
+    def _state(self) -> dict:
+        """{"state": RUNNING | PENDING | ERROR, ...}, or {} when there is no cluster yet."""
+        if not self.kube:
+            return _ray_state(self.name, self.region)
+        import socket
+
+        import requests
+
+        try:
+            r = requests.get(f"{self.name}/api/version", timeout=10)
+        except requests.RequestException:
+            # The head's Service exists (its name resolves) before the head is ready: the cluster is starting
+            # (a new Ray node and its image can take minutes); no name yet means no cluster yet.
+            try:
+                socket.gethostbyname(self.name.split("//", 1)[-1].rsplit(":", 1)[0])
+                return {"state": "PENDING"}
+            except OSError:
+                return {}
+        return {"state": "RUNNING"} if r.status_code == 200 else {"state": "PENDING"}
+
+    def _label(self) -> str:
+        return self.name.split("//", 1)[-1].split("-head-svc", 1)[0] if self.kube else self.name.rsplit("/", 1)[-1]
 
     def __enter__(self) -> str:
         import time
 
-        log(f"asking for Ray cluster {self.name.rsplit('/', 1)[-1]} ({self.step})", self.ml_config,
+        log(f"asking for Ray cluster {self._label()} ({self.step})", self.ml_config,
             run_id=self.run_id, ray_cluster=self.name)
         _ray_request(self.ml_config, "create", self.step, self.run_id)
         deadline, state = time.time() + 60 * min(self.minutes, 45), "PENDING"
         asked, resends = time.time(), 0
         while time.time() < deadline:
-            current = _ray_state(self.name, self.region)
+            current = self._state()
             state = current.get("state", "PENDING")
             if state == "RUNNING":
-                log(f"Ray cluster {self.name.rsplit('/', 1)[-1]} is running", self.ml_config, run_id=self.run_id)
+                log(f"Ray cluster {self._label()} is running", self.ml_config, run_id=self.run_id)
                 return self.name
             if state == "ERROR":
                 break
@@ -551,17 +589,17 @@ class _RayCluster:
                                        f"{resends + 1} requests: see the launcher's logs ('ray create')")
                 _ray_request(self.ml_config, "create", self.step, self.run_id)
                 asked, resends = time.time(), resends + 1
-                log(f"asked again for Ray cluster {self.name.rsplit('/', 1)[-1]} ({resends})", self.ml_config,
+                log(f"asked again for Ray cluster {self._label()} ({resends})", self.ml_config,
                     "WARNING", self.run_id)
             time.sleep(20)
         self.__exit__(None, None, None)
-        error = _ray_state(self.name, self.region).get("error") or {}
+        error = {} if self.kube else _ray_state(self.name, self.region).get("error") or {}
         raise RuntimeError(f"Ray cluster {self.name} did not start (state {state}): {error.get('message', '')}")
 
     def __exit__(self, *exc) -> bool:
         try:
             _ray_request(self.ml_config, "delete", self.step, self.run_id)
-            log(f"Ray cluster {self.name.rsplit('/', 1)[-1]} deleted", self.ml_config, run_id=self.run_id)
+            log(f"Ray cluster {self._label()} deleted", self.ml_config, run_id=self.run_id)
         except Exception as e:  # noqa: BLE001 - the launcher's cleanup removes it once the run ends
             log(f"Ray cluster delete failed (cleanup removes it after the run): {e}", self.ml_config, "WARNING",
                 self.run_id)
@@ -583,7 +621,8 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
 
     from ray.job_submission import JobStatus, JobSubmissionClient
 
-    client = JobSubmissionClient(f"vertex_ray://{cluster}")
+    # On GKE `cluster` is the head's dashboard address; on Agent Platform its resource name.
+    client = JobSubmissionClient(cluster if cluster.startswith("http") else f"vertex_ray://{cluster}")
     job = client.submit_job(entrypoint=entrypoint, runtime_env=runtime_env or {})
     log(f"Ray job {job}: {entrypoint}", ml_config, run_id=run_id, ray_job=job)
     deadline, status = time.time() + 60 * timeout_minutes, None

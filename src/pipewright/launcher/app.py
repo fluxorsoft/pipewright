@@ -79,7 +79,8 @@ def create_app(registry: Registry | None = None) -> Flask:
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
         try:
             name = adapters.submit(contract, target, parameters_for(contract, target, source_uri, rid), jid,
-                                   labels_for(contract, trigger, rid, pipeline), reg().manifest.get("security"))
+                                   labels_for(contract, trigger, rid, pipeline), reg().manifest.get("security"),
+                                   manifest=reg().manifest, gcp=getattr(reg(), "gcp", None))
             log.info("submitted %s (%s %s, release %s) for %s", name, contract.usecase, pipeline,
                      contract.release_id, source_uri)
             _event("run.submitted", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid,

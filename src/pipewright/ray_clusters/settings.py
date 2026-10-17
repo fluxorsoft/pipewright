@@ -88,18 +88,20 @@ def base_image(settings: dict, region: str, gpu: bool = False) -> str:
     return settings.get("image") or prebuilt_image(region, settings["ray_version"], settings["python_version"], gpu)
 
 
-def step_cluster(spec: dict, settings: dict) -> dict:
+def step_cluster(spec: dict, settings: dict, orchestrator: str = "vertex") -> dict:
     """A step's `ray` request with the defaults filled in."""
     limits = settings["limits"]
     machines = limits.get("machines") or ["n1-standard-8"]
-    head = spec.get("head_machine") or next((m for m in machines if _big_enough(m)), machines[0])
+    fits = _big_enough if orchestrator == "vertex" else (lambda m: True)
+    head = spec.get("head_machine") or next((m for m in machines if fits(m)), machines[0])
     return {"head_machine": head, "worker_machine": spec.get("worker_machine") or head,
             "workers": int(spec.get("workers", 1)), "accelerator": spec.get("accelerator"),
             "max_minutes": int(spec.get("max_minutes") or limits["max_minutes"])}
 
 
-def check_step(step: str, cluster: dict, settings: dict, where: str) -> list[str]:
-    """Problems with a step's cluster against the platform's limits (empty when it fits)."""
+def check_step(step: str, cluster: dict, settings: dict, where: str, orchestrator: str = "vertex") -> list[str]:
+    """Problems with a step's cluster against the platform's limits (empty when it fits). The head node's minimum
+    size is Ray on Agent Platform's; KubeRay on GKE (orchestrator kfp) has none."""
     problems, limits = [], settings["limits"]
     label = f"{where}.{step}.ray"
     if not settings.get("enabled", True):
@@ -111,7 +113,7 @@ def check_step(step: str, cluster: dict, settings: dict, where: str) -> list[str
     for key in ("head_machine", "worker_machine"):
         if allowed and cluster[key] not in allowed:
             problems.append(f"{label}.{key} {cluster[key]} is not allowed (the platform allows {', '.join(allowed)})")
-    if not _big_enough(cluster["head_machine"]):
+    if orchestrator == "vertex" and not _big_enough(cluster["head_machine"]):
         problems.append(f"{label}.head_machine {cluster['head_machine']} has {machine_cpus(cluster['head_machine'])} "
                         f"vCPUs and {machine_memory_gb(cluster['head_machine']):g} GB: a Ray head node needs at least "
                         f"{HEAD_MIN_CPUS} vCPUs and more than {HEAD_MIN_MEMORY_GB} GB (for example n1-standard-16)")
@@ -134,14 +136,15 @@ def check_step(step: str, cluster: dict, settings: dict, where: str) -> list[str
     return problems
 
 
-def resolve_steps(steps: dict, settings: dict, where: str = "steps") -> tuple[dict, list[str]]:
+def resolve_steps(steps: dict, settings: dict, where: str = "steps",
+                  orchestrator: str = "vertex") -> tuple[dict, list[str]]:
     """({step: cluster} for every step that asks for Ray, problems)."""
     clusters, problems = {}, []
     for step, cfg in (steps or {}).items():
         if not isinstance(cfg, dict) or "ray" not in cfg:
             continue
-        cluster = step_cluster(cfg["ray"] or {}, settings)
-        problems += check_step(step, cluster, settings, where)
+        cluster = step_cluster(cfg["ray"] or {}, settings, orchestrator)
+        problems += check_step(step, cluster, settings, where, orchestrator)
         sized = [k for k in ("cpu", "memory", "gpu") if k in cfg]
         if sized:
             # A step with its own CPU or memory runs where the metadata server issues no ID tokens, so it could not
@@ -163,6 +166,14 @@ def cluster_id(usecase: str, run_id: str, step: str) -> str:
     share one. At most 63 characters, starting with a letter."""
     digest = hashlib.sha256(f"{usecase}|{run_id}|{step}".encode()).hexdigest()[:12]
     stem = _NAME.sub("-", f"{usecase}-{step}".lower()).strip("-")[:44].rstrip("-")
+    return f"pw-{stem}-{digest}"
+
+
+def kube_cluster_name(usecase: str, run_id: str, step: str) -> str:
+    """The RayCluster name on GKE (orchestrator kfp): shorter than cluster_id, because KubeRay names the head's
+    Service `<name>-head-svc` and shortens a Service name over 50 characters, which the step would not find."""
+    digest = hashlib.sha256(f"{usecase}|{run_id}|{step}".encode()).hexdigest()[:12]
+    stem = _NAME.sub("-", f"{usecase}-{step}".lower()).strip("-")[:24].rstrip("-")
     return f"pw-{stem}-{digest}"
 
 

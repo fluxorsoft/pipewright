@@ -119,7 +119,7 @@ def client(monkeypatch):
 
     calls = []
 
-    def fake_submit(contract, target, params, job_id, labels, security=None):
+    def fake_submit(contract, target, params, job_id, labels, security=None, manifest=None, gcp=None):
         if job_id in [c[1] for c in calls]:
             raise AlreadySubmitted(job_id)
         calls.append((contract.usecase, job_id, params, labels, security))

@@ -34,6 +34,7 @@ class Environment:
     approver_groups: dict = field(default_factory=dict)   # name -> {topic, subscription}: retrain decisions
     ray: dict = field(default_factory=dict)       # Ray clusters: mode, version, image, network attachment, limits
     features: dict = field(default_factory=dict)  # feature tables: required (tenants list their datasets)
+    kubernetes: dict = field(default_factory=dict)  # orchestrator kfp: endpoint, ca_certificate, namespace
     manifest_ignored: tuple = ()                  # manifest keys this version does not know (R-05): ignored
     promotion_from: str | None = None
     manifest_source: str | None = None
@@ -91,7 +92,8 @@ def environment_from_manifest(ref: str, base_dir: Path = Path(".")) -> Environme
         policies=manifest.get("policies", {}), tenants=manifest.get("tenants", {}),
         observability=manifest.get("observability") or {}, security=manifest.get("security") or {},
         approver_groups=manifest.get("approver_groups") or {}, ray=manifest.get("ray") or {},
-        features=manifest.get("features") or {}, manifest_ignored=tuple(ignored),
+        features=manifest.get("features") or {}, kubernetes=manifest.get("kubernetes") or {},
+        manifest_ignored=tuple(ignored),
         manifest_source=source, source=source,
     )
 
@@ -142,6 +144,7 @@ def load_environment(root: Path, name: str) -> Environment:
         approver_groups=manifest.get("approver_groups") or {},
         ray=manifest.get("ray") or {},
         features=manifest.get("features") or {},
+        kubernetes=manifest.get("kubernetes") or {},
         manifest_ignored=tuple(ignored),
         promotion_from=spec.get("promotion", {}).get("from"),
         manifest_source=manifest_source,

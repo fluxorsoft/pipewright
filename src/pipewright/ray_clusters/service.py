@@ -14,11 +14,12 @@ has ended or whose deadline has passed even when the step that made them was kil
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
 
-from pipewright.ray_clusters.settings import cluster_id, platform_settings
+from pipewright.ray_clusters.settings import cluster_id, kube_cluster_name, platform_settings
 from pipewright.release.contract import ReleaseContract
 
 log = logging.getLogger("pipewright.launcher")
@@ -96,6 +97,13 @@ class RayClusters:
         self.gcp = gcp
         self.manifest = manifest_getter
 
+    def kubernetes(self) -> bool:
+        """Clusters are KubeRay RayClusters on the environment's GKE cluster (orchestrator kfp)."""
+        return self.manifest().get("orchestrator") == "kfp"
+
+    def kuberay(self) -> KubeRayClusters:
+        return KubeRayClusters(self.gcp, self.manifest)
+
     def settings(self, contract: ReleaseContract) -> dict:
         manifest = self.manifest()
         tenant = (manifest.get("tenants") or {}).get(contract.tenant) or {}
@@ -119,6 +127,8 @@ class RayClusters:
             raise RayRequestError(f"Ray clusters are not enabled for tenant {contract.tenant} in this environment")
         if settings["mode"] != "per_run":
             raise RayRequestError(f"Ray mode {settings['mode']} is not supported")
+        if self.kubernetes():
+            return self.kuberay().create(contract, step, run_id, settings)
         cid = cluster_id(contract.usecase, run_id, step)
         parent = f"projects/{contract.project}/locations/{contract.region}"
         body = cluster_body(contract, step, run_id, settings, self.manifest().get("security"))
@@ -143,6 +153,8 @@ class RayClusters:
 
     def delete(self, contract: ReleaseContract, step: str, run_id: str, caller: str | None) -> dict:
         self._check(contract, step, caller)
+        if self.kubernetes():
+            return self.kuberay().delete(kube_cluster_name(contract.usecase, run_id, step))
         cid = cluster_id(contract.usecase, run_id, step)
         name = f"projects/{contract.project}/locations/{contract.region}/persistentResources/{cid}"
         r = self.gcp.delete(f"{_api(contract.region)}/{name}")
@@ -178,6 +190,8 @@ class RayClusters:
 
     def reap(self, project: str, region: str, now: float | None = None) -> list[dict]:
         """Deletes clusters whose run has ended, or whose deadline has passed. Never fails the tick."""
+        if self.kubernetes():
+            return self.kuberay().reap(now)
         now = now or time.time()
         results = []
         try:
@@ -216,3 +230,173 @@ def _age_minutes(cluster: dict, now: float) -> float:
     except ValueError:
         return 0.0
     return (now - t.replace(tzinfo=t.tzinfo or timezone.utc).timestamp()) / 60
+
+
+# ---------------------------------------------------------------- KubeRay (orchestrator kfp, private-gke)
+#
+# On private GKE a step's cluster is a KubeRay RayCluster in the Kubeflow namespace, on the platform's Ray node pool
+# (tainted, so only Ray pods land there), with its pods running as the tenant's Kubernetes service account, which
+# Workload Identity binds to the runner: the same identity as on Agent Platform. The step reaches the head node
+# directly inside the cluster, so there is no public endpoint and no Private Service Connect.
+
+RAY_POOL = {"pipewright.dev/pool": "ray"}
+RAY_TOLERATION = {"key": "pipewright.dev/ray", "operator": "Equal", "value": "true", "effect": "NoSchedule"}
+KFP_TERMINAL = {"SUCCEEDED", "FAILED", "CANCELED", "SKIPPED"}
+CPU_SHARE, MEMORY_SHARE = 0.85, 0.8   # of a machine type's vCPUs and memory: what a pod on that node can have
+
+
+def pod_resources(machine: str) -> dict:
+    """The pod size for a machine type in steps.<step>.ray (a node keeps some of its machine for its own agents, so
+    a pod gets most of the machine, not all of it)."""
+    from pipewright.ray_clusters.settings import machine_cpus, machine_memory_gb
+
+    cpus, memory = machine_cpus(machine), machine_memory_gb(machine)
+    if cpus is None or memory is None:
+        raise RayRequestError(f"machine type {machine} is not known: name a predefined type such as e2-standard-8")
+    size = {"cpu": f"{max(1000, int(cpus * CPU_SHARE * 1000))}m", "memory": f"{max(1, int(memory * MEMORY_SHARE))}Gi"}
+    return {"requests": dict(size), "limits": dict(size)}
+
+
+def raycluster_body(contract: ReleaseContract, step: str, run_id: str, settings: dict, namespace: str,
+                    service_account: str, now: float | None = None) -> dict:
+    """The RayCluster for a step's cluster: a head node and, when asked, one worker group."""
+    from pipewright.ray_clusters.settings import RAY_RELEASES
+
+    spec = contract.ray["steps"][step]
+    if spec.get("accelerator"):
+        raise RayRequestError(f"step {step}: accelerators for Ray are not available on GKE yet")
+    deadline = int((now or time.time()) + 60 * (int(spec["max_minutes"]) + GRACE_MINUTES))
+    labels = {**MANAGED, "pipewright-usecase": _label(contract.usecase), "pipewright-tenant": _label(contract.tenant),
+              "run-id": _label(run_id), "pipewright-step": _label(step),
+              "pipewright-release": _label(contract.release_id), "pipewright-deadline": str(deadline)}
+
+    def pod(container: str, machine: str, ports: list[dict]) -> dict:
+        return {"metadata": {"labels": dict(labels)},
+                "spec": {"serviceAccountName": service_account, "nodeSelector": dict(RAY_POOL),
+                         "tolerations": [dict(RAY_TOLERATION)],
+                         "containers": [{"name": container, "image": contract.ray["image"],
+                                         "resources": pod_resources(machine), "ports": ports}]}}
+
+    head_ports = [{"name": "gcs", "containerPort": 6379}, {"name": "dashboard", "containerPort": 8265},
+                  {"name": "client", "containerPort": 10001}]
+    body = {
+        "apiVersion": "ray.io/v1", "kind": "RayCluster",
+        "metadata": {"name": kube_cluster_name(contract.usecase, run_id, step), "namespace": namespace,
+                     "labels": labels},
+        "spec": {
+            "rayVersion": RAY_RELEASES.get(settings["ray_version"], settings["ray_version"]),
+            "headGroupSpec": {"rayStartParams": {"dashboard-host": "0.0.0.0"},
+                              "template": pod("ray-head", spec["head_machine"], head_ports)},
+            "workerGroupSpecs": [],
+        },
+    }
+    workers = int(spec["workers"])
+    if workers:
+        body["spec"]["workerGroupSpecs"] = [{
+            "groupName": "workers", "replicas": workers, "minReplicas": workers, "maxReplicas": workers,
+            "rayStartParams": {}, "template": pod("ray-worker", spec["worker_machine"], [])}]
+    return body
+
+
+class KubeRayClusters:
+    """RayClusters on private GKE, through the cluster's Kubernetes API as the launcher (its RBAC: rayclusters in the
+    Kubeflow namespace, nothing else there but the Kubeflow Pipelines API)."""
+
+    def __init__(self, gcp, manifest_getter):
+        self.gcp = gcp
+        self.manifest = manifest_getter
+
+    def _kube(self):
+        from pipewright.kube import KubeClient
+
+        return KubeClient.from_manifest(self.manifest(), self.gcp)
+
+    def namespace(self) -> str:
+        return (self.manifest().get("kubernetes") or {}).get("namespace") or "kubeflow"
+
+    def _path(self, name: str = "") -> str:
+        return f"/apis/ray.io/v1/namespaces/{self.namespace()}/rayclusters" + (f"/{name}" if name else "")
+
+    def create(self, contract: ReleaseContract, step: str, run_id: str, settings: dict) -> dict:
+        from pipewright.kube import message
+
+        tenant = (self.manifest().get("tenants") or {}).get(contract.tenant) or {}
+        service_account = tenant.get("kubernetes_service_account")
+        if not service_account:
+            raise RayRequestError(f"tenant {contract.tenant} has no kubernetes_service_account in the environment "
+                                  "manifest", 500)
+        body = raycluster_body(contract, step, run_id, settings, self.namespace(), service_account)
+        name = body["metadata"]["name"]
+        r = self._kube().post(self._path(), body)
+        if r.status == 409:
+            return {"cluster": name, "status": "exists"}
+        if not r.ok:
+            if r.status in (400, 422):     # the API refused the cluster itself: retrying cannot help
+                raise RayRequestError(f"creating RayCluster {name} was refused: {message(r)}"[:500], 400)
+            raise RuntimeError(f"creating RayCluster {name} failed: {r.status} {message(r)}"[:500])
+        log.info("raycluster %s for %s %s (run %s)", name, contract.usecase, step, run_id)
+        spec = contract.ray["steps"][step]
+        pools = [{"machine": spec["head_machine"], "nodes": 1}]
+        if int(spec["workers"]):
+            pools.append({"machine": spec["worker_machine"], "nodes": int(spec["workers"])})
+        record = {"cluster": f"kubernetes:{self.namespace()}/rayclusters/{name}", "step": step,
+                  "image": contract.ray["image"], "service_account": contract.runner_service_account,
+                  "kubernetes_service_account": service_account, "kms_key": None, "network_attachment": None,
+                  "pools": pools}
+        return {"cluster": name, "status": "creating", "record": record}
+
+    def delete(self, name: str) -> dict:
+        r = self._kube().delete(self._path(name))
+        if r.status == 404:
+            return {"cluster": name, "status": "gone"}
+        if not r.ok:
+            raise RuntimeError(f"deleting RayCluster {name} failed: {r.status}")
+        log.info("raycluster %s deleted", name)
+        return {"cluster": name, "status": "deleting"}
+
+    def _run_state(self, kube, usecase: str, run_id: str) -> str | None:
+        """The state of the Kubeflow run with this run ID (its display name is the job ID, `<use case>-<run ID>...`),
+        "unknown" when the API does not answer, None when there is no such run."""
+        from pipewright.adapters.kfp import api_path
+
+        flt = json.dumps({"predicates": [{"key": "display_name", "operation": "IS_SUBSTRING",
+                                          "string_value": f"{usecase}-{run_id}"}]})
+        r = kube.get(f"{api_path(self.namespace())}/runs", filter=flt, page_size=5)
+        if not r.ok:
+            return "unknown"
+        runs = (r.body or {}).get("runs") or []
+        return runs[0].get("state") if runs else None
+
+    def reap(self, now: float | None = None) -> list[dict]:
+        now = now or time.time()
+        results = []
+        try:
+            kube = self._kube()
+            r = kube.get(self._path(), labelSelector=",".join(f"{k}={v}" for k, v in MANAGED.items()))
+            if not r.ok:
+                raise RuntimeError(f"listing RayClusters failed: {r.status}")
+            clusters = (r.body or {}).get("items") or []
+        except Exception as e:  # noqa: BLE001
+            log.warning("ray cleanup skipped: %s", e)
+            return [{"status": "skipped", "reason": str(e)[:200]}]
+        for c in clusters:
+            meta = c.get("metadata") or {}
+            if meta.get("deletionTimestamp"):
+                continue
+            labels = meta.get("labels") or {}
+            deadline = int(labels.get("pipewright-deadline") or 0)
+            state = self._run_state(kube, labels.get("pipewright-usecase", ""), labels.get("run-id", ""))
+            reason = None
+            if deadline and now > deadline:
+                reason = "past its deadline"
+            elif state in KFP_TERMINAL:
+                reason = f"its run ended ({state.lower()})"
+            elif state is None and _age_minutes({"createTime": meta.get("creationTimestamp")}, now) > GRACE_MINUTES:
+                reason = "no pipeline run has its run ID"
+            if not reason:
+                continue
+            d = kube.delete(self._path(meta["name"]))
+            results.append({"cluster": meta["name"], "reason": reason,
+                            "status": "deleted" if d.ok or d.status == 404 else f"error {d.status}"})
+            log.info("ray cleanup: %s %s", meta["name"], reason)
+        return results

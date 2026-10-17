@@ -212,6 +212,14 @@
             "pattern": "^projects/[^/]+/subscriptions/[^/]+$",
             "description": "subscription with this tenant's retrain decision events (use cases opt in with retraining.decisions.publish)"
           },
+          "kubernetes_service_account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+            "description": "orchestrator kfp: the Kubernetes service account this tenant's runs and Ray clusters use (Workload Identity binds it to the runner)"
+          },
           "ray": {
             "anyOf": [
               {
@@ -381,6 +389,42 @@
     "requires": {
       "type": "string",
       "description": "the Pipewright versions this manifest needs, as a version specifier (for example \">=0.5\"); older versions refuse it with a clear message"
+    },
+    "kubernetes": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "endpoint"
+      ],
+      "description": "orchestrator kfp (private-gke): the GKE cluster's Kubernetes API, called as the caller's Google identity",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "dns_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the cluster's DNS endpoint (a host name, IAM authorized): for callers outside the VPC, such as a Fleet View collector"
+        },
+        "ca_certificate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the cluster's CA certificate, base64 PEM"
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "where Kubeflow Pipelines runs and Ray clusters run"
+        }
+      }
     }
   },
   "$defs": {

@@ -21,7 +21,9 @@ from typing import Any
 
 from pipewright.errors import ConfigError
 
-SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+# userinfo.email: GKE names the caller by its email only when the token has this scope (otherwise by a numeric ID),
+# and Kubernetes RBAC for the launcher (orchestrator kfp) is granted to its email.
+SCOPES = ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/userinfo.email"]
 
 
 def _require_gcp():
@@ -110,6 +112,15 @@ class Gcp:
     def delete(self, url: str, **params) -> Response:
         r = self.session.delete(url, params=params or None, timeout=30)
         return Response(r.status_code, _json(r) if r.content else {})
+
+    def access_token(self) -> str:
+        """A current OAuth access token of the caller (for APIs called without this session, e.g. a GKE cluster)."""
+        creds = self.session.credentials
+        if not creds.valid:
+            import google.auth.transport.requests
+
+            creds.refresh(google.auth.transport.requests.Request())
+        return creds.token
 
     def identity(self) -> str | None:
         """Email of the caller, if the token says so."""
