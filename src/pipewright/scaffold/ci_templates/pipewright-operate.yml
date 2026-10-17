@@ -30,6 +30,7 @@ on:
           - promote-canary
           - undeploy-canary
           - undeploy-model
+          - predict
       pipeline:
         description: "run: training or inference"
         type: choice
@@ -41,6 +42,10 @@ on:
         default: ""
       version:
         description: "model-approve: version number; rollback: release id (empty: previous)"
+        type: string
+        default: ""
+      instances:
+        description: "predict: JSON instances, or a JSON file in the repository (e.g. usecases/<name>/tests/predict.json)"
         type: string
         default: ""
 
@@ -68,6 +73,7 @@ jobs:
       PIPELINE: ${{ inputs.pipeline }}
       SOURCE_URI: ${{ inputs.source_uri }}
       VERSION: ${{ inputs.version }}
+      INSTANCES: ${{ inputs.instances }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/pipewright-setup
@@ -113,4 +119,5 @@ jobs:
             promote-canary)  p deploy-model --env "$ENV" --usecase "$UC" --promote --approve ;;
             undeploy-canary) p deploy-model --env "$ENV" --usecase "$UC" --undeploy-canary --approve ;;
             undeploy-model)  p deploy-model --env "$ENV" --usecase "$UC" --undeploy ;;
+            predict)         p model predict --env "$ENV" --usecase "$UC" --instances "$INSTANCES" ;;
           esac

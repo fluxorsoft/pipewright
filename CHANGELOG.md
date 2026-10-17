@@ -3,6 +3,14 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [Unreleased]
+
+### Added
+
+- **`predict` in the generated operate workflow** (`pipewright ci init`): runs `pipewright model predict` against the
+  use case's endpoint or InferenceService with the `instances` input, inline JSON or a JSON file in the repository
+  (for example `usecases/<name>/tests/predict.json`); the predictions go to the job summary.
+
 ## [1.0.0] - 2026-10-17
 
 First release.

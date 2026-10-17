@@ -23,6 +23,9 @@ def test_render_orders_release_jobs_by_environment():
     trigger = operate[True]["workflow_dispatch"]["inputs"]          # YAML reads `on` as true
     assert trigger["environment"]["options"] == ["dev", "staging", "prod"]
     assert "data-erase" not in trigger["action"]["options"]
+    assert "predict" in trigger["action"]["options"] and "instances" in trigger
+    step = operate["jobs"]["operate"]["steps"][-1]["run"]
+    assert 'p model predict --env "$ENV" --usecase "$UC" --instances "$INSTANCES"' in step
     for text in files.values():
         assert "@@" not in text
 
