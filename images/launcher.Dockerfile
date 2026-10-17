@@ -27,7 +27,7 @@ LABEL dev.pipewright.component="launcher" dev.pipewright.version="${VERSION}" \
 
 # A home directory: gunicorn's control server writes a socket there.
 RUN useradd --uid 10001 --create-home app
-USER app
+USER 10001:10001          # numeric, so Kubernetes can verify runAsNonRoot (schedules on GKE)
 
 # The app loads the manifest and live contracts at import: an unreadable manifest fails the revision.
 # Timeout 300 s: deploy the Cloud Run service with the same request timeout (a cold start plus a submit can

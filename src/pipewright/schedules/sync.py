@@ -1,8 +1,11 @@
-"""pipewright schedules sync: Cloud Scheduler jobs from a use case's triggers.schedules.
+"""pipewright schedules sync: a use case's triggers.schedules as Cloud Scheduler jobs or Kubernetes CronJobs.
 
-Each schedule becomes job `pw-<usecase>-<schedule>`, which POSTs {"usecase", "schedule"} to the launcher's /run
-with an OIDC token for the launcher service account. Jobs for schedules removed from the config are deleted.
-Only jobs with this naming prefix are touched.
+The environment manifest's `schedules.backend` chooses (default cloud_scheduler); the use case is the same for both.
+
+cloud_scheduler: each schedule becomes job `pw-<usecase>-<schedule>`, which POSTs {"usecase", "schedule"} to the
+launcher's /run with an OIDC token for the launcher service account. kubernetes (private-gke): each schedule becomes
+a CronJob that publishes the same request to the run requests topic (schedules/kubernetes.py). Jobs for schedules
+removed from the config are deleted. Only jobs this use case owns are touched.
 """
 
 from __future__ import annotations
@@ -61,6 +64,39 @@ class Change:
     detail: str = ""
 
 
+def backend(env: Environment) -> str:
+    return (env.schedules or {}).get("backend") or "cloud_scheduler"
+
+
+def _diff(want: dict, have: dict, comparable, describe) -> list[Change]:
+    changes = []
+    for name, job in want.items():
+        if name not in have:
+            changes.append(Change("create", name, describe(job)))
+        elif comparable(have[name]) != comparable(job):
+            changes.append(Change("update", name, describe(job)))
+        else:
+            changes.append(Change("none", name, describe(job)))
+    for name in have:
+        if name not in want:
+            changes.append(Change("delete", name, "no longer in usecase.yaml"))
+    return changes
+
+
+def _sync_kubernetes(uc: ResolvedUseCase, env: Environment, gcp, dry_run: bool) -> list[Change]:
+    from pipewright.schedules import kubernetes
+
+    want = kubernetes.desired(uc, env)
+    k8s = kubernetes.Backend(env, gcp)
+    changes = _diff(want, k8s.existing(uc.name), kubernetes.comparable,
+                    lambda j: f"{j['spec']['schedule']} ({j['spec']['timeZone']}), CronJob in {k8s.namespace}")
+    if not dry_run:
+        for c in changes:
+            if c.action != "none":
+                k8s.apply(c.action, c.job, want.get(c.job))
+    return changes
+
+
 def plan(uc: ResolvedUseCase, env: Environment, gcp: Gcp) -> tuple[list[Change], dict, str]:
     parent = f"projects/{env.project}/locations/{env.region}"
     want = desired_jobs(uc, env)
@@ -72,22 +108,13 @@ def plan(uc: ResolvedUseCase, env: Environment, gcp: Gcp) -> tuple[list[Change],
         raise ConfigError(f"cannot list Cloud Scheduler jobs: {error_text(resp)}")
     have = {j["name"].rsplit("/", 1)[-1]: j for j in resp.body.get("jobs", [])
             if j["name"].rsplit("/", 1)[-1].startswith(job_prefix(uc.name))}
-    changes = []
-    for name, job in want.items():
-        if name not in have:
-            changes.append(Change("create", name, f"{job['schedule']} ({job['timeZone']})"))
-        elif _comparable(have[name]) != _comparable(job):
-            changes.append(Change("update", name, f"{job['schedule']} ({job['timeZone']})"))
-        else:
-            changes.append(Change("none", name, f"{job['schedule']} ({job['timeZone']})"))
-    for name in have:
-        if name not in want:
-            changes.append(Change("delete", name, "no longer in usecase.yaml"))
-    return changes, want, parent
+    return _diff(want, have, _comparable, lambda j: f"{j['schedule']} ({j['timeZone']})"), want, parent
 
 
 def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run: bool = False) -> list[Change]:
     gcp = gcp or Gcp()
+    if backend(env) == "kubernetes":
+        return _sync_kubernetes(uc, env, gcp, dry_run)
     changes, want, parent = plan(uc, env, gcp)
     if dry_run:
         return changes

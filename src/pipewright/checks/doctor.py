@@ -215,7 +215,17 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
         else:
             report.add(s, Result(WARN, "landing notifications", error_text(resp)))
 
-    if uc.triggers["schedules"]:
+    if uc.triggers["schedules"] and _schedule_backend(env) == "kubernetes":
+        from pipewright.schedules import kubernetes
+
+        try:
+            k8s = kubernetes.Backend(env, gcp)
+            found = k8s.existing(uc.name)
+            report.add(s, Result(OK, f"schedules: CronJobs in {k8s.namespace}",
+                                 f"{len(found)} for this use case; `schedules sync` manages them"))
+        except Exception as e:  # noqa: BLE001 - reported, not raised
+            report.add(s, Result(FAIL, "schedules: CronJobs", str(e)[:300], "ask the platform team"))
+    elif uc.triggers["schedules"]:
         r = gcp.get(f"https://serviceusage.googleapis.com/v1/projects/{env.project}/services/"
                     "cloudscheduler.googleapis.com")
         enabled = r.ok and r.body.get("state") == "ENABLED"
@@ -542,12 +552,16 @@ def _check_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
             report.add(s, Result(INFO, "not managed by this use case", ", ".join(others)))
 
 
+def _schedule_backend(env: Environment) -> str:
+    return (getattr(env, "schedules", None) or {}).get("backend") or "cloud_scheduler"
+
+
 def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
     s = "Permissions of the identity running doctor (what `release` will need)"
     wanted = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload"]
     if uc.model["serving"]["enabled"]:
         wanted += ["aiplatform.endpoints.deploy"]
-    if uc.triggers["schedules"]:
+    if uc.triggers["schedules"] and _schedule_backend(env) == "cloud_scheduler":
         wanted += ["cloudscheduler.jobs.create", "cloudscheduler.jobs.update"]
     if uc.ml and uc.ml["monitoring"]["alerts"]["notify"]:
         wanted += ["monitoring.alertPolicies.create", "monitoring.notificationChannels.create"]
@@ -579,7 +593,8 @@ def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: 
             report.add(s, Result(OK if ok else FAIL, f"{kind} repository {repo}",
                                  "upload" if ok else "cannot upload"))
 
-    if uc.triggers["schedules"] and env.launcher.get("service_account"):
+    if (uc.triggers["schedules"] and _schedule_backend(env) == "cloud_scheduler"
+            and env.launcher.get("service_account")):
         granted = _test_permissions(gcp, f"{IAM}/projects/-/serviceAccounts/{env.launcher['service_account']}"
                                     ":testIamPermissions", ["iam.serviceAccounts.actAs"])
         ok = granted is not None and "iam.serviceAccounts.actAs" in granted

@@ -90,7 +90,7 @@ TLS-intercepting proxy also set `REQUESTS_CA_BUNDLE`.
 | 5 | `pipewright tables sync --env <env>` | Creates your tables; later applies additive changes only |
 | 6 | `git commit` | Releases are named after the commit; uncommitted work is marked `-dirty-` |
 | 7 | `pipewright release --env <env>` | Builds your component image, compiles and uploads one template per pipeline, writes the contract, verifies, makes it live |
-| 8 | `pipewright schedules sync --env <env>` | Creates your Cloud Scheduler jobs |
+| 8 | `pipewright schedules sync --env <env>` | Creates your schedules: Cloud Scheduler jobs, or CronJobs where the manifest sets `schedules.backend: kubernetes` (private GKE) |
 | 9 | drop a file in your landing prefix, or wait for the schedule | The shared launcher starts the pipeline the trigger names (landing: training by default) |
 | 10 | `pipewright model list` / `model approve --version N --approve` | With `promote_model: manual`, an approved model is a candidate until you make it the default (the champion) |
 

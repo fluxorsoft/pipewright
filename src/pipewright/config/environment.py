@@ -35,6 +35,7 @@ class Environment:
     ray: dict = field(default_factory=dict)       # Ray clusters: mode, version, image, network attachment, limits
     features: dict = field(default_factory=dict)  # feature tables: required (tenants list their datasets)
     kubernetes: dict = field(default_factory=dict)  # orchestrator kfp: endpoint, ca_certificate, namespace
+    schedules: dict = field(default_factory=dict)   # backend (cloud_scheduler | kubernetes), namespace, image
     manifest_ignored: tuple = ()                  # manifest keys this version does not know (R-05): ignored
     promotion_from: str | None = None
     manifest_source: str | None = None
@@ -93,6 +94,7 @@ def environment_from_manifest(ref: str, base_dir: Path = Path(".")) -> Environme
         observability=manifest.get("observability") or {}, security=manifest.get("security") or {},
         approver_groups=manifest.get("approver_groups") or {}, ray=manifest.get("ray") or {},
         features=manifest.get("features") or {}, kubernetes=manifest.get("kubernetes") or {},
+        schedules=manifest.get("schedules") or {},
         manifest_ignored=tuple(ignored),
         manifest_source=source, source=source,
     )
@@ -145,6 +147,7 @@ def load_environment(root: Path, name: str) -> Environment:
         ray=manifest.get("ray") or {},
         features=manifest.get("features") or {},
         kubernetes=manifest.get("kubernetes") or {},
+        schedules=manifest.get("schedules") or {},
         manifest_ignored=tuple(ignored),
         promotion_from=spec.get("promotion", {}).get("from"),
         manifest_source=manifest_source,
