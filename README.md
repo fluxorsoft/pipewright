@@ -148,6 +148,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 | Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps |
 | Observe | Lifecycle events on Pub/Sub and labelled structured logs for every key moment, with no vendor code in pipelines |
 | Protect | Personal data declared in the data contract and never used as a feature; erasure by key across a team's tables (BigQuery and Parquet) |
+| Synthesize | **Synthetic data**, off until a team switches it on: learned inside the environment by an engine (MOSTLY AI local mode by default; SDV if the team installs it), gated on fidelity, utility and privacy before anything is published; or rows from the data contract alone, with no real data |
 | Automate | `pipewright ci init` writes GitHub Actions workflows for pull requests, releases and operations, including self-hosted runners |
 | Extend | Other packages add CLI commands through the `pipewright.commands` entry point, without patching the core |
 
@@ -291,6 +292,44 @@ source that resolves to the same tables: `- feature_group: customer_profile` wit
 from the Feature Registry at each run. `pipewright new-usecase --from features` starts from an example with two
 feature tables.
 
+## Synthetic data
+
+Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,
+compiled or released for it, and the use case behaves exactly as before.
+
+```yaml
+# config/synthetic.yaml
+synthetic:
+  enabled: true                          # may differ per environment
+  purpose: test-data                     # sets the gates: test-data stays in the organisation, sharing leaves it
+  source_uri: bq://${project}.${resources.bigquery_dataset}.customers    # read like training data, point in time
+  output_table: synthetic_customers      # in outputs.bigquery.tables: the contract's columns plus run_id
+  columns:
+    customer_id: { rule: key, prefix: "SYN-" }     # keys and personal data are never learned
+```
+
+- **Two tiers.** `learned`: an engine learns from the real data inside the environment, in a `synthetic`
+  pipeline Pipewright provides (no code to write): `pipewright run --pipeline synthetic`, or a schedule with
+  `pipeline: synthetic`. `contract`: no real data at all; `pipewright synthetic generate --out rows.csv` writes rows
+  from the data contract and the column rules, for development, CI and demos.
+- **Engines.** MOSTLY AI's Synthetic Data SDK in local mode (Apache-2.0) is the default; it makes no network
+  calls. SDV is available as an engine your team installs itself (`synthetic.requirements`), under its own
+  licence (Business Source Licence 1.1); Pipewright never ships it.
+- **Gated, never trusted.** Each candidate (by default the engine at sampling temperatures 1.0 and 1.3, in
+  parallel) is scored the same way: fidelity, utility (a model trained on synthetic data tested on a real holdout)
+  and privacy (exact copies, distance to the closest record, singling-out, linkability and inference attacks).
+  Pipewright recomputes the purpose's gates and publishes the best candidate that passes all of them, or nothing.
+  `pipewright synthetic gates` lists them; privacy gates may only be made stricter.
+- **Never learned:** personal-data columns (`data_protection.personal_data_columns`) and keys get new values from
+  rules; a real holdout is kept back from the engine; the generator stays inside the step.
+- **Released like any pipeline:** the synthetic pipeline runs on two images Pipewright builds (the engine, and
+  the evaluation), recorded in the release contract by digest, verified, and copied by `promote`.
+- **Events:** `synthetic.evaluated`, `synthetic.rejected` and `synthetic.generated` carry the gates, the chosen
+  candidate and where the rows went.
+
+Approval of a synthetic release by named approver groups, releasing it into other environments, evidence and
+per-environment privacy policy are in Pipewright Enterprise.
+
 ## Promotion between environments
 
 What runs in production is what was tested: `pipewright promote --from test --to prod --usecase <name>` takes the
@@ -391,7 +430,7 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 |---|---|
 | Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test` |
 | Release | `tables sync`, `release`, `status`, `rollback`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model approve`, `deploy-model`, `monitor status`, `data erase` |
+| Operate | `run`, `model list`, `model approve`, `deploy-model`, `monitor status`, `data erase`, `synthetic generate`, `synthetic gates` |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze` |
 | Extend | `plugins` (commands added by installed packages) |
 
@@ -435,6 +474,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Agent Platform Feature Store feature groups as a feature source | Built |
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
+| Synthetic data (learned inside the environment and gated, or from the data contract alone) | Built, in test |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 
