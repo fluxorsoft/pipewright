@@ -1,14 +1,15 @@
 """Synthetic data generation (FR-49): a governed pipeline Pipewright provides when a use case enables it.
 
-config.py     the `synthetic` section: defaults and cross-checks
-runtime/      gates, column rules, engines, evaluation (standalone: also copied into the synthetic image)
-synthetic_steps.py the pipeline's steps (KFP components on the synthetic image)
-pipeline.py   the `synthetic` pipeline, compiled and released with the use case's own pipelines
+config.py           the `synthetic` section: defaults, cross-checks, the platform's policy
+runtime/            gates, column rules, engines, evaluation (standalone: also copied into the synthetic images)
+synthetic_steps.py  the pipeline's steps (KFP components on the synthetic images)
+pipeline.py         the `synthetic` pipeline, compiled and released with the use case's own pipelines
 """
 
 from pathlib import Path
 
 PIPELINE = "synthetic"
+TASKS = {"prepare-synthetic", "generate-synthetic", "evaluate-synthetic", "select-synthetic", "publish-synthetic"}
 PIPELINE_FILE = Path(__file__).resolve().parent / "pipeline.py"
 PIPELINE_FUNCTION = "synthetic_pipeline"
 # The synthetic pipeline runs on two images Pipewright builds for the use case: the engine image (generation:

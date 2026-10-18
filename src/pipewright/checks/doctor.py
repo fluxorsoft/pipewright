@@ -312,7 +312,12 @@ def _check_template(uc: ResolvedUseCase, report: Report) -> None:
         ml = "takes ml_config" if ML_CONFIG_PARAMETER in info.parameters else "no ml_config parameter"
         report.add(s, Result(OK, f"{name} compiles", f"{info.name}, {len(info.parameters)} parameters, {ml}"))
     if uc.steps:
-        report.add(s, Result(OK, "steps", f"{', '.join(uc.steps)} applied"))
+        from pipewright.synthetic import TASKS
+
+        idle = [t for t in uc.steps if t in TASKS and "synthetic" not in uc.pipelines]
+        applied = [t for t in uc.steps if t not in idle]
+        report.add(s, Result(OK, "steps", f"{', '.join(applied) or 'none'} applied"
+                             + (f"; {', '.join(idle)} unused here (synthetic data is off)" if idle else "")))
     problems, notes = check_parameters(uc, infos)
     for p in problems:
         report.add(s, Result(FAIL, "parameters", p))

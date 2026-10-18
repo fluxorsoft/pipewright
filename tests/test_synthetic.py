@@ -373,3 +373,19 @@ def test_platform_can_forbid_synthetic_data(repo):
     assert "synthetic data is not allowed in dev" in problems(repo)
     ml_repo(repo).usecase["spec"].pop("synthetic", None)
     resolve(repo)                                                  # a use case without it is unaffected
+
+
+@pytest.mark.skipif(importlib.util.find_spec("kfp") is None, reason="kfp not installed (gcp extra)")
+def test_synthetic_steps_are_ignored_where_synthetic_data_is_off(repo):
+    from pipewright.build.compile import compile_all
+    from pipewright.synthetic import TASKS
+    from tests.test_tables_and_compile import TWO_PIPELINES
+
+    ml_repo(repo).usecase["spec"]["steps"] = {"generate-synthetic": {"cpu": 4}}
+    spec = repo.usecase["spec"]
+    spec["pipelines"] = {"training": spec.pop("pipeline"),
+                         "inference": {"file": "pipeline.py", "function": "churn_inference_pipeline"}}
+    path = write(repo)
+    (path.parent / "pipeline.py").write_text(TWO_PIPELINES, encoding="utf-8")
+    uc = resolve_usecase(path, load_environment(repo.root, "dev"))
+    assert set(compile_all(uc)) == {"training", "inference"} and "generate-synthetic" in TASKS

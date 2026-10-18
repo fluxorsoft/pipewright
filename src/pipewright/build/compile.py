@@ -17,6 +17,7 @@ from pipewright.config import ResolvedUseCase
 from pipewright.errors import ConfigError
 from pipewright.synthetic import EVALUATION_IMAGE_ENV as SYNTHETIC_EVALUATION_IMAGE_ENV
 from pipewright.synthetic import IMAGE_ENV as SYNTHETIC_IMAGE_ENV
+from pipewright.synthetic import TASKS as SYNTHETIC_TASKS
 
 # Parameters the launcher always supplies at run time.
 LAUNCHER_PARAMETERS = ("project", "region", "source_uri", "run_id")
@@ -115,7 +116,9 @@ def compile_all(uc: ResolvedUseCase, component_image: str = PLACEHOLDER_IMAGE,
                                     (out_dir / f"{uc.name}-{name}.yaml") if out_dir else None,
                                     synthetic_images=synthetic_images)
              for name in uc.pipelines}
-    unknown = [s for s in uc.steps if not any(s in info.tasks for info in plain.values())]
+    # The synthetic pipeline's tasks may be sized while synthetic data is off in an environment: nothing to apply.
+    off = SYNTHETIC_TASKS if "synthetic" not in uc.pipelines else set()
+    unknown = [s for s in uc.steps if not any(s in info.tasks for info in plain.values()) and s not in off]
     if unknown:
         all_tasks = sorted({t for info in plain.values() for t in info.tasks})
         raise ConfigError(f"steps: no task named {', '.join(unknown)} (tasks: {', '.join(all_tasks)})")
