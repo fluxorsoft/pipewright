@@ -204,10 +204,69 @@ def test_apply_rules_replaces_keys_and_personal_data():
 
 # ---------------------------------------------------------------- pipeline --
 
-def test_steps_module_names_the_image_variable():
-    from pipewright.synthetic import IMAGE_ENV, PIPELINE_FILE
+def test_steps_module_names_the_image_variables():
+    from pipewright.synthetic import EVALUATION_IMAGE_ENV, IMAGE_ENV, PIPELINE_FILE
 
-    assert f'"{IMAGE_ENV}"' in (PIPELINE_FILE.parent / "synthetic_steps.py").read_text(encoding="utf-8")
+    text = (PIPELINE_FILE.parent / "synthetic_steps.py").read_text(encoding="utf-8")
+    assert f'"{IMAGE_ENV}"' in text and f'"{EVALUATION_IMAGE_ENV}"' in text
+    assert "\nfrom pipewright" not in text and "\nimport pipewright" not in text   # the images have no Pipewright
+
+
+def test_runtime_package_is_standalone():
+    from pipewright.synthetic import PIPELINE_FILE
+
+    for path in (PIPELINE_FILE.parent / "runtime").glob("*.py"):
+        assert "from pipewright" not in path.read_text(encoding="utf-8"), path.name
+
+
+@pytest.mark.skipif(importlib.util.find_spec("kfp") is None, reason="kfp not installed (gcp extra)")
+def test_image_contexts(repo, tmp_path):
+    from pipewright.build.images import synthetic_build_context
+    from pipewright.checks.kfp_version import compiler_version
+
+    synthetic_repo(repo, requirements="synthetic-requirements.txt")
+    path = write(repo)
+    (path.parent / "synthetic-requirements.txt").write_text("sdv==2.0.0\n", encoding="utf-8")
+    uc = resolve_usecase(path, load_environment(repo.root, "dev"))
+    engine = synthetic_build_context(uc, tmp_path / "engine", "engine")
+    evaluation = synthetic_build_context(uc, tmp_path / "evaluation", "evaluation")
+    for ctx in (engine, evaluation):
+        components = ctx / "components"
+        assert (components / "synthetic_steps.py").is_file() and (components / "pipewright_runtime.py").is_file()
+        assert (components / "pipewright_synthetic" / "engines.py").is_file()
+        ini = (ctx / "kfp_config.ini").read_text(encoding="utf-8")
+        assert "generate_synthetic = synthetic_steps.py" in ini and "publish_synthetic = synthetic_steps.py" in ini
+        assert f"kfp=={compiler_version()}" in (ctx / "requirements.txt").read_text(encoding="utf-8")
+    engine_req = (engine / "requirements.txt").read_text(encoding="utf-8")
+    assert "mostlyai[local]==6.2.0" in engine_req and "torch==2.13.0+cpu" in engine_req and "sdv==2.0.0" in engine_req
+    evaluation_req = (evaluation / "requirements.txt").read_text(encoding="utf-8")
+    assert "anonymeter==1.1.0" in evaluation_req and "sdv" not in evaluation_req and "sdmetrics" not in evaluation_req
+    assert "mostlyai" not in evaluation_req
+
+
+def test_contract_synthetic_images():
+    from pipewright.release.contract import ReleaseContract
+
+    image = "r/x@sha256:" + "a" * 64
+    launcher = ["project", "region", "source_uri", "run_id"]
+    base = {"contract_version": "3", "release_id": "r1", "usecase": "churn", "tenant": "churn", "environment": "dev",
+            "blueprint": None, "orchestrator": "vertex", "project": "p", "region": "r", "pipeline_name": "t",
+            "template_uri": "https://kfp/x/sha256:1", "template_digest": "sha256:1", "component_image": image,
+            "pipeline_root": "gs://b/r", "runner_service_account": "sa", "parameters": launcher,
+            "static_parameters": {}, "triggers": {}}
+    target = {"pipeline_name": "t", "template_uri": "https://kfp/x/sha256:1", "template_digest": "sha256:1",
+              "parameters": launcher, "static_parameters": {}, "experiment": None}
+    with pytest.raises(ConfigError, match="needs synthetic.image"):
+        ReleaseContract.from_dict({**base, "pipelines": {"training": target, "synthetic": target}}).validate()
+    ok = ReleaseContract.from_dict({**base, "pipelines": {"training": target, "synthetic": target},
+                                    "synthetic": {"image": "r/s@sha256:" + "b" * 64,
+                                                  "evaluation_image": "r/e@sha256:" + "c" * 64}})
+    ok.validate()
+    assert ok.images_for("synthetic") == {"r/s@sha256:" + "b" * 64, "r/e@sha256:" + "c" * 64}
+    assert ok.images_for("training") == {image}
+    old = ReleaseContract.from_dict({**base, "pipelines": {"training": target}})     # older contracts read the same
+    old.validate()
+    assert old.synthetic == {}
 
 
 @pytest.mark.skipif(importlib.util.find_spec("kfp") is None, reason="kfp not installed (gcp extra)")
@@ -217,9 +276,10 @@ def test_compile_the_synthetic_pipeline_on_its_own_image(repo):
     synthetic_repo(repo).usecase["spec"]["steps"] = {"generate-synthetic": {"cpu": 4, "memory": "8G"}}
     uc = resolve(repo)
     image = "europe-west2-docker.pkg.dev/acme-ml-dev/ml-images/churn-synthetic@sha256:" + "1" * 64
-    info = compile_pipeline(uc, "synthetic", synthetic_image=image,
+    evaluation = image.replace("churn-synthetic@", "churn-synthetic-evaluation@").replace("1" * 64, "2" * 64)
+    info = compile_pipeline(uc, "synthetic", synthetic_images=(image, evaluation),
                             steps={"generate-synthetic": uc.steps["generate-synthetic"]})
-    assert info.images == {image} and info.name == "synthetic"
+    assert info.images == {image, evaluation} and info.name == "synthetic"
     assert {"project", "region", "source_uri", "run_id", "ml_config"} == set(info.parameters)
     # (alone, the template does not take the training pipeline's parameters: only those problems remain)
     assert all(p.startswith("parameters.") for p in check_parameters(uc, {"synthetic": info})[0])
@@ -229,3 +289,47 @@ def test_compile_the_synthetic_pipeline_on_its_own_image(repo):
                                "publish-synthetic"}
     res = doc["deploymentSpec"]["executors"]["exec-generate-synthetic"]["container"]["resources"]
     assert res["resourceCpuLimit"] == "4"
+
+
+# --------------------------------------------------------------------- CLI --
+
+def test_cli_generate_contract_rows_and_show_gates(repo, capsys):
+    import csv
+
+    from pipewright.cli.main import main
+
+    synthetic_repo(repo, purpose="sharing", gates={"dcr_ratio": {"min": 1.2}},
+                   columns={"snapshot_date": {"rule": "time", "from": "2025-01-01", "to": "2025-03-31",
+                                              "step": "month_end"}})
+    write(repo)
+    out = repo.root / "out" / "rows.csv"
+    assert main(["synthetic", "generate", "--root", str(repo.root), "--env", "dev", "--usecase", "churn",
+                 "--out", str(out), "--rows", "40"]) == 0
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
+    assert len(rows) == 40 and rows[0]["customer_id"].startswith("SYN-")
+    assert {r["snapshot_date"] for r in rows} <= {"2025-01-31", "2025-02-28", "2025-03-31"}
+    assert main(["synthetic", "gates", "--root", str(repo.root), "--env", "dev", "--usecase", "churn"]) == 0
+    text = capsys.readouterr().out
+    assert "purpose sharing" in text and "dcr_ratio       min 1.2  (default 1.0)" in text
+
+
+def test_cli_run_synthetic_uses_the_configured_source(repo, monkeypatch):
+    from pipewright.cli.main import main
+    from pipewright.runs import launch
+
+    synthetic_repo(repo)
+    write(repo)
+    sent = {}
+    monkeypatch.setattr(launch, "run", lambda env, body: sent.update(body) or {"status": "submitted"})
+    assert main(["run", "--root", str(repo.root), "--env", "dev", "--usecase", "churn", "--pipeline", "synthetic"]) == 0
+    assert sent == {"usecase": "churn", "pipeline": "synthetic", "source_uri": "bq://acme-ml-dev.churn.customers"}
+
+
+def test_synthetic_schedule_learns_from_the_configured_source(repo):
+    synthetic_repo(repo)
+    repo.usecase["spec"]["triggers"]["schedules"] = [{"name": "monthly", "cron": "0 3 1 * *",
+                                                      "timezone": "Europe/London", "pipeline": "synthetic"}]
+    repo.usecase["spec"]["environments"]["dev"]["triggers"] = {"schedules": [
+        {"name": "monthly", "cron": "0 3 1 * *", "timezone": "Europe/London", "pipeline": "synthetic"}]}
+    uc = resolve(repo)
+    assert uc.triggers["schedules"][0]["source_uri"] == "bq://acme-ml-dev.churn.customers"

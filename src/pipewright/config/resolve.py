@@ -212,6 +212,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         src = ml["synthetic"].get("source_uri")
         if src and "${" not in src and sources.problem(src):
             problems.append(f"synthetic.source_uri: {sources.problem(src)}")
+        for s in triggers["schedules"]:                  # a synthetic schedule learns from synthetic.source_uri
+            if s["pipeline"] == "synthetic" and not s.get("source_uri") and src:
+                s["source_uri"] = src
     _feature_policy(ml, env, tenant, problems)
     _retraining_policy(ml["retraining"], approvals, env, problems)
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).

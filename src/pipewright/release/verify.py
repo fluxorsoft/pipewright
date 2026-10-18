@@ -55,7 +55,7 @@ def _verify_template(contract: ReleaseContract, target: PipelineTarget, creds, p
             spec = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         images = {e["container"]["image"] for e in spec["deploymentSpec"]["executors"].values() if "container" in e}
         params = sorted(spec["root"].get("inputDefinitions", {}).get("parameters", {}))
-        if images != {contract.component_image}:
+        if images != contract.images_for(target.name):
             problems.append(f"{target.name}: template images {sorted(images)} != contract image")
         if params != sorted(target.parameters):
             problems.append(f"{target.name}: template parameters differ from the contract")
@@ -86,6 +86,13 @@ def verify(contract: ReleaseContract, gcp: Gcp, creds) -> list[str]:
             passed.append(f"Ray image exists (by digest), for {', '.join(contract.ray['steps'])}")
         else:
             problems.append(f"Ray image not found: {contract.ray['image']}")
+
+    for key, what in (("image", "synthetic engine image"), ("evaluation_image", "synthetic evaluation image")):
+        if contract.synthetic:
+            if image_exists(gcp, contract.synthetic[key]):
+                passed.append(f"{what} exists (by digest)")
+            else:
+                problems.append(f"{what} not found: {contract.synthetic[key]}")
 
     for name in contract.pipeline_names:
         target = contract.pipeline(name)

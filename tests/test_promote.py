@@ -50,7 +50,7 @@ def setup(repo, monkeypatch, tmp_path):
         state.calls.append(f"write {name}")
         state.store[(bucket, name)] = (text, (current[1] if current else 0) + 1)
 
-    def compile_pinned(uc, image, out_dir):
+    def compile_pinned(uc, image, out_dir, synthetic_images=None):
         path = tmp_path / "compiled.yaml"
         path.write_text(state.dst_template, encoding="utf-8")
         return {"training": SimpleNamespace(name="churn-training", spec_path=path, pipeline="training",

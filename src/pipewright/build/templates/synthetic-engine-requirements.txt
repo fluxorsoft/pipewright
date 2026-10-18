@@ -1,0 +1,9 @@
+# The synthetic engine image (Pipewright adds kfp at the compiler's version, then synthetic.requirements).
+# Versions as resolved and run in the FR-49 spike (Kubeflow on GKE and Agent Platform Pipelines, egress denied).
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+torch==2.13.0+cpu
+mostlyai[local]==6.2.0
+google-cloud-storage==3.17.1
+pyarrow==26.0.0

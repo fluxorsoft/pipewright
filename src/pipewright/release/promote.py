@@ -386,9 +386,17 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     registry = dst_env.artifact_registry["docker"]
     dst_image = destination_image(source.component_image, registry)
     dst_ray = destination_image(source.ray["image"], registry) if source.ray else None
-    rewrites = {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {})}
+    dst_synthetic = (tuple(destination_image(source.synthetic[k], registry) for k in ("image", "evaluation_image"))
+                     if source.synthetic else None)
+    rewrites = {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {}),
+                **({source.synthetic["image"]: dst_synthetic[0],
+                    source.synthetic["evaluation_image"]: dst_synthetic[1]} if dst_synthetic else {})}
+    if bool(dst_synthetic) != uc_dst.synthetic_image_needed:
+        state = ("on", "off") if uc_dst.synthetic_image_needed else ("off", "on")
+        raise ConfigError(f"synthetic data is {state[0]} for {uc_dst.name} in {dst_env.name} but {state[1]} in the "
+                          "source release: promote releases what was tested; align synthetic.enabled first")
     out_dir = build_dir or (uc_dst.directory / ".pipewright" / "promote")
-    infos = publish.compile_pinned(uc_dst, dst_image, out_dir)
+    infos = publish.compile_pinned(uc_dst, dst_image, out_dir, dst_synthetic)
     if set(infos) != set(source.pipeline_names):
         raise ConfigError(f"the destination compiles pipelines {sorted(infos)}, the source release has "
                           f"{source.pipeline_names}")
@@ -430,6 +438,9 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     copy_image(gcp, source.component_image, dst_image, log)
     if dst_ray:
         copy_image(gcp, source.ray["image"], dst_ray, log)
+    if dst_synthetic:
+        copy_image(gcp, source.synthetic["image"], dst_synthetic[0], log)
+        copy_image(gcp, source.synthetic["evaluation_image"], dst_synthetic[1], log)
 
     # 6. The model, unchanged.
     model = None
@@ -440,11 +451,11 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     uploaded = {p: publish.upload_template(info, dst_env.artifact_registry["kfp"], uc_dst, rid, gcp.session.credentials)
                 for p, info in infos.items()}
     contract = publish.build_contract(uc_dst, dst_env, infos, uploaded, dst_image, rid, source.source_commit,
-                                      ray_image=dst_ray)
+                                      ray_image=dst_ray, synthetic_images=dst_synthetic)
     record = {
         "environment": src_env.name, "project": src_env.project, "release_id": rid, "contract_sha256": source_sha,
         "contract": f"gs://{src_env.artifacts_bucket}/{contract_name(source.usecase, rid)}",
-        "images": {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {})},
+        "images": rewrites,
         "templates": {p: {"source": source.pipeline(p).template_digest, "destination": uploaded[p][1],
                           "differences": differences.get(p, [])} for p in infos},
         "model": model, "by": who, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "policy": policy,

@@ -1,4 +1,4 @@
-"""The synthetic pipeline's steps: KFP components on the use case's synthetic image (FR-49).
+"""The synthetic pipeline's steps: KFP components on the use case's synthetic images (FR-49).
 
     prepare   read the source point in time, drop what is never learned, keep a real holdout
     generate  one engine candidate: learn from the training rows, generate (in parallel per candidate)
@@ -6,7 +6,7 @@
     select    recompute the gates and keep the best candidate that passes every one
     publish   apply the column rules (new keys, made-up personal data) and write the output table
 
-Every step reads its settings from ml_config["synthetic"]; engines and evaluation come from the image's
+Every step reads its settings from ml_config["synthetic"]; engines and evaluation come from the images'
 pipewright_synthetic package, platform helpers from pipewright_runtime.
 """
 
@@ -15,13 +15,15 @@ from typing import NamedTuple
 
 from kfp import dsl
 
-# The image runs this file without Pipewright installed: no pipewright imports at module level. The name is
-# pipewright.synthetic.IMAGE_ENV (kept in step by a test).
-IMAGE = os.environ.get("PIPEWRIGHT_SYNTHETIC_IMAGE", "pipewright-synthetic:dev")
+# The images run this file without Pipewright installed: no pipewright imports at module level. The names are
+# pipewright.synthetic.IMAGE_ENV and EVALUATION_IMAGE_ENV (kept in step by a test). generate runs on the engine
+# image, every other step on the evaluation image.
+ENGINE_IMAGE = os.environ.get("PIPEWRIGHT_SYNTHETIC_IMAGE", "pipewright-synthetic:dev")
+EVALUATION_IMAGE = os.environ.get("PIPEWRIGHT_SYNTHETIC_EVALUATION_IMAGE", "pipewright-synthetic-evaluation:dev")
 BASE_IMAGE = "python:3.11-slim"
 
 
-@dsl.component(base_image=BASE_IMAGE, target_image=IMAGE)
+@dsl.component(base_image=BASE_IMAGE, target_image=EVALUATION_IMAGE)
 def prepare_synthetic(project: str, source_uri: str, run_id: str, ml_config: dict,
                       train: dsl.Output[dsl.Dataset], holdout: dsl.Output[dsl.Dataset]) -> int:
     """Returns the number of rows to generate (synthetic.rows, or as many as the source has). An empty source_uri
@@ -43,7 +45,7 @@ def prepare_synthetic(project: str, source_uri: str, run_id: str, ml_config: dic
     return int(syn["rows"] or len(df))
 
 
-@dsl.component(base_image=BASE_IMAGE, target_image=IMAGE)
+@dsl.component(base_image=BASE_IMAGE, target_image=ENGINE_IMAGE)
 def generate_synthetic(train: dsl.Input[dsl.Dataset], rows: int, candidate: str, run_id: str, ml_config: dict,
                        synthetic: dsl.Output[dsl.Dataset]) -> str:
     """One candidate (its settings as JSON). A failing engine is recorded, not raised: the other candidates still
@@ -74,7 +76,7 @@ def generate_synthetic(train: dsl.Input[dsl.Dataset], rows: int, candidate: str,
     return json.dumps(result, default=str)
 
 
-@dsl.component(base_image=BASE_IMAGE, target_image=IMAGE)
+@dsl.component(base_image=BASE_IMAGE, target_image=EVALUATION_IMAGE)
 def evaluate_synthetic(train: dsl.Input[dsl.Dataset], holdout: dsl.Input[dsl.Dataset],
                        synthetic: dsl.Input[dsl.Dataset], generated: str, run_id: str, ml_config: dict) -> str:
     """The candidate's evaluation: {name, uri, metrics, attacks, engine, errors}."""
@@ -106,7 +108,7 @@ def evaluate_synthetic(train: dsl.Input[dsl.Dataset], holdout: dsl.Input[dsl.Dat
     return json.dumps(result, default=str)
 
 
-@dsl.component(base_image=BASE_IMAGE, target_image=IMAGE)
+@dsl.component(base_image=BASE_IMAGE, target_image=EVALUATION_IMAGE)
 def select_synthetic(results: list, run_id: str, ml_config: dict, record: dsl.Output[dsl.Artifact]
                      ) -> NamedTuple("Selection", [("decision", str), ("selection", str)]):
     """Pipewright recomputes the gates (the purpose's, with the use case's overrides) on every candidate and keeps
@@ -141,7 +143,7 @@ def select_synthetic(results: list, run_id: str, ml_config: dict, record: dsl.Ou
     return namedtuple("Selection", ["decision", "selection"])(decision, selection)
 
 
-@dsl.component(base_image=BASE_IMAGE, target_image=IMAGE)
+@dsl.component(base_image=BASE_IMAGE, target_image=EVALUATION_IMAGE)
 def publish_synthetic(selection: str, project: str, bq_dataset: str, run_id: str, ml_config: dict) -> str:
     """The chosen candidate, with the column rules applied, appended to synthetic.output_table (run_id on every
     row). Returns where it went."""

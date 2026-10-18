@@ -1,9 +1,11 @@
 """Scores a synthetic table against the real data it learned from, the same way for every engine.
 
-Standalone (no Pipewright imports). Runs in the synthetic image: SDMetrics (MIT), scikit-learn and Anonymeter
-(BSD) are imported when used. The metric names are the gate names in gates.py.
+Standalone (no Pipewright imports). Runs in the synthetic evaluation image: pandas, SciPy, scikit-learn and
+Anonymeter (BSD) are imported when used. Nothing from the SDV stack: SDMetrics would bring copulas (BUSL-1.1), so
+fidelity is computed here with SDMetrics' definitions. The metric names are the gate names in gates.py.
 
-    fidelity        SDMetrics quality score (column shapes and column-pair trends), against the training rows
+    fidelity        quality score (column shapes and column-pair trends, as SDMetrics defines them), against the
+                    training rows
     tstr_drop       AUC of a model trained on real training rows (TRTR) minus one trained on synthetic rows (TSTR),
                     both tested on the real holdout
     exact_copies    share of synthetic rows identical to a training row
@@ -40,22 +42,68 @@ def prepare(df, like=None, dates=(), drop=()):
     return out[list(ref.columns)]
 
 
-def _metadata(df, label: str | None) -> dict:
-    cols = {}
-    for c in df.columns:
-        categorical = str(df[c].dtype) == "category" or c == label or df[c].nunique() <= 10
-        cols[c] = {"sdtype": "categorical" if categorical else "numerical"}
-    return {"columns": cols}
+def _categorical(df, c, label) -> bool:
+    return str(df[c].dtype) == "category" or c == label or df[c].nunique() <= 10
+
+
+def _frequencies(values) -> dict:
+    counts = values.astype(str).value_counts(normalize=True)
+    return counts.to_dict()
+
+
+def _tv_complement(real, syn) -> float:
+    """1 minus the total variation distance between two categorical distributions."""
+    p, q = _frequencies(real), _frequencies(syn)
+    return 1 - 0.5 * sum(abs(p.get(k, 0) - q.get(k, 0)) for k in set(p) | set(q))
+
+
+def _ks_complement(real, syn) -> float:
+    """1 minus the two-sample Kolmogorov-Smirnov statistic of two numeric distributions."""
+    from scipy.stats import ks_2samp
+
+    a, b = real.dropna(), syn.dropna()
+    if a.empty or b.empty:
+        return 0.0
+    return 1 - float(ks_2samp(a, b).statistic)
+
+
+def _bins(values):
+    """A numeric column in 10 equal-width bins of its own range, as SDMetrics' ColumnPairTrends does it (each table
+    is binned by its own range: kept, so the gates mean what they meant in the spike)."""
+    import numpy as np
+    import pandas as pd
+
+    clean = values.dropna()
+    if clean.empty:
+        return values.astype(str)
+    return pd.Series(np.digitize(values, bins=np.histogram_bin_edges(clean)), index=values.index).astype(str)
 
 
 def fidelity(train, syn, label: str | None) -> dict:
-    from sdmetrics.reports.single_table import QualityReport
+    """The quality score's two parts, defined as in SDMetrics' QualityReport (computed here, so evaluation needs no
+    package from the SDV stack): column shapes (KS complement for numbers, TV complement for categories) and
+    column-pair trends (correlation similarity for two numbers, contingency similarity otherwise, numbers in 10
+    bins). Each from 0 to 1; fidelity is their mean. Checked against SDMetrics 0.32 on the spike's census outputs:
+    within 0.005 for MOSTLY AI (with and without differential privacy, temperature 1.6), 0.036 higher for SDV's
+    Gaussian copula."""
+    import itertools
 
-    r = QualityReport()
-    r.generate(train, syn, _metadata(train, label), verbose=False)
-    props = r.get_properties().set_index("Property")["Score"]
-    return {"fidelity": round(float(r.get_score()), 4), "column_shapes": round(float(props["Column Shapes"]), 4),
-            "column_pairs": round(float(props["Column Pair Trends"]), 4)}
+    cols = list(train.columns)
+    cat = {c: _categorical(train, c, label) for c in cols}
+    shapes = [(_tv_complement(train[c], syn[c]) if cat[c] else _ks_complement(train[c], syn[c])) for c in cols]
+    pairs = []
+    for a, b in itertools.combinations(cols, 2):
+        if not cat[a] and not cat[b]:
+            r_real, r_syn = train[a].corr(train[b]), syn[a].corr(syn[b])
+            if r_real == r_real and r_syn == r_syn:                       # both defined (not NaN)
+                pairs.append(1 - abs(r_real - r_syn) / 2)
+            continue
+        ra, sa = (train[a].astype(str), syn[a].astype(str)) if cat[a] else (_bins(train[a]), _bins(syn[a]))
+        rb, sb = (train[b].astype(str), syn[b].astype(str)) if cat[b] else (_bins(train[b]), _bins(syn[b]))
+        pairs.append(_tv_complement(ra + "\x1f" + rb, sa + "\x1f" + sb))
+    shape = sum(shapes) / len(shapes) if shapes else 0.0
+    pair = sum(pairs) / len(pairs) if pairs else shape
+    return {"fidelity": round((shape + pair) / 2, 4), "column_shapes": round(shape, 4), "column_pairs": round(pair, 4)}
 
 
 def utility(train, holdout, syn, label: str, positive) -> dict:

@@ -5,6 +5,8 @@ The top-level template fields always describe the training pipeline, so v2 contr
 Optional `ray` (no version change; older launchers ignore it): the release's Ray image by digest, the Ray version and
 each Ray step's cluster ({step: {head_machine, worker_machine, workers, accelerator, max_minutes}}). The launcher
 builds a step's cluster from this, never from the request (pipewright.ray_clusters).
+Optional `synthetic` (no version change; older launchers ignore it): the synthetic pipeline's images by digest
+({image, evaluation_image}) and what it releases ({purpose, output_table}), when synthetic data is enabled.
 
 gs://<artifacts>/contracts/<usecase>/<release_id>.json   one contract per release (never changed)
 gs://<artifacts>/contracts/<usecase>/current.json        pointer: which release is live, plus history
@@ -97,12 +99,13 @@ class ReleaseContract:
     ray: dict = field(default_factory=dict)
     # Set when the release came through `pipewright promote`: the source release, digests, model, who, policy.
     promoted_from: dict = field(default_factory=dict)
+    synthetic: dict = field(default_factory=dict)     # the synthetic pipeline's images and purpose (FR-49)
 
     @classmethod
     def from_dict(cls, data: dict) -> ReleaseContract:
         known = set(cls.__dataclass_fields__)
         optional = {"source_commit", "created_at", "labels", "blueprint", "pipelines", "metadata", "ray",
-                    "promoted_from"}
+                    "promoted_from", "synthetic"}
         missing = sorted(known - optional - set(data))
         if missing:
             raise ConfigError(f"contract is missing fields: {missing}")
@@ -120,6 +123,12 @@ class ReleaseContract:
         if not self.pipelines:
             return ["training"]
         return sorted(self.pipelines, key=lambda n: (n != "training", n))     # training first
+
+    def images_for(self, name: str) -> set[str]:
+        """The images a pipeline's template may use: the synthetic pipeline's own two, or the component image."""
+        if name == "synthetic" and self.synthetic:
+            return {self.synthetic["image"], self.synthetic["evaluation_image"]}
+        return {self.component_image}
 
     def pipeline(self, name: str = "training") -> PipelineTarget:
         if name in self.pipelines:
@@ -157,6 +166,14 @@ class ReleaseContract:
                 problems.append("ray.image must be pinned by digest")
             if not self.ray.get("steps"):
                 problems.append("ray.steps is empty: a release with a Ray image has at least one Ray step")
+        if self.synthetic:
+            for key in ("image", "evaluation_image"):
+                if "@sha256:" not in (self.synthetic.get(key) or ""):
+                    problems.append(f"synthetic.{key} must be pinned by digest")
+            if "synthetic" not in self.pipeline_names:
+                problems.append("synthetic images without a synthetic pipeline")
+        elif "synthetic" in self.pipeline_names:
+            problems.append("a synthetic pipeline needs synthetic.image and synthetic.evaluation_image")
         if not self.pipeline_root.startswith("gs://"):
             problems.append("pipeline_root must be a gs:// URI")
         if self.orchestrator not in ("vertex", "kfp"):

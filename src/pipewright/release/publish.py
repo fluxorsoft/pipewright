@@ -24,17 +24,18 @@ def _tag(value: str) -> str:
 
 
 def compile_pinned(uc: ResolvedUseCase, component_image: str, out_dir: Path,
-                   synthetic_image: str | None = None) -> dict[str, TemplateInfo]:
-    """Every pipeline of the use case, with `steps` applied. The synthetic pipeline runs on the synthetic image."""
+                   synthetic_images: tuple[str, str] | None = None) -> dict[str, TemplateInfo]:
+    """Every pipeline of the use case, with `steps` applied. The synthetic pipeline runs on the synthetic images
+    (engine, evaluation)."""
     from pipewright.synthetic import PIPELINE as SYNTHETIC
 
-    if SYNTHETIC in uc.pipelines and not synthetic_image:
-        raise ConfigError("the synthetic pipeline needs the use case's synthetic image")
+    if SYNTHETIC in uc.pipelines and not synthetic_images:
+        raise ConfigError("the synthetic pipeline needs the use case's synthetic images")
     infos = compile_all(uc, component_image=component_image, out_dir=out_dir,
-                        **({"synthetic_image": synthetic_image} if synthetic_image else {}))
+                        **({"synthetic_images": synthetic_images} if synthetic_images else {}))
     for name, info in infos.items():
-        expected = synthetic_image if name == SYNTHETIC else component_image
-        if info.images != {expected}:
+        expected = set(synthetic_images) if name == SYNTHETIC else {component_image}
+        if info.images != expected:
             raise ConfigError(f"{name} template uses unexpected images: {sorted(info.images)}")
     problems, _ = check_parameters(uc, infos)
     if problems:
@@ -59,7 +60,8 @@ def upload_template(info: TemplateInfo, kfp_repository: str, uc: ResolvedUseCase
 
 def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, TemplateInfo], uploaded: Uploaded,
                    component_image: str, release_id: str, source_commit: str | None,
-                   ray_image: str | None = None) -> ReleaseContract:
+                   ray_image: str | None = None,
+                   synthetic_images: tuple[str, str] | None = None) -> ReleaseContract:
     experiment = uc.ml["training"]["experiment"]["name"] if uc.ml else None
     pipelines = {
         name: {"pipeline_name": info.name, "template_uri": uploaded[name][0], "template_digest": uploaded[name][1],
@@ -103,6 +105,9 @@ def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, Templ
               # the mode the release was built for (a standing release names its tenant's cluster)
               **({"mode": "standing", "standing": uc.ray.get("standing")} if uc.ray.get("mode") == "standing" else {})}
              if uc.ray and ray_image else {}),
+        synthetic=({"image": synthetic_images[0], "evaluation_image": synthetic_images[1],
+                    "purpose": uc.synthetic["purpose"], "output_table": uc.synthetic["output_table"]}
+                   if synthetic_images and uc.synthetic else {}),
     )
     contract.validate()
     return contract

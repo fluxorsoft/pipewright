@@ -186,7 +186,7 @@
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" },
     "principal": { "type": "string", "pattern": "^(group|user|serviceAccount):.+$" },
     "approval_mode": { "enum": ["manual", "auto"] },
-    "pipeline_name": { "enum": ["training", "inference"] },
+    "pipeline_name": { "enum": ["training", "inference", "synthetic"], "description": "synthetic: the pipeline Pipewright provides when synthetic.enabled" },
     "pipeline_ref": {
       "type": "object",
       "additionalProperties": false,

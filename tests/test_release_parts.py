@@ -172,7 +172,7 @@ def test_a_changed_template_is_a_new_release_even_on_the_same_commit(repo, monke
     spec.write_text("template: 1\n")
     image = f"europe-west2-docker.pkg.dev/acme-ml-dev/ml-images/churn-components@{DIGEST}"
 
-    def compile_pinned(uc, component_image, out_dir):
+    def compile_pinned(uc, component_image, out_dir, synthetic_images=None):
         return {"training": SimpleNamespace(name="churn-training", spec_path=spec,
                                             parameters={"project", "region", "source_uri", "run_id"})}
 

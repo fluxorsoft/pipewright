@@ -167,6 +167,55 @@ def build_and_push(uc: ResolvedUseCase, repository: str, release_id: str, token:
                                log, "component image")
 
 
+SYNTHETIC_KINDS = ("engine", "evaluation")
+
+
+def synthetic_build_context(uc: ResolvedUseCase, dest: Path, kind: str) -> Path:
+    """The context of one of the synthetic pipeline's images (kind: engine or evaluation): Pipewright's steps,
+    runtime and synthetic package, its pinned requirements with kfp at the compiler's version, and for the engine
+    the use case's synthetic.requirements (for example SDV, which the team installs)."""
+    from pipewright.checks.kfp_version import compiler_version
+    from pipewright.synthetic import PIPELINE_FILE
+
+    if kind not in SYNTHETIC_KINDS:
+        raise ValueError(f"unknown synthetic image {kind!r}")
+    templates = resources.files("pipewright.build.templates")
+    components = dest / "components"
+    components.mkdir(parents=True)
+    shutil.copy(PIPELINE_FILE.parent / "synthetic_steps.py", components / "synthetic_steps.py")
+    shutil.copytree(PIPELINE_FILE.parent / "runtime", components / "pipewright_synthetic",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    runtime = templates.joinpath("pipewright_runtime.py").read_text(encoding="utf-8")
+    (components / "pipewright_runtime.py").write_text(runtime, encoding="utf-8")
+    kfp = compiler_version()
+    if not kfp:
+        raise ConfigError("building the synthetic images needs kfp installed (the GCP extra)")
+    requirements = templates.joinpath(f"synthetic-{kind}-requirements.txt").read_text(encoding="utf-8")
+    requirements += f"\nkfp=={kfp}\n"
+    if kind == "engine" and uc.synthetic_requirements:
+        requirements += f"\n# {uc.synthetic_requirements.name} (synthetic.requirements)\n"
+        requirements += uc.synthetic_requirements.read_text(encoding="utf-8")
+    (dest / "requirements.txt").write_text(requirements, encoding="utf-8")
+    (dest / "kfp_config.ini").write_text(kfp_config_ini(find_components(components)), encoding="utf-8")
+    dockerfile = templates.joinpath(f"synthetic-{kind}.Dockerfile").read_text(encoding="utf-8")
+    (dest / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    return dest
+
+
+def build_and_push_synthetic(uc: ResolvedUseCase, repository: str, release_id: str, token: str,
+                             verbose: bool = False, gcp=None, log=print) -> tuple[str, str]:
+    """The synthetic pipeline's images (<name>-synthetic, <name>-synthetic-evaluation), as (engine, evaluation)
+    references by digest; same tagging as build_and_push, so an unchanged image is reused."""
+    docker_login(repository.split("/", 1)[0], token)
+    refs = []
+    for kind, package in (("engine", f"{uc.name}-synthetic"), ("evaluation", f"{uc.name}-synthetic-evaluation")):
+        with tempfile.TemporaryDirectory(prefix=f"pipewright-synthetic-{kind}-") as tmp:
+            ctx = synthetic_build_context(uc, Path(tmp), kind)
+            refs.append(_build_and_push(ctx, repository, package, uc, release_id, None, verbose, gcp, log,
+                                        f"synthetic {kind} image"))
+    return refs[0], refs[1]
+
+
 def build_and_push_ray(uc: ResolvedUseCase, repository: str, release_id: str, token: str, base_image: str,
                        verbose: bool = False, gcp=None, log=print) -> str:
     """The use case's Ray image (<name>-ray), on the platform's Ray base image; same tagging as build_and_push."""
