@@ -109,7 +109,7 @@ def test_output_table_must_hold_the_contract_and_run_id(repo):
                                                                       encoding="utf-8")
     with pytest.raises(ConfigError) as e:
         resolve_usecase(path, load_environment(repo.root, "dev"))
-    assert "lacks contract columns tenure_months" in str(e.value) and "add a run_id column" in str(e.value)
+    assert "its schema lacks tenure_months" in str(e.value) and "add a run_id column" in str(e.value)
 
 
 def test_privacy_gates_only_stricter(repo):
@@ -389,3 +389,90 @@ def test_synthetic_steps_are_ignored_where_synthetic_data_is_off(repo):
     (path.parent / "pipeline.py").write_text(TWO_PIPELINES, encoding="utf-8")
     uc = resolve_usecase(path, load_environment(repo.root, "dev"))
     assert set(compile_all(uc)) == {"training", "inference"} and "generate-synthetic" in TASKS
+
+
+# -------------------------------------------------------------- relational --
+
+def relational_repo(repo, **synthetic):
+    synthetic_repo(repo, mode="relational", **synthetic)
+    spec = repo.usecase["spec"]
+    spec["triggers"].pop("landing")
+    spec["data"]["features_from"] = {"entity": {"columns": ["customer_id"], "time_column": "snapshot_date"},
+                                     "sources": [{"feature_group": "customer_profile",
+                                                  "features": ["tenure_months", "monthly_charges"]}]}
+    tables = spec["outputs"]["bigquery"]["tables"]
+    tables["synthetic_profile"] = "schemas/synthetic_profile.json"
+    tables["synthetic_tx"] = "schemas/synthetic_tx.json"
+    return repo
+
+
+def write_relational(repo):
+    path = write(repo)
+    run = [{"name": "run_id", "type": "STRING"}]
+    (path.parent / "schemas" / "synthetic_profile.json").write_text(json.dumps(
+        [{"name": "customer_id", "type": "STRING"}, {"name": "feature_timestamp", "type": "TIMESTAMP"},
+         {"name": "tenure_months", "type": "INTEGER"}, {"name": "monthly_charges", "type": "FLOAT"}, *run]),
+        encoding="utf-8")
+    (path.parent / "schemas" / "synthetic_tx.json").write_text(json.dumps(
+        [{"name": "customer_id", "type": "STRING"}, {"name": "at", "type": "TIMESTAMP"}, *run]), encoding="utf-8")
+    return path
+
+
+def test_relational_resolves_children_keys_and_outputs(repo):
+    relational_repo(repo, output_tables={"customer_profile": "synthetic_profile", "transactions": "synthetic_tx"},
+                    sequences=[{"name": "transactions", "source_uri": "bq://acme-ml-dev.churn.transactions",
+                                "key": "customer_id", "order_by": "at"}])
+    uc = resolve_usecase(write_relational(repo), load_environment(repo.root, "dev"))
+    rel = uc.synthetic["relational"]
+    assert rel["key"] == "customer_id" and rel["time_column"] == "snapshot_date"
+    assert "tenure_months" not in rel["parent_columns"] and "churned" in rel["parent_columns"]
+    assert [(c["name"], c["kind"], c["output_table"]) for c in rel["children"]] == [
+        ("customer_profile", "features", "synthetic_profile"), ("transactions", "sequence", "synthetic_tx")]
+    assert rel["children"][0]["features"] == {"tenure_months": "tenure_months", "monthly_charges": "monthly_charges"}
+    assert "customer_id" not in uc.synthetic["exclude"]          # the entity key is the primary key, not a value
+
+
+def test_relational_checks(repo):
+    relational_repo(repo, output_tables={"nope": "synthetic_tx"},
+                    sequences=[{"name": "customer_profile", "source_uri": "transactions", "key": "c", "order_by": "t"}])
+    with pytest.raises(ConfigError) as e:
+        resolve_usecase(write_relational(repo), load_environment(repo.root, "dev"))
+    found = str(e.value)
+    for part in ("the name 'customer_profile' is taken", "sequences[0].source_uri: a bq://",
+                 "output_tables.customer_profile: the table", "output_tables.nope: no child table"):
+        assert part in found, part
+    synthetic_repo(repo, sequences=[{"name": "tx", "source_uri": "bq://d.t", "key": "k", "order_by": "o"}])
+    assert "sequences and output_tables need mode: relational" in problems(repo)
+
+
+def test_pit_join_matches_the_training_rule():
+    pd = pytest.importorskip("pandas")
+    from pipewright.synthetic.runtime import relational as rel
+
+    parent = pd.DataFrame({"id": ["a", "a", "b"], "cut": ["2025-02-01", "2025-03-01", "2025-02-01"]})
+    child = pd.DataFrame({"id": ["a", "a", "a", "b"],
+                          "ts": ["2025-01-10", "2025-02-01 00:00:00", "2025-02-20", "2025-03-05"], "x": [1, 2, 3, 9]})
+    out = rel.pit_join(parent, {"c": child}, "id", "cut",
+                       [{"name": "c", "key": "id", "time_column": "ts", "features": {"x_out": "x"}}])
+    # at or before the cut-off (midnight of the date): a/Feb -> 2 (exactly at it), a/Mar -> 3, b/Feb -> none
+    assert out["x_out"].tolist()[:2] == [2, 3] and pd.isna(out["x_out"].tolist()[2])
+
+
+def test_split_integrity_and_keys():
+    pd = pytest.importorskip("pandas")
+    from pipewright.synthetic.runtime import relational as rel
+
+    parent = pd.DataFrame({"id": [f"k{i}" for i in range(10)], "cut": ["2025-06-01"] * 10})
+    child = pd.DataFrame({"id": [f"k{i % 10}" for i in range(30)], "ts": ["2025-01-01"] * 25 + ["2025-09-01"] * 5})
+    tr, tr_c, ho, ho_c = rel.split(parent, {"c": (child, "id")}, "id", 0.3, seed=1)
+    assert len(ho) == 3 and set(ho_c["c"]["id"]) == set(ho["id"]) and not set(tr_c["c"]["id"]) & set(ho["id"])
+    metrics, errors = rel.integrity(parent, {"c": child}, "id", "cut", parent, {"c": child},
+                                    {"c": {"key": "id", "time_column": "ts"}})
+    assert errors == [] and metrics["rows_per_entity[c]"] == 3.0 and metrics["share_before_cutoff[c]"] == 0.833
+    bad = pd.concat([parent, parent.head(1)])
+    _, errors = rel.integrity(bad, {"c": pd.concat([child, pd.DataFrame({"id": ["zz"], "ts": ["2025-01-01"]})])},
+                              "id", None)
+    assert errors == ["1 duplicate keys in the entity table", "1 rows of c refer to no entity"]
+    p2, c2 = rel.remap_keys(parent, {"c": (child, "id")}, "id", {"prefix": "S-"})
+    assert p2["id"].tolist()[0] == "S-00000001" and set(c2["c"]["id"]) == set(p2["id"])
+    assert (c2["c"].groupby("id").size() == 3).all()                   # each entity keeps its rows

@@ -560,7 +560,29 @@
           "additionalProperties": false,
           "properties": { "attacks": { "type": "integer", "minimum": 100, "maximum": 5000 } }
         },
-        "requirements": { "type": "string", "description": "extra packages for the synthetic image (e.g. SDV, which your team installs)" }
+        "requirements": { "type": "string", "description": "extra packages for the synthetic image (e.g. SDV, which your team installs)" },
+        "mode": { "enum": ["flat", "relational"], "description": "relational: the entity table and its child tables (feature tables, sequences) learned together" },
+        "output_tables": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "relational: each child table's output table (in outputs.bigquery.tables), by child name"
+        },
+        "sequences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "source_uri", "key", "order_by"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$" },
+              "source_uri": { "type": "string" },
+              "key": { "type": "string" },
+              "order_by": { "type": "string" },
+              "columns": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "description": "relational: event tables per entity (transactions, sessions), generated in order with the entity table"
+        }
       }
     },
     "retraining": {

@@ -283,6 +283,14 @@ synthetic.gates.inference.max: "Defaults: 0.50 (test-data), 0.25 (sharing)."
 synthetic.evaluation: How candidates are scored.
 synthetic.evaluation.attacks: Anonymeter attacks per risk (default 1000). Fewer give confidence bounds too wide to gate on.
 synthetic.requirements: A requirements file of extra packages for the synthetic image, for example SDV (installed by your team, which accepts its licence directly).
+synthetic.mode: "flat (default): one table, the source as training reads it. relational: the entity table and its child tables learned together in one model, the feature tables of data.features_from (history per entity) and synthetic.sequences (events per entity); keys stay consistent and history keeps its timing against each cut-off."
+synthetic.output_tables: "relational: the output table (in outputs.bigquery.tables) of each child table, by its name: a feature table by its feature group or table name, a sequence by its name. Each holds the child's columns and run_id."
+synthetic.sequences: "relational: event tables per entity, beyond the feature tables (for example transactions or sessions), generated in order with the entity table."
+synthetic.sequences.name: The child table's name (output_tables uses it).
+synthetic.sequences.source_uri: The event table, bq://project.dataset.table. Only rows of the source's entities are read.
+synthetic.sequences.key: The column that refers to the entity table's key.
+synthetic.sequences.order_by: The column the events are ordered by within each entity (usually a timestamp).
+synthetic.sequences.columns: The columns to learn and generate (default all). Keys and personal data among them are never learned as values.
 
 tests: How `pipewright test` and the release check the use case's code.
 tests.command: The command run in the use case folder; it must exit 0.

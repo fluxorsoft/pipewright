@@ -55,6 +55,67 @@ def generate(train, rows: int, settings: Settings, workdir: str, table: str = "d
     raise ValueError(f"unknown engine {settings.engine!r} (known: {', '.join(ENGINES)})")
 
 
+def generate_tables(parent, key: str, children: dict, entities: int, settings: Settings, workdir: str,
+                    table: str = "entity"):
+    """Relational and sequential: learns the parent table and its child tables together (each child a sequence
+    per entity, in the order given) and generates `entities` new parents with their children. children maps
+    name -> (DataFrame, key column). Returns ({"parent": df, name: df, ...}, facts)."""
+    if settings.engine == "mostlyai":
+        return _mostlyai_tables(parent, key, children, entities, settings, workdir, table)
+    if settings.engine == "sdv":
+        return _sdv_tables(parent, key, children, entities, settings)
+    raise ValueError(f"unknown engine {settings.engine!r} (known: {', '.join(ENGINES)})")
+
+
+def _mostlyai_config(s: Settings) -> dict:
+    cfg = {"max_training_time": s.max_training_minutes, "value_protection": True,
+           "rare_category_replacement_method": s.rare_categories.upper()}
+    if s.model:
+        cfg["model"] = s.model
+    if s.epsilon:
+        cfg["differential_privacy"] = {"max_epsilon": s.epsilon}
+    return cfg
+
+
+def _mostlyai_tables(parent, key: str, children: dict, entities: int, s: Settings, workdir: str, table: str):
+    offline()
+    from mostlyai.sdk import MostlyAI
+
+    cfg = _mostlyai_config(s)
+    tables = [{"name": table, "data": parent, "primary_key": key, "tabular_model_configuration": cfg}]
+    for name, (child, ck) in children.items():
+        tables.append({"name": name, "data": child, "tabular_model_configuration": cfg,
+                       "foreign_keys": [{"column": ck, "referenced_table": table, "is_context": True}]})
+    mostly = MostlyAI(local=True, local_dir=workdir, quiet=True)
+    g = mostly.train(config={"name": f"pipewright-{table}-relational", "tables": tables}, progress_bar=False)
+    gen_tables = [{"name": table, "configuration": {"sample_size": entities,
+                                                    "sampling_temperature": s.sampling_temperature}}]
+    out = mostly.generate(g, config={"tables": gen_tables}, progress_bar=False).data()
+    result = {"parent": out[table], **{name: out[name] for name in children}}
+    return result, {"engine": "mostlyai", "mode": "relational",
+                    "versions": {p: _version(p) for p in ("mostlyai", "mostlyai-engine", "torch")},
+                    "configuration": cfg, "sampling_temperature": s.sampling_temperature,
+                    "tables": {n: len(d) for n, d in result.items()}}
+
+
+def _sdv_tables(parent, key: str, children: dict, entities: int, s: Settings):
+    try:
+        from sdv.metadata import Metadata
+        from sdv.multi_table import HMASynthesizer
+    except ImportError:
+        raise RuntimeError("engine sdv: SDV is not installed in the synthetic image (synthetic.requirements; SDV is "
+                           "under the Business Source Licence 1.1, which your team accepts directly)") from None
+    data = {"parent": parent, **{n: c for n, (c, _) in children.items()}}
+    meta = Metadata.detect_from_dataframes(data=data)
+    synth = HMASynthesizer(meta)
+    synth.fit(data)
+    scale = entities / max(len(parent), 1)
+    out = synth.sample(scale=scale)
+    return out, {"engine": "sdv", "mode": "relational", "versions": {"sdv": _version("sdv")},
+                 "synthesizer": "hma", "licence": "BUSL-1.1 (installed and accepted by the team)",
+                 "tables": {n: len(d) for n, d in out.items()}}
+
+
 def _version(package: str) -> str | None:
     from importlib.metadata import PackageNotFoundError, version
 

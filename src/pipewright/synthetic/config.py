@@ -11,14 +11,23 @@
 
 Never learned: personal-data columns (without a rule they become new keys if unique, else nulls) and keys (unique
 columns and the entity columns of feature tables get new keys).
+
+mode: relational learns the entity table and its child tables together, one model: the feature tables of
+data.features_from (history per entity) and synthetic.sequences (events per entity, in order). Each generated
+table goes to its own output table (output_table for the entity table, output_tables for each child); the
+evaluation joins the synthetic tables point in time, as training does, and checks their integrity.
 """
 
 from __future__ import annotations
 
+import re
+
 from pipewright.synthetic.runtime import engines, gates, rules
 
 TIERS = ("learned", "contract")
+MODES = ("flat", "relational")
 MAX_CANDIDATES = 8
+_BQ = re.compile(r"^bq://(?:[a-z][a-z0-9-]{4,61}[a-z0-9]\.)?[A-Za-z_][A-Za-z0-9_]{0,1023}\.[A-Za-z0-9_$-]{1,1024}$")
 
 DEFAULTS = {
     "enabled": False,
@@ -37,6 +46,9 @@ DEFAULTS = {
     "gates": {},                     # overrides of the purpose's gates (privacy gates: stricter only)
     "evaluation": {"attacks": 1000},  # the spike: 500 attacks gave bounds too unstable to gate on
     "requirements": None,            # extra packages for the synthetic image (e.g. SDV, which the team installs)
+    "mode": "flat",                  # flat (one table) | relational (the entity table and its child tables)
+    "output_tables": {},             # relational: child table name -> table in outputs.bigquery.tables
+    "sequences": [],                 # relational: event tables per entity [{name, source_uri, key, order_by}]
 }
 
 
@@ -94,6 +106,12 @@ def check(ml: dict, columns: dict, label: str | None, known, problems: list[str]
         problems.append(f"{where}.output_table: the table in outputs.bigquery.tables that receives the data")
     if not 0 < syn["holdout_fraction"] < 0.5:
         problems.append(f"{where}.holdout_fraction must be above 0 and below 0.5")
+    if syn["mode"] not in MODES:
+        problems.append(f"{where}.mode {syn['mode']!r} is not one of {', '.join(MODES)}")
+    elif syn["mode"] == "relational":
+        _relational(syn, ml, columns, problems)
+    elif syn["sequences"] or syn["output_tables"]:
+        problems.append(f"{where}: sequences and output_tables need mode: relational")
     base = dict(syn["engine"])
     variants = syn["candidates"] or default_candidates(base)
     if len(variants) > MAX_CANDIDATES:
@@ -179,19 +197,81 @@ def default_candidates(engine: dict) -> list[dict]:
     return [{"name": "default"}]
 
 
+def _relational(syn: dict, ml: dict, columns: dict, problems: list[str]) -> None:
+    """mode: relational. Resolves synthetic.relational = {key, time_column, parent_columns, children}: the entity
+    table's key (one column) and cut-off, the contract columns it holds, and every child table (the feature tables
+    of data.features_from, then synthetic.sequences) with its key, order and output table."""
+    from pipewright.config.ml import feature_columns
+
+    where = "synthetic"
+    ff = ml["data"].get("features_from")
+    contract = ml["data"]["contract"] or {"columns": []}
+    keys = (ff or {}).get("entity", {}).get("columns") or list(contract.get("unique") or [])
+    if len(keys) != 1:
+        problems.append(f"{where}.mode relational: the entity table needs exactly one key column "
+                        "(data.features_from.entity.columns, or data.contract.unique)")
+        return
+    key = keys[0]
+    from_features = feature_columns(ff)
+    children, names = [], set()
+    for i, src in enumerate((ff or {}).get("sources") or []):
+        name = src.get("feature_group") or src["table"].rsplit(".", 1)[-1]
+        names.add(name)
+        children.append({"name": name, "kind": "features", "index": i, "key": (src.get("entity_columns") or keys)[0],
+                         "order_by": src.get("time_column", "feature_timestamp"),
+                         "features": {src.get("prefix", "") + f: f for f in src["features"]},
+                         "output_table": syn["output_tables"].get(name)})
+    for j, seq in enumerate(syn["sequences"]):
+        at = f"{where}.sequences[{j}]"
+        missing = [k for k in ("name", "source_uri", "key", "order_by") if not seq.get(k)]
+        if missing:
+            problems.append(f"{at}: give {', '.join(missing)}")
+            continue
+        if seq["name"] in names:
+            problems.append(f"{at}: the name {seq['name']!r} is taken (a feature table or another sequence)")
+        names.add(seq["name"])
+        if "${" not in seq["source_uri"] and not _BQ.match(seq["source_uri"]):
+            problems.append(f"{at}.source_uri: a bq://project.dataset.table (or bq://dataset.table)")
+        children.append({"name": seq["name"], "kind": "sequence", "source_uri": seq["source_uri"],
+                         "key": seq["key"], "order_by": seq["order_by"], "columns": seq.get("columns"),
+                         "output_table": syn["output_tables"].get(seq["name"])})
+    if not children:
+        problems.append(f"{where}.mode relational: no child tables (data.features_from or synthetic.sequences)")
+    for c in children:
+        if not c["output_table"]:
+            problems.append(f"{where}.output_tables.{c['name']}: the table in outputs.bigquery.tables that receives "
+                            f"the synthetic {c['name']} rows")
+    for name in syn["output_tables"]:
+        if name not in names:
+            problems.append(f"{where}.output_tables.{name}: no child table of that name "
+                            f"(children: {', '.join(sorted(names)) or 'none'})")
+    syn["relational"] = {"key": key, "time_column": (ff or {}).get("entity", {}).get("time_column"),
+                         "parent_columns": [c for c in columns if c not in from_features], "children": children}
+    # The key is the entity table's primary key: learned as a key (never as values) and replaced by the key rule.
+    syn["exclude"] = [c for c in syn["exclude"] if c != key]
+
+
 def output_problems(syn: dict, contract: dict, tables: dict) -> list[str]:
-    """The output table must exist and hold every contract column (checked once tables are loaded)."""
+    """The output tables must exist and hold what goes into them, plus run_id (checked once tables are loaded):
+    flat, every contract column; relational, the entity table's columns, and each child's key."""
     if not syn["enabled"] or syn["tier"] != "learned" or not syn["output_table"]:
         return []
-    name = syn["output_table"]
-    if name not in tables:
-        return [f"synthetic.output_table: {name!r} is not in outputs.bigquery.tables"]
-    have = {f["name"] for f in tables[name].fields}
-    missing = [c["name"] for c in contract["columns"] if c["name"] not in have]
+    rel = syn.get("relational")
+    wanted = {syn["output_table"]: (rel["parent_columns"] if rel else [c["name"] for c in contract["columns"]])}
+    for child in (rel or {}).get("children", []):
+        if child["output_table"]:
+            wanted[child["output_table"]] = [child["key"]]
     out = []
-    if missing:
-        out.append(f"synthetic.output_table {name!r}: its schema lacks contract columns {', '.join(missing)}")
-    if "run_id" not in have:
-        out.append(f"synthetic.output_table {name!r}: add a run_id column (STRING): every synthetic row records the "
-                   "run that made it, so a release can be traced or removed")
+    for name, need in wanted.items():
+        where = f"synthetic output table {name!r}"
+        if name not in tables:
+            out.append(f"{where} is not in outputs.bigquery.tables")
+            continue
+        have = {f["name"] for f in tables[name].fields}
+        missing = [c for c in need if c not in have]
+        if missing:
+            out.append(f"{where}: its schema lacks {', '.join(missing)}")
+        if "run_id" not in have:
+            out.append(f"{where}: add a run_id column (STRING): every synthetic row records the run that made it, "
+                       "so a release can be traced or removed")
     return out

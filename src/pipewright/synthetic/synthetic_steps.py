@@ -6,6 +6,11 @@
     select    recompute the gates and keep the best candidate that passes every one
     publish   apply the column rules (new keys, made-up personal data) and write the output table
 
+mode relational: the datasets are folders of tables (the entity table and each child, see
+pipewright_synthetic.relational); the holdout is whole entities; evaluation adds integrity (keys, orphans, rows
+per entity, history before the cut-off) and measures the gates on the point-in-time join of the synthetic tables;
+publish writes every table, with new keys the same in the entity table and its children.
+
 Every step reads its settings from ml_config["synthetic"]; engines and evaluation come from the images'
 pipewright_synthetic package, platform helpers from pipewright_runtime.
 """
@@ -31,6 +36,8 @@ def prepare_synthetic(project: str, source_uri: str, run_id: str, ml_config: dic
     import pipewright_runtime as rt
 
     syn = ml_config["synthetic"]
+    if syn.get("mode") == "relational":
+        return _prepare_tables(project, source_uri or syn["source_uri"], run_id, ml_config, train.path, holdout.path)
     df = rt.read_source(source_uri or syn["source_uri"], project, ml_config, run_id)
     contract = [c["name"] for c in ml_config["data"]["contract"]["columns"]]
     missing = [c for c in contract if c not in df.columns]
@@ -61,14 +68,27 @@ def generate_synthetic(train: dsl.Input[dsl.Dataset], rows: int, candidate: str,
 
     settings = engines.Settings.from_dict(json.loads(candidate))
     t0 = time.time()
+    relational = ml_config["synthetic"].get("mode") == "relational"
     try:
-        data = pd.read_parquet(train.path)
-        out, facts = engines.generate(data, rows, settings, tempfile.mkdtemp(prefix="engine-"),
-                                      table=ml_config["usecase"].replace("-", "_"))
-        out.to_parquet(synthetic.path, index=False)
-        result = {"name": settings.name, "rows": len(out), "seconds": round(time.time() - t0, 1), **facts}
+        table = ml_config["usecase"].replace("-", "_")
+        if relational:
+            from pipewright_synthetic import relational as rel
+
+            parent, children, spec = rel.load(train.path)
+            out, facts = engines.generate_tables(parent, spec["key"], children, rows, settings,
+                                                 tempfile.mkdtemp(prefix="engine-"), table=table)
+            rel.save(synthetic.path, out["parent"], {c["name"]: (out[c["name"]], c["key"]) for c in spec["children"]},
+                     spec)
+            n = len(out["parent"])
+        else:
+            data = pd.read_parquet(train.path)
+            out, facts = engines.generate(data, rows, settings, tempfile.mkdtemp(prefix="engine-"), table=table)
+            out.to_parquet(synthetic.path, index=False)
+            n = len(out)
+        result = {"name": settings.name, "rows": n, "seconds": round(time.time() - t0, 1), **facts}
     except Exception as e:  # noqa: BLE001 - recorded in the evaluation record
-        pd.DataFrame().to_parquet(synthetic.path)
+        if not relational:
+            pd.DataFrame().to_parquet(synthetic.path)
         result = {"name": settings.name, "error": f"{type(e).__name__}: {e}"[:1000],
                   "seconds": round(time.time() - t0, 1)}
         rt.log(f"candidate {settings.name} failed: {traceback.format_exc()[-2000:]}", ml_config, "ERROR", run_id)
@@ -95,10 +115,33 @@ def evaluate_synthetic(train: dsl.Input[dsl.Dataset], holdout: dsl.Input[dsl.Dat
     label = (data.get("label") or {}).get("column")
     dates = [c["name"] for c in data["contract"]["columns"] if c["type"] in ("date", "timestamp")]
     try:
-        metrics = evaluation.evaluate(pd.read_parquet(train.path), pd.read_parquet(holdout.path),
-                                      pd.read_parquet(synthetic.path), label, (data.get("label") or {}).get("positive"),
-                                      dates=dates, secrets=syn["sensitive_columns"],
+        extra, drop = {}, ()
+        if syn.get("mode") == "relational":
+            from pipewright_synthetic import relational as rel
+
+            tr_parent, tr_children, spec = rel.load(train.path)
+            ho_parent, ho_children, _ = rel.load(holdout.path)
+            sy_parent, sy_children, _ = rel.load(synthetic.path)
+            specs = {c["name"]: {"key": c["key"], "time_column": c["order_by"] if c["kind"] == "features" else None}
+                     for c in spec["children"]}
+            extra, problems = rel.integrity(sy_parent, {n: d for n, (d, _k) in sy_children.items()}, spec["key"],
+                                            spec["time_column"], tr_parent,
+                                            {n: d for n, (d, _k) in tr_children.items()}, specs)
+            if problems:
+                result["errors"] = [f"integrity: {p}" for p in problems]
+                result["metrics"] = extra
+                return json.dumps(result, default=str)
+            real, real_held = rel.flat(tr_parent, tr_children, spec), rel.flat(ho_parent, ho_children, spec)
+            synthetic_flat, drop = rel.flat(sy_parent, sy_children, spec), (spec["key"],)
+            columns = [c for c in real.columns if c in synthetic_flat.columns]
+            real, real_held, synthetic_flat = real[columns], real_held[columns], synthetic_flat[columns]
+        else:
+            real, real_held = pd.read_parquet(train.path), pd.read_parquet(holdout.path)
+            synthetic_flat = pd.read_parquet(synthetic.path)
+        metrics = evaluation.evaluate(real, real_held, synthetic_flat, label, (data.get("label") or {}).get("positive"),
+                                      dates=dates, drop=drop, secrets=syn["sensitive_columns"],
                                       n_attacks=syn["evaluation"]["attacks"])
+        metrics.update(extra)
     except Exception as e:  # noqa: BLE001
         result["errors"] = [f"evaluation failed: {type(e).__name__}: {e}"[:1000]]
         return json.dumps(result, default=str)
@@ -157,6 +200,8 @@ def publish_synthetic(selection: str, project: str, bq_dataset: str, run_id: str
 
     syn, contract = ml_config["synthetic"], ml_config["data"]["contract"]
     chosen = json.loads(selection)
+    if syn.get("mode") == "relational":
+        return _publish_tables(chosen, project, bq_dataset, run_id, ml_config)
     bucket, _, name = chosen["uri"].removeprefix("gs://").partition("/")
     df = pd.read_parquet(io.BytesIO(storage.Client(project=project).bucket(bucket).blob(name).download_as_bytes()))
     records = rules.apply_rules(df.to_dict("records"), contract, syn["columns"], seed=syn["seed"])
@@ -167,3 +212,106 @@ def publish_synthetic(selection: str, project: str, bq_dataset: str, run_id: str
                   locations=written, chosen=chosen["chosen"], purpose=syn["purpose"], metrics=chosen["metrics"],
                   record=chosen["record"])
     return json.dumps({"rows": len(out), "locations": written})
+
+
+# ------------------------------------------------------------------- relational helpers --
+# Plain functions next to the components: the images import this file, so the components call them at run time.
+
+def _prepare_tables(project: str, source_uri: str, run_id: str, ml_config: dict, train_dir: str,
+                    holdout_dir: str) -> int:
+    """mode relational: the entity table as it is (no join) and each child table, only rows of its entities;
+    timestamps without a time zone (as the engine reads them); whole entities held out."""
+    import pipewright_runtime as rt
+    from pipewright_synthetic import relational as rel
+
+    syn = ml_config["synthetic"]
+    spec = dict(syn["relational"])
+    client = rt.bigquery_client(project, ml_config)
+    parent_ref = rt.bq_table(source_uri, project)
+    parent = client.query(f"SELECT * FROM `{parent_ref}`").to_dataframe(create_bqstorage_client=False)
+    learn = [c for c in spec["parent_columns"] if c not in set(syn["exclude"])]
+    missing = [c for c in learn if c not in parent.columns]
+    if missing:
+        raise ValueError(f"the entity table {parent_ref} lacks {', '.join(missing)}")
+    parent = _plain(parent[learn])
+    ff = (ml_config["data"].get("features_from") or {})
+    if ff:
+        ff = rt.resolve_feature_groups(ff, project, (ml_config.get("platform") or {}).get("region"))
+        rt._check_feature_datasets(ff, project, ml_config)
+    key = spec["key"]
+    children, resolved = {}, []
+    for c in spec["children"]:
+        c = dict(c)
+        if c["kind"] == "features":
+            src = ff["sources"][c["index"]]
+            table = rt.bq_table(src["table"], project)
+            names = src.get("columns") or {}
+            c["key"] = (src.get("entity_columns") or ff["entity"]["columns"])[0]
+            c["order_by"] = src.get("time_column", "feature_timestamp")
+            c["features"] = {out: names.get(f, f) for out, f in c["features"].items()}
+            select = ", ".join(f"`{x}`" for x in dict.fromkeys([c["key"], c["order_by"], *c["features"].values()]))
+        else:
+            table = rt.bq_table(c["source_uri"], project)
+            select = ", ".join(f"`{x}`" for x in c["columns"]) if c.get("columns") else "*"
+        df = client.query(f"SELECT {select} FROM `{table}` WHERE `{c['key']}` IN (SELECT `{key}` FROM `{parent_ref}`)"
+                          ).to_dataframe(create_bqstorage_client=False)
+        df = _plain(df).sort_values([c["key"], c["order_by"]]).reset_index(drop=True)
+        children[c["name"]] = (df, c["key"])
+        resolved.append(c)
+    spec["children"] = resolved
+    tr, tr_c, ho, ho_c = rel.split(parent, children, key, syn["holdout_fraction"], syn["seed"])
+    rel.save(train_dir, tr, {n: (d, children[n][1]) for n, d in tr_c.items()}, spec)
+    rel.save(holdout_dir, ho, {n: (d, children[n][1]) for n, d in ho_c.items()}, spec)
+    rt.log(f"synthetic source (relational): {len(parent)} entities, {len(ho)} held out; children "
+           f"{ {n: len(d) for n, (d, _k) in children.items()} }", ml_config, run_id=run_id, entities=len(parent))
+    return int(syn["rows"] or len(parent))
+
+
+def _plain(df):
+    """BigQuery types the engines and Parquet read plainly: DATE as ISO text, TIMESTAMP without a time zone."""
+    import pandas as pd
+
+    df = df.copy()
+    for col in df.columns:
+        kind = str(df[col].dtype)
+        if kind == "dbdate":
+            df[col] = pd.to_datetime(df[col]).dt.strftime("%Y-%m-%d")
+        elif kind.startswith("datetime64") and "UTC" in kind:
+            df[col] = df[col].dt.tz_convert(None)
+    return df
+
+
+def _publish_tables(chosen: dict, project: str, bq_dataset: str, run_id: str, ml_config: dict) -> str:
+    """mode relational: new keys (the key rule) the same in the entity table and every child, the other column
+    rules on the entity table, run_id on every row; each table appended to its output table."""
+    import json
+    import tempfile
+
+    import pandas as pd
+    import pipewright_runtime as rt
+    from google.cloud import storage
+    from pipewright_synthetic import relational as rel
+    from pipewright_synthetic import rules
+
+    syn, contract = ml_config["synthetic"], ml_config["data"]["contract"]
+    bucket, _, prefix = chosen["uri"].removeprefix("gs://").partition("/")
+    local = tempfile.mkdtemp(prefix="synthetic-")
+    for blob in storage.Client(project=project).bucket(bucket).list_blobs(prefix=prefix.rstrip("/") + "/"):
+        blob.download_to_filename(f"{local}/{blob.name.rsplit('/', 1)[-1]}")
+    parent, children, spec = rel.load(local)
+    key = spec["key"]
+    rule = {k: v for k, v in (syn["columns"].get(key) or {"rule": "key"}).items() if k != "rule"}
+    parent, renamed = rel.remap_keys(parent, children, key, rule, seed=syn["seed"])
+    others = {n: r for n, r in syn["columns"].items() if n != key}
+    parent = pd.DataFrame(rules.apply_rules(parent.to_dict("records"), contract, others, seed=syn["seed"]))
+    written, rows = {}, {"parent": len(parent)}
+    parent["run_id"] = run_id
+    written[syn["output_table"]] = rt.write_table(syn["output_table"], parent, ml_config, project, bq_dataset, run_id)
+    for c in spec["children"]:
+        df = renamed[c["name"]].assign(run_id=run_id)
+        written[c["output_table"]] = rt.write_table(c["output_table"], df, ml_config, project, bq_dataset, run_id)
+        rows[c["name"]] = len(df)
+    rt.emit_event("synthetic.generated", ml_config, run_id, table=syn["output_table"], rows=len(parent),
+                  tables=rows, locations=written, chosen=chosen["chosen"], purpose=syn["purpose"],
+                  metrics=chosen["metrics"], record=chosen["record"], mode="relational")
+    return json.dumps({"rows": rows, "locations": written})
