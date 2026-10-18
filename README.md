@@ -474,7 +474,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Agent Platform Feature Store feature groups as a feature source | Built |
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
-| Synthetic data (learned inside the environment and gated, or from the data contract alone) | Built, in test |
+| Synthetic data (learned inside the environment and gated, or from the data contract alone) | Built and used end to end on Kubeflow in private GKE, inside an enforced perimeter (feature branch) |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 
