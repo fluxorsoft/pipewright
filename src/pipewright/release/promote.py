@@ -64,6 +64,20 @@ def destination_image(image: str, registry: str) -> str:
     return f"{registry.rstrip('/')}/{path.rsplit('/', 1)[-1]}@{digest}"
 
 
+class _Sized:
+    """A response stream with a known length, so requests streams it without asking the stream for a file
+    descriptor (Windows refuses fstat on a socket stream: WinError 6)."""
+
+    def __init__(self, raw, length: str | None):
+        self.raw, self.length = raw, int(length or 0)
+
+    def __len__(self) -> int:
+        return self.length
+
+    def read(self, size: int = -1) -> bytes:
+        return self.raw.read(size)
+
+
 def copy_image(gcp: Gcp, source: str, dest: str, log=print) -> str:
     """Copies an image between registries through the registry API: the manifest and every blob, byte for byte,
     so the digest cannot change. Returns the destination digest (checked equal to the source's)."""
@@ -101,7 +115,8 @@ def copy_image(gcp: Gcp, source: str, dest: str, log=print) -> str:
         if location.startswith("/"):
             location = f"https://{dhost}{location}"
         sep = "&" if "?" in location else "?"
-        put = s.put(f"{location}{sep}digest={quote(blob)}", data=src.raw, timeout=1800,
+        put = s.put(f"{location}{sep}digest={quote(blob)}", data=_Sized(src.raw, src.headers.get("Content-Length")),
+                    timeout=1800,
                     headers={"Content-Type": "application/octet-stream",
                              "Content-Length": src.headers.get("Content-Length", "")})
         if put.status_code not in (201, 204):
@@ -386,10 +401,20 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     registry = dst_env.artifact_registry["docker"]
     dst_image = destination_image(source.component_image, registry)
     dst_ray = destination_image(source.ray["image"], registry) if source.ray else None
-    rewrites = {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {})}
+    # Synthetic data may be switched off in the destination (it is not part of what a model release carries): the
+    # synthetic pipeline is then left out. Switched on there but not in the source, nothing tested would be promoted.
+    if uc_dst.synthetic_image_needed and not source.synthetic:
+        raise ConfigError(f"synthetic data is on for {uc_dst.name} in {dst_env.name} but the source release has no "
+                          "synthetic pipeline: release it with synthetic data on in the source first")
+    dst_synthetic = (tuple(destination_image(source.synthetic[k], registry) for k in ("image", "evaluation_image"))
+                     if source.synthetic and uc_dst.synthetic_image_needed else None)
+    rewrites = {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {}),
+                **({source.synthetic["image"]: dst_synthetic[0],
+                    source.synthetic["evaluation_image"]: dst_synthetic[1]} if dst_synthetic else {})}
     out_dir = build_dir or (uc_dst.directory / ".pipewright" / "promote")
-    infos = publish.compile_pinned(uc_dst, dst_image, out_dir)
-    if set(infos) != set(source.pipeline_names):
+    infos = publish.compile_pinned(uc_dst, dst_image, out_dir, dst_synthetic)
+    expected = set(source.pipeline_names) - ({"synthetic"} if source.synthetic and not dst_synthetic else set())
+    if set(infos) != expected:
         raise ConfigError(f"the destination compiles pipelines {sorted(infos)}, the source release has "
                           f"{source.pipeline_names}")
     differences = {}
@@ -430,6 +455,9 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     copy_image(gcp, source.component_image, dst_image, log)
     if dst_ray:
         copy_image(gcp, source.ray["image"], dst_ray, log)
+    if dst_synthetic:
+        copy_image(gcp, source.synthetic["image"], dst_synthetic[0], log)
+        copy_image(gcp, source.synthetic["evaluation_image"], dst_synthetic[1], log)
 
     # 6. The model, unchanged.
     model = None
@@ -440,11 +468,11 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     uploaded = {p: publish.upload_template(info, dst_env.artifact_registry["kfp"], uc_dst, rid, gcp.session.credentials)
                 for p, info in infos.items()}
     contract = publish.build_contract(uc_dst, dst_env, infos, uploaded, dst_image, rid, source.source_commit,
-                                      ray_image=dst_ray)
+                                      ray_image=dst_ray, synthetic_images=dst_synthetic)
     record = {
         "environment": src_env.name, "project": src_env.project, "release_id": rid, "contract_sha256": source_sha,
         "contract": f"gs://{src_env.artifacts_bucket}/{contract_name(source.usecase, rid)}",
-        "images": {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {})},
+        "images": rewrites,
         "templates": {p: {"source": source.pipeline(p).template_digest, "destination": uploaded[p][1],
                           "differences": differences.get(p, [])} for p in infos},
         "model": model, "by": who, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "policy": policy,

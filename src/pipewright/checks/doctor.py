@@ -249,7 +249,44 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     if ds is not None:
         _check_tables(uc, env, gcp, report)
     _check_ml(uc, env, gcp, report)
+    _check_synthetic(uc, env, gcp, report)
     _check_permissions(uc, env, gcp, report)
+
+
+def _check_synthetic(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    """synthetic (only when enabled): what is generated and by which engines, and that the learned tier's source
+    exists with the contract's columns (with data.features_from, the entity table's own columns)."""
+    syn = uc.synthetic
+    if not syn:
+        return
+    from pipewright.config.ml import feature_columns
+    from pipewright.runs import sources
+
+    s = f"Synthetic data of {uc.name}"
+    engines = sorted({c["engine"] for c in syn.get("candidates") or []}) or ["none (contract tier)"]
+    report.add(s, Result(INFO, f"purpose {syn['purpose']}, tier {syn['tier']}",
+                         f"engines: {', '.join(engines)}; `pipewright synthetic gates` lists the gates"))
+    if "sdv" in engines:
+        report.add(s, Result(WARN, "engine sdv", "SDV is under the Business Source Licence 1.1: your team installs it "
+                             "(synthetic.requirements) and accepts its terms directly; Pipewright never ships it"))
+    src = syn.get("source_uri")
+    if syn["tier"] != "learned" or not src or not src.startswith("bq://") or sources.problem(src):
+        return
+    project, dataset, table = sources.bq_table(src, env.project).split(".")
+    resp = gcp.get(f"{BQ}/projects/{project}/datasets/{dataset}/tables/{table}")
+    name = f"source {project}.{dataset}.{table}"
+    if not resp.ok:
+        report.add(s, Result(FAIL, name, error_text(resp), "check synthetic.source_uri, and that the runner may read "
+                             "it (it is read as the runner, like training data)"))
+        return
+    have = {f["name"] for f in (resp.body.get("schema") or {}).get("fields", [])}
+    from_features = set(feature_columns(uc.ml["data"].get("features_from")))
+    need = [c["name"] for c in uc.ml["data"]["contract"]["columns"] if c["name"] not in from_features]
+    missing = [c for c in need if c not in have]
+    detail = (f"no column {', '.join(missing)}" if missing else f"{len(need)} contract columns"
+              + (f" (+{len(from_features)} from feature tables)" if from_features else ""))
+    report.add(s, Result(FAIL if missing else OK, name, detail,
+                         "the source must hold the data contract's columns" if missing else ""))
 
 
 def _check_template(uc: ResolvedUseCase, report: Report) -> None:
@@ -275,7 +312,12 @@ def _check_template(uc: ResolvedUseCase, report: Report) -> None:
         ml = "takes ml_config" if ML_CONFIG_PARAMETER in info.parameters else "no ml_config parameter"
         report.add(s, Result(OK, f"{name} compiles", f"{info.name}, {len(info.parameters)} parameters, {ml}"))
     if uc.steps:
-        report.add(s, Result(OK, "steps", f"{', '.join(uc.steps)} applied"))
+        from pipewright.synthetic import TASKS
+
+        idle = [t for t in uc.steps if t in TASKS and "synthetic" not in uc.pipelines]
+        applied = [t for t in uc.steps if t not in idle]
+        report.add(s, Result(OK, "steps", f"{', '.join(applied) or 'none'} applied"
+                             + (f"; {', '.join(idle)} unused here (synthetic data is off)" if idle else "")))
     problems, notes = check_parameters(uc, infos)
     for p in problems:
         report.add(s, Result(FAIL, "parameters", p))

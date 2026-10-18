@@ -55,11 +55,22 @@ class ResolvedUseCase:
     #                                               run_requests_topic, kms_key
     outputs: dict = field(default_factory=dict)   # store, gcs {format, external_tables, uri}, tables {name: fields}
     ray_requirements: Path | None = None           # extra packages for the Ray image (components.ray_requirements)
+    synthetic_requirements: Path | None = None     # extra packages for the synthetic image (synthetic.requirements)
 
     @property
     def ray(self) -> dict | None:
         """Ray steps and settings ({mode, ray_version, python_version, steps}), or None when no step uses Ray."""
         return self.platform.get("ray")
+
+    @property
+    def synthetic(self) -> dict | None:
+        """The resolved synthetic section, or None when synthetic data is off for this use case."""
+        return self.ml.get("synthetic")
+
+    @property
+    def synthetic_image_needed(self) -> bool:
+        """True when the use case releases the synthetic pipeline (the learned tier), which runs on its own image."""
+        return bool(self.synthetic) and self.synthetic["tier"] == "learned"
 
     # Older single-pipeline accessors (training).
     @property
@@ -97,7 +108,8 @@ class ResolvedUseCase:
             "tenant": self.tenant,
             "sources": self.sources,
             "resources": self.resources,
-            "pipelines": {n: {"file": rel(p.file), "function": p.function} for n, p in self.pipelines.items()},
+            "pipelines": {n: ({"provided_by": "pipewright (synthetic.enabled)"} if n == "synthetic" and self.synthetic
+                              else {"file": rel(p.file), "function": p.function}) for n, p in self.pipelines.items()},
             "components": {"dir": rel(self.components_dir), "requirements": rel(self.requirements)},
             "framework": self.framework,
             "triggers": self.triggers,

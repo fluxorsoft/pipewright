@@ -124,6 +124,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     tenant = eff["tenant"]
     resources = _resources(tenant, eff.get("resources", {}), env, problems)
     pipelines = _pipelines(eff, directory, problems)
+    synthetic_requirements = _synthetic_pipeline(eff.get("synthetic") or {}, pipelines, directory, problems)
     triggers = _triggers(eff, resources, tenant, pipelines, problems)
 
     # Model, serving, approvals, policies.
@@ -203,6 +204,19 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         for where, uri in [*named, ("retraining.source_uri", retrain_source)]:
             if uri and uri.startswith("gs://"):
                 problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
+    if "synthetic" in ml:
+        from pipewright.synthetic import config as synthetic_config
+
+        problems += synthetic_config.output_problems(ml["synthetic"], ml["data"]["contract"] or {"columns": []},
+                                                     tables)
+        src = ml["synthetic"].get("source_uri")
+        if src and "${" not in src and sources.problem(src):
+            problems.append(f"synthetic.source_uri: {sources.problem(src)}")
+        for s in triggers["schedules"]:                  # a synthetic schedule learns from synthetic.source_uri
+            if s["pipeline"] == "synthetic" and not s.get("source_uri") and src:
+                s["source_uri"] = src
+        synthetic_config.apply_policy(ml["synthetic"], env.policies.get("synthetic") or {}, env.name,
+                                      env.approver_groups if env.manifest_source else None, problems)
     _feature_policy(ml, env, tenant, problems)
     _retraining_policy(ml["retraining"], approvals, env, problems)
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
@@ -264,8 +278,28 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   # read_source refuses feature tables (and groups' tables) outside them
                   **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
                                                   .get("datasets")) is not None else {})},
-        outputs=outputs, ray_requirements=ray_requirements,
+        outputs=outputs, ray_requirements=ray_requirements, synthetic_requirements=synthetic_requirements,
     )
+
+
+def _synthetic_pipeline(spec: dict, pipelines: dict, directory: Path, problems: list[str]) -> Path | None:
+    """synthetic.enabled with the learned tier adds the pipeline Pipewright provides (the contract tier needs no
+    pipeline: it runs anywhere, from the CLI). Returns synthetic.requirements, resolved."""
+    from pipewright.synthetic import PIPELINE, PIPELINE_FILE, PIPELINE_FUNCTION
+
+    if not spec.get("enabled") or spec.get("tier", "learned") != "learned":
+        return None
+    if PIPELINE in pipelines:
+        problems.append("pipelines.synthetic: Pipewright provides the synthetic pipeline when synthetic.enabled is "
+                        "set; remove pipelines.synthetic")
+    else:
+        pipelines[PIPELINE] = PipelineRef(PIPELINE, PIPELINE_FILE, PIPELINE_FUNCTION)
+    if not spec.get("requirements"):
+        return None
+    path = (directory / spec["requirements"]).resolve()
+    if not path.is_file():
+        problems.append(f"synthetic.requirements not found: {spec['requirements']}")
+    return path
 
 
 def _ray(steps: dict, tenant: str, env: Environment, problems: list[str]) -> dict | None:

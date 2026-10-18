@@ -1,6 +1,7 @@
 """pipewright release / rollback / status.
 
-release: tables sync -> component image -> compile + upload templates -> contract -> verify -> move pointer
+release: tables sync -> component image (+ Ray, synthetic images) -> compile + upload templates -> contract -> verify
+-> move pointer
 """
 
 from __future__ import annotations
@@ -120,25 +121,33 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
                                                 gcp=gcp, log=log)
         log(f"component image: {component_image}")
     ray_image = _ray_image(uc, env, release_id, gcp, log) if uc.ray else None
+    synthetic_images = None
+    if uc.synthetic_image_needed:
+        log("building synthetic images (docker)...")
+        synthetic_images = images.build_and_push_synthetic(uc, env.artifact_registry["docker"], release_id,
+                                                           _token(gcp), gcp=gcp, log=log)
+        log(f"synthetic images: {synthetic_images[0]}, {synthetic_images[1]}")
 
     # Contracts are write-once (evidence points at them). The same commit with the same images and templates is a
     # retry: reuse the contract. The same commit with anything different (e.g. a Pipewright upgrade that changes an
     # image or how templates compile) is a new release. Templates are compared by digest, the sha256 of the file.
     out_dir = build_dir or (uc.directory / ".pipewright" / "build")
-    infos = publish.compile_pinned(uc, component_image, out_dir)
+    infos = publish.compile_pinned(uc, component_image, out_dir, synthetic_images)
     digests = {n: "sha256:" + hashlib.sha256(info.spec_path.read_bytes()).hexdigest() for n, info in infos.items()}
 
     def same(c: ReleaseContract) -> bool:
         released = {n: c.pipeline(n).template_digest for n in c.pipeline_names}
         ray_mode = (uc.ray or {}).get("mode", "per_run") if uc.ray else None
+        synthetic = (c.synthetic.get("image"), c.synthetic.get("evaluation_image")) if c.synthetic else None
         return (c.component_image == component_image and (c.ray or {}).get("image") == ray_image
-                and released == digests and c.pipeline_root == publish.pipeline_root(env, uc)
+                and synthetic == synthetic_images and released == digests
+                and c.pipeline_root == publish.pipeline_root(env, uc)
                 and ((c.ray or {}).get("mode", "per_run") if c.ray else None) == ray_mode)
 
     existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
     existing = ReleaseContract.from_json(existing_text) if existing_text else None
     if existing is not None and not same(existing):
-        what = "|".join([component_image, ray_image or "", publish.pipeline_root(env, uc),
+        what = "|".join([component_image, ray_image or "", *(synthetic_images or ()), publish.pipeline_root(env, uc),
                          (uc.ray or {}).get("mode", "") if uc.ray else "",
                          *(f"{n}={d}" for n, d in sorted(digests.items()))])
         release_id = f"{release_id}-{hashlib.sha256(what.encode()).hexdigest()[:8]}"
@@ -159,7 +168,7 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
                                                          gcp.session.credentials)
             log(f"template ({pipeline}): {uploaded[pipeline][0]}")
         contract = publish.build_contract(uc, env, infos, uploaded, component_image, release_id, commit,
-                                          ray_image=ray_image)
+                                          ray_image=ray_image, synthetic_images=synthetic_images)
         try:
             gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
         except PreconditionFailed:

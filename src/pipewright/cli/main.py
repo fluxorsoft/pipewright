@@ -374,14 +374,72 @@ def cmd_run(args) -> int:
     if args.print_launcher_url:
         print(launch.launcher_url(env))
         return 0
-    _selected(Path(args.root), [args.usecase])
-    result = launch.run(env, launch.body(args.usecase, args.pipeline, args.source_uri, args.schedule, args.run_key))
+    found = _selected(Path(args.root), [args.usecase])
+    source_uri = args.source_uri
+    if args.pipeline == "synthetic" and not source_uri and not args.schedule:
+        synthetic = resolve_usecase(found[args.usecase], env).synthetic or {}
+        source_uri = synthetic.get("source_uri")          # the data the engine learns from, as configured
+        if not source_uri:
+            raise ConfigError(f"{args.usecase} has no synthetic pipeline in {env.name} (synthetic.enabled)")
+    result = launch.run(env, launch.body(args.usecase, args.pipeline, source_uri, args.schedule, args.run_key))
     if result.get("status") == "requested":
         print(f"requested: {result['usecase']} {result['pipeline']} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")
         return 0
     print(f"{result.get('status')}: {result.get('usecase')} {result.get('pipeline', '')} job {result.get('job_id')}"
           + (f" (release {result['release']})" if result.get("release") else ""))
+    return 0
+
+
+def cmd_synthetic_generate(args) -> int:
+    """Contract-only rows: from the data contract and synthetic.columns, no real data, no ML (development and CI)."""
+    import csv
+
+    from pipewright.synthetic.runtime import rules
+
+    uc, env = _one(args)
+    ml = uc.ml
+    contract = ml["data"]["contract"]
+    if not contract:
+        raise ConfigError(f"{uc.name} has no data.contract to generate from")
+    syn = uc.synthetic or {}
+    rows = args.rows or syn.get("rows") or contract.get("min_rows") or 1000
+    seed = args.seed if args.seed is not None else (syn.get("seed") or ml["training"]["seed"])
+    data = rules.contract_rows(contract, ml["data"].get("label"), syn.get("columns") or {}, rows, seed)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    names = [c["name"] for c in contract["columns"]]
+    if out.suffix == ".parquet":
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+        except ImportError:
+            raise ConfigError("writing Parquet needs pyarrow (the gcp extra); or write .csv") from None
+        pq.write_table(pa.Table.from_pylist(data), out)
+    else:
+        with out.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=names)
+            writer.writeheader()
+            writer.writerows(data)
+    print(f"wrote {rows} contract-only rows to {out} (seed {seed}; no real data was read)")
+    return 0
+
+
+def cmd_synthetic_gates(args) -> int:
+    """The gates a synthetic release must pass in this environment: the purpose's defaults with the overrides."""
+    from pipewright.synthetic.runtime import gates
+
+    uc, env = _one(args)
+    syn = uc.synthetic
+    if not syn:
+        print(f"{uc.name}: synthetic data is off in {env.name} (synthetic.enabled)")
+        return 0
+    purpose_defaults = gates.defaults(syn["purpose"])
+    print(f"{uc.name} in {env.name}: purpose {syn['purpose']}, tier {syn['tier']}")
+    for metric, gate in (syn.get("gates") or purpose_defaults).items():
+        (direction, value), = gate.items()
+        note = "" if gate == purpose_defaults.get(metric) else f"  (default {purpose_defaults[metric][direction]})"
+        print(f"  {metric:15} {direction} {value}{note}")
     return 0
 
 
@@ -668,12 +726,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("run", help="start a pipeline through the launcher (file-free: give a gs:// source)")
     one(sp)
-    sp.add_argument("--pipeline", help="training (default) or inference")
+    sp.add_argument("--pipeline", help="training (default), inference or synthetic")
     sp.add_argument("--source-uri", help="gs:// path of the data")
     sp.add_argument("--schedule", help="run one of the use case's schedules now")
     sp.add_argument("--run-key", help="idempotency key: the same key never starts a second run")
     sp.add_argument("--print-launcher-url", action="store_true", help="print the launcher URL and exit")
     sp.set_defaults(func=cmd_run)
+
+    sp = sub.add_parser("synthetic", help="synthetic data (synthetic.*): contract-only rows, the gates in force")
+    ysub = sp.add_subparsers(dest="synthetic_command", required=True)
+    sp = ysub.add_parser("generate", help="rows from the data contract and rules alone (no real data, no ML)")
+    one(sp)
+    sp.add_argument("--out", required=True, help="a .csv or .parquet file")
+    sp.add_argument("--rows", type=int, help="default: synthetic.rows, else data.contract.min_rows")
+    sp.add_argument("--seed", type=int, help="default: synthetic.seed, else training.seed")
+    sp.set_defaults(func=cmd_synthetic_generate)
+    sp = ysub.add_parser("gates", help="the gates a synthetic release must pass, with their defaults")
+    one(sp)
+    sp.set_defaults(func=cmd_synthetic_gates)
 
     sp = sub.add_parser("ci", help="CI workflows for the MLOps repo")
     csub = sp.add_subparsers(dest="ci_command", required=True)

@@ -1,4 +1,5 @@
 """pipewright promote (FR-29): the acceptance tests of CONTEXT.md, section 8.12, offline."""
+import io
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -50,7 +51,7 @@ def setup(repo, monkeypatch, tmp_path):
         state.calls.append(f"write {name}")
         state.store[(bucket, name)] = (text, (current[1] if current else 0) + 1)
 
-    def compile_pinned(uc, image, out_dir):
+    def compile_pinned(uc, image, out_dir, synthetic_images=None):
         path = tmp_path / "compiled.yaml"
         path.write_text(state.dst_template, encoding="utf-8")
         return {"training": SimpleNamespace(name="churn-training", spec_path=path, pipeline="training",
@@ -196,7 +197,7 @@ class Registry:
 
     def _resp(self, code, body=b"", headers=None):
         return SimpleNamespace(status_code=code, content=body, text=body.decode(errors="replace"),
-                               headers=headers or {}, raw=body)
+                               headers=headers or {}, raw=io.BytesIO(body if isinstance(body, bytes) else b""))
 
     def get(self, url, **kw):
         kind, ref = url.rsplit("/", 2)[-2:]
@@ -214,7 +215,8 @@ class Registry:
 
     def put(self, url, data=None, **kw):
         if "/blobs/uploads/" in url:
-            self.objects[("dst", "blobs", url.split("digest=")[1].replace("%3A", ":"))] = data
+            body = data.read() if hasattr(data, "read") else data
+            self.objects[("dst", "blobs", url.split("digest=")[1].replace("%3A", ":"))] = body
         else:
             self.objects[("dst", "manifests", url.rsplit("/", 1)[1])] = data
         return self._resp(201)

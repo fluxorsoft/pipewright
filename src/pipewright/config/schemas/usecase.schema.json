@@ -110,6 +110,7 @@
         },
         "monitoring": { "$ref": "#/$defs/monitoring" },
         "retraining": { "$ref": "#/$defs/retraining" },
+        "synthetic": { "$ref": "#/$defs/synthetic" },
         "data_protection": {
           "type": "object",
           "additionalProperties": false,
@@ -185,7 +186,7 @@
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" },
     "principal": { "type": "string", "pattern": "^(group|user|serviceAccount):.+$" },
     "approval_mode": { "enum": ["manual", "auto"] },
-    "pipeline_name": { "enum": ["training", "inference"] },
+    "pipeline_name": { "enum": ["training", "inference", "synthetic"], "description": "synthetic: the pipeline Pipewright provides when synthetic.enabled" },
     "pipeline_ref": {
       "type": "object",
       "additionalProperties": false,
@@ -461,6 +462,129 @@
         }
       }
     },
+    "synthetic_engine": {
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["mostlyai", "sdv"], "description": "mostlyai: MOSTLY AI SDK in local mode (default); sdv: only if your team installs SDV (synthetic.requirements) under its own licence" },
+        "model": { "type": ["string", "null"], "description": "mostlyai: MOSTLY_AI/Small, Medium or Large; sdv: gaussian_copula, ctgan, tvae or copulagan" },
+        "max_training_minutes": { "type": "number", "exclusiveMinimum": 0 },
+        "differential_privacy": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["epsilon"],
+          "properties": { "epsilon": { "type": "number", "exclusiveMinimum": 0 } },
+          "description": "train with a differential privacy budget (mostlyai)"
+        },
+        "sampling_temperature": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+        "rare_categories": { "enum": ["constant", "sample"] },
+        "epochs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "synthetic_min_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min"],
+      "properties": { "min": { "type": "number" } }
+    },
+    "synthetic_max_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max"],
+      "properties": { "max": { "type": "number" } }
+    },
+    "synthetic": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "synthetic data generation (off unless enabled): an engine learns from real data inside the environment, or rules generate rows from the data contract alone",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "purpose": { "enum": ["test-data", "sharing"], "description": "sets the default gates: test-data stays in the organisation, sharing leaves it" },
+        "tier": { "enum": ["learned", "contract"] },
+        "source_uri": { "type": "string", "description": "learned: the data the engine learns from, read point in time like training" },
+        "output_table": { "type": "string", "description": "learned: a table in outputs.bigquery.tables" },
+        "rows": { "type": ["integer", "null"], "minimum": 1 },
+        "holdout_fraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 0.5 },
+        "seed": { "type": ["integer", "null"] },
+        "engine": { "$ref": "#/$defs/synthetic_engine", "unevaluatedProperties": false },
+        "candidates": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/synthetic_engine",
+            "required": ["name"],
+            "properties": { "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,30}$" } },
+            "unevaluatedProperties": false
+          },
+          "description": "engine variants tried side by side; the best one passing every gate is kept"
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["rule"],
+            "properties": {
+              "rule": { "enum": ["key", "fake", "constant", "drop", "time", "values", "range"] },
+              "prefix": { "type": "string" },
+              "provider": { "enum": ["email", "name", "phone", "uuid", "text"] },
+              "value": {},
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "step": { "enum": ["day", "month_end"] },
+              "values": { "type": "array", "minItems": 1 },
+              "weights": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+              "min": { "type": "number" },
+              "max": { "type": "number" }
+            },
+            "additionalProperties": false
+          },
+          "description": "columns decided by rules, not learned (keys, personal data, time grids)"
+        },
+        "sensitive_columns": { "type": "array", "items": { "type": "string" } },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fidelity": { "$ref": "#/$defs/synthetic_min_gate" },
+            "tstr_drop": { "$ref": "#/$defs/synthetic_max_gate" },
+            "exact_copies": { "$ref": "#/$defs/synthetic_max_gate" },
+            "dcr_ratio": { "$ref": "#/$defs/synthetic_min_gate" },
+            "closer_than_p5": { "$ref": "#/$defs/synthetic_max_gate" },
+            "singling_out": { "$ref": "#/$defs/synthetic_max_gate" },
+            "linkability": { "$ref": "#/$defs/synthetic_max_gate" },
+            "inference": { "$ref": "#/$defs/synthetic_max_gate" }
+          },
+          "description": "overrides of the purpose's gates; privacy gates may only be made stricter"
+        },
+        "evaluation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "attacks": { "type": "integer", "minimum": 100, "maximum": 5000 } }
+        },
+        "requirements": { "type": "string", "description": "extra packages for the synthetic image (e.g. SDV, which your team installs)" },
+        "mode": { "enum": ["flat", "relational"], "description": "relational: the entity table and its child tables (feature tables, sequences) learned together" },
+        "output_tables": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "relational: each child table's output table (in outputs.bigquery.tables), by child name"
+        },
+        "sequences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "source_uri", "key", "order_by"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$" },
+              "source_uri": { "type": "string" },
+              "key": { "type": "string" },
+              "order_by": { "type": "string" },
+              "columns": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "description": "relational: event tables per entity (transactions, sessions), generated in order with the entity table"
+        }
+      }
+    },
     "retraining": {
       "type": "object",
       "additionalProperties": false,
@@ -634,6 +758,20 @@
           "properties": { "serving": { "$ref": "#/$defs/serving" } }
         },
         "approvals": { "$ref": "#/$defs/approvals" },
+        "synthetic": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "per environment: switch synthetic data on or off, how many rows, how long to train (gates and privacy stay fixed)",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "rows": { "type": ["integer", "null"], "minimum": 1 },
+            "engine": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "max_training_minutes": { "type": "number", "exclusiveMinimum": 0 } }
+            }
+          }
+        },
         "retraining": {
           "type": "object",
           "additionalProperties": false,

@@ -15,6 +15,9 @@ import yaml
 from pipewright.build.spec_patch import apply_steps, task_names
 from pipewright.config import ResolvedUseCase
 from pipewright.errors import ConfigError
+from pipewright.synthetic import EVALUATION_IMAGE_ENV as SYNTHETIC_EVALUATION_IMAGE_ENV
+from pipewright.synthetic import IMAGE_ENV as SYNTHETIC_IMAGE_ENV
+from pipewright.synthetic import TASKS as SYNTHETIC_TASKS
 
 # Parameters the launcher always supplies at run time.
 LAUNCHER_PARAMETERS = ("project", "region", "source_uri", "run_id")
@@ -66,8 +69,11 @@ def _import(uc: ResolvedUseCase, pipeline: str):
 
 
 def compile_pipeline(uc: ResolvedUseCase, pipeline: str = "training", component_image: str = PLACEHOLDER_IMAGE,
-                     output: Path | None = None, steps: dict | None = None) -> TemplateInfo:
-    """Compiles one pipeline. `steps` (a subset of uc.steps) is applied to the compiled template."""
+                     output: Path | None = None, steps: dict | None = None,
+                     synthetic_images: tuple[str, str] = (PLACEHOLDER_IMAGE, PLACEHOLDER_IMAGE)) -> TemplateInfo:
+    """Compiles one pipeline. `steps` (a subset of uc.steps) is applied to the compiled template. The synthetic
+    pipeline Pipewright provides runs on the use case's synthetic images (engine, evaluation), every other on its
+    component image."""
     try:
         from kfp import compiler
     except ImportError:
@@ -78,6 +84,7 @@ def compile_pipeline(uc: ResolvedUseCase, pipeline: str = "training", component_
     # Components read COMPONENT_IMAGE at import time; drop cached copies so the image takes effect.
     # PIPEWRIGHT_ML_CONFIG lets pipeline code read compile-time settings (e.g. ParallelFor parallelism).
     os.environ["COMPONENT_IMAGE"] = component_image
+    os.environ[SYNTHETIC_IMAGE_ENV], os.environ[SYNTHETIC_EVALUATION_IMAGE_ENV] = synthetic_images
     os.environ["PIPEWRIGHT_ML_CONFIG"] = json.dumps(uc.ml_config(), default=str)
     fn = _import(uc, pipeline)
     out = output or Path(tempfile.mkdtemp(prefix="pipewright-")) / f"{uc.name}-{pipeline}.yaml"
@@ -102,19 +109,24 @@ def compile_pipeline(uc: ResolvedUseCase, pipeline: str = "training", component_
 
 
 def compile_all(uc: ResolvedUseCase, component_image: str = PLACEHOLDER_IMAGE,
-                out_dir: Path | None = None) -> dict[str, TemplateInfo]:
+                out_dir: Path | None = None,
+                synthetic_images: tuple[str, str] = (PLACEHOLDER_IMAGE, PLACEHOLDER_IMAGE)) -> dict[str, TemplateInfo]:
     """Compiles every pipeline, then applies each `steps` entry to the pipelines that contain that task."""
     plain = {name: compile_pipeline(uc, name, component_image,
-                                    (out_dir / f"{uc.name}-{name}.yaml") if out_dir else None)
+                                    (out_dir / f"{uc.name}-{name}.yaml") if out_dir else None,
+                                    synthetic_images=synthetic_images)
              for name in uc.pipelines}
-    unknown = [s for s in uc.steps if not any(s in info.tasks for info in plain.values())]
+    # The synthetic pipeline's tasks may be sized while synthetic data is off in an environment: nothing to apply.
+    off = SYNTHETIC_TASKS if "synthetic" not in uc.pipelines else set()
+    unknown = [s for s in uc.steps if not any(s in info.tasks for info in plain.values()) and s not in off]
     if unknown:
         all_tasks = sorted({t for info in plain.values() for t in info.tasks})
         raise ConfigError(f"steps: no task named {', '.join(unknown)} (tasks: {', '.join(all_tasks)})")
     infos = {}
     for name, info in plain.items():
         mine = {s: v for s, v in uc.steps.items() if s in info.tasks}
-        infos[name] = compile_pipeline(uc, name, component_image, info.spec_path, mine) if mine else info
+        infos[name] = (compile_pipeline(uc, name, component_image, info.spec_path, mine, synthetic_images)
+                       if mine else info)
     return infos
 
 
