@@ -108,3 +108,19 @@ data:
 Compute the feature, append a row per change, keep the timestamp honest, keep the table's schema stable (add
 columns; do not rename or retype them), register the group if your organisation uses the Feature Store, and handle
 erasure requests in their tables (`pipewright data erase` covers only a use case's own tables).
+
+## Synthetic copies of feature tables
+
+When a team switches synthetic data on with `mode: relational` (see the README's *Synthetic data*), the engine
+learns the entity table together with the feature tables named in `data.features_from` and any event tables in
+`synthetic.sequences`, as one model. That keeps what the rules on this page protect:
+
+| What is kept | How |
+|---|---|
+| Keys that match across tables | Keys are never learned; new keys are made once and used in every table |
+| History per entity | A feature table's rows per entity are learned as a sequence, not as independent rows |
+| Timing against each cut-off | The gates are measured on the point-in-time join of the synthetic tables, the same join training uses |
+| Integrity | A duplicate key or a child row without its entity fails the candidate; rows per entity and the share of history before the cut-off are recorded next to the real tables' |
+
+Each synthetic table goes to its own output table (`synthetic.output_tables`, by source name), so a team can train
+on synthetic data with the same `features_from` block pointed at those tables.

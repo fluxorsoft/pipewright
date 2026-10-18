@@ -148,7 +148,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 | Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps |
 | Observe | Lifecycle events on Pub/Sub and labelled structured logs for every key moment, with no vendor code in pipelines |
 | Protect | Personal data declared in the data contract and never used as a feature; erasure by key across a team's tables (BigQuery and Parquet) |
-| Synthesize | **Synthetic data**, off until a team switches it on: learned inside the environment by an engine (MOSTLY AI local mode by default; SDV if the team installs it), gated on fidelity, utility and privacy before anything is published; or rows from the data contract alone, with no real data |
+| Synthesize | **Synthetic data**, off until a team switches it on: learned inside the environment by an engine (MOSTLY AI local mode by default; SDV if the team installs it), gated on fidelity, utility and privacy before anything is published; one table, or an entity table with its feature tables and event sequences, keys and timing intact; or rows from the data contract alone, with no real data |
 | Automate | `pipewright ci init` writes GitHub Actions workflows for pull requests, releases and operations, including self-hosted runners |
 | Extend | Other packages add CLI commands through the `pipewright.commands` entry point, without patching the core |
 
@@ -478,8 +478,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Agent Platform Feature Store feature groups as a feature source | Built |
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
-| Synthetic data (learned inside the environment and gated, or from the data contract alone) | Built and used end to end on Kubeflow in private GKE, inside an enforced perimeter (feature branch) |
-| Relational and sequential synthetic data (`mode: relational`: the entity table with its feature tables and event sequences) | Built and used end to end on Kubeflow (feature branch) |
+| Synthetic data (learned inside the environment and gated, or from the data contract alone) | Released in 1.0.0; used end to end on Agent Platform Pipelines and on Kubeflow in private GKE, inside an enforced perimeter |
+| Relational and sequential synthetic data (`mode: relational`: the entity table with its feature tables and event sequences) | Released in 1.0.0; used end to end on Kubeflow in private GKE |
 | SmartNoise as a differentially private engine | Roadmap (later) |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
