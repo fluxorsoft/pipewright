@@ -1001,6 +1001,10 @@ deprecations page and the SDK 2.0.1 migration guide:
 | `predict` in the generated operate workflow | Built 2026-10-17 |
 | Plain Kubernetes on premises (section 8.14) | On demand only (D-89) |
 | Synthetic data generation (FR-49): the `synthetic` section, contract-only generation, an engine interface (MOSTLY AI SDK local mode by default, SDV opt-in), evaluation and gates | Built on the feature branch; used end to end (2026-10-18) |
+| Synthetic data: relational generation (FR-49 follow-up): the entity table and its child tables together (keys, history per entity, timing against each cut-off), so point-in-time joins and feature tables are tested on synthetic data; the spike showed MOSTLY AI does it (TSTR drop 0.003 on churn) | Roadmap: good to have (2026-10-18) |
+| Synthetic data: sequential generation (FR-49 follow-up): event histories per entity (transactions, sessions, claims) where order and gaps matter | Roadmap: good to have (2026-10-18) |
+| Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: good to have (2026-10-18) |
+| Synthetic data: AI-assisted authoring (FR-49 follow-up): a drafted `synthetic` section and column rules from a table's schema and profile (Gemini), for a person to review | Roadmap: good to have (2026-10-18) |
 | Value-free error messages (NFR-18, D-65) | Planned |
 | Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters, a long-lived cluster per tenant (section 8.15): on private GKE, kept by the platform as a KubeRay cluster whose workers scale to zero; a cluster per run stays the default. Not on Agent Platform | Built 2026-10-17 |

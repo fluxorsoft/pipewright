@@ -475,6 +475,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 | Synthetic data (learned inside the environment and gated, or from the data contract alone) | Built and used end to end on Kubeflow in private GKE, inside an enforced perimeter (feature branch) |
+| Synthetic data follow-ups: relational and sequential generation, SmartNoise (differential privacy), AI-assisted authoring of the `synthetic` section | Roadmap (good to have) |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 
