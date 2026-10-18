@@ -333,3 +333,15 @@ def test_synthetic_schedule_learns_from_the_configured_source(repo):
         {"name": "monthly", "cron": "0 3 1 * *", "timezone": "Europe/London", "pipeline": "synthetic"}]}
     uc = resolve(repo)
     assert uc.triggers["schedules"][0]["source_uri"] == "bq://acme-ml-dev.churn.customers"
+
+
+def test_keys_are_never_learned(repo):
+    synthetic_repo(repo)
+    spec = repo.usecase["spec"]
+    spec["data_protection"] = {"personal_data_columns": []}
+    spec["triggers"].pop("landing")                 # a features_from source is bq://, not landing files
+    spec["data"]["features_from"] = {"entity": {"columns": ["customer_id"], "time_column": "snapshot_date"},
+                                     "sources": [{"table": "bq://acme-ml-dev.features.profile",
+                                                  "features": ["tenure_months"]}]}
+    syn = resolve(repo).synthetic
+    assert syn["columns"]["customer_id"] == {"rule": "key"} and "customer_id" in syn["exclude"]

@@ -9,7 +9,8 @@
       engine: { type: mostlyai, max_training_minutes: 10 }
       columns: { customer_id: { rule: key } }
 
-Personal-data columns are never learned: without a rule they become new keys (if unique) or nulls.
+Never learned: personal-data columns (without a rule they become new keys if unique, else nulls) and keys (unique
+columns and the entity columns of feature tables get new keys).
 """
 
 from __future__ import annotations
@@ -65,6 +66,11 @@ def check(ml: dict, columns: dict, label: str | None, known, problems: list[str]
         problems.extend(rules.problems_for(name, rule, columns.get(name)))
         resolved[name] = rule
     personal = list(ml["data_protection"]["personal_data_columns"])
+    # Keys are never learned either: unique columns and the entity columns of feature tables get new keys.
+    entity = list(((ml["data"].get("features_from") or {}).get("entity") or {}).get("columns") or [])
+    for name in dict.fromkeys([*unique, *entity]):
+        if name in columns and name not in resolved:
+            resolved[name] = {"rule": "key"}
     for name in personal:
         if name not in resolved:
             resolved[name] = {"rule": "key"} if name in unique else {"rule": "drop"}
