@@ -345,3 +345,31 @@ def test_keys_are_never_learned(repo):
                                                   "features": ["tenure_months"]}]}
     syn = resolve(repo).synthetic
     assert syn["columns"]["customer_id"] == {"rule": "key"} and "customer_id" in syn["exclude"]
+
+
+# ------------------------------------------------------------------ policy --
+
+def test_platform_policy(repo):
+    synthetic_repo(repo, purpose="sharing", gates={"fidelity": {"min": 0.8}})
+    repo.manifests["dev"]["approver_groups"] = {"data-protection": {"topic": "projects/p/topics/dp",
+                                                                    "subscription": "projects/p/subscriptions/dp"}}
+    repo.manifests["dev"]["policies"] = {"synthetic": {
+        "allowed_purposes": ["test-data", "sharing"], "allowed_engines": ["mostlyai"],
+        "differential_privacy_for": ["sharing"], "gates": {"fidelity": {"min": 0.88}, "inference": {"max": 0.1}},
+        "required_approvers": ["data-protection"]}}
+    found = problems(repo)
+    assert "purpose sharing requires differential privacy in dev" in found
+    synthetic_repo(repo, purpose="sharing", gates={"fidelity": {"min": 0.8}},
+                   engine={"type": "mostlyai", "differential_privacy": {"epsilon": 5}})
+    syn = resolve(repo).synthetic
+    assert syn["gates"]["fidelity"] == {"min": 0.88}             # raised to the platform's floor
+    assert syn["gates"]["inference"] == {"max": 0.1} and syn["approvers"] == ["data-protection"]
+    assert [c["name"] for c in syn["candidates"]] == ["default"]  # with DP, no temperature variant
+
+
+def test_platform_can_forbid_synthetic_data(repo):
+    synthetic_repo(repo)
+    repo.manifests["dev"]["policies"] = {"synthetic": {"allowed": False}}
+    assert "synthetic data is not allowed in dev" in problems(repo)
+    ml_repo(repo).usecase["spec"].pop("synthetic", None)
+    resolve(repo)                                                  # a use case without it is unaffected

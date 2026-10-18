@@ -179,6 +179,51 @@
               "minimum": 1
             }
           }
+        },
+        "synthetic": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "platform limits on synthetic data in this environment (validate enforces them)",
+          "properties": {
+            "allowed": {
+              "type": "boolean",
+              "description": "false: no use case may switch synthetic data on here"
+            },
+            "allowed_purposes": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "enum": ["test-data", "sharing"] }
+            },
+            "allowed_engines": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "enum": ["mostlyai", "sdv"] }
+            },
+            "differential_privacy_for": {
+              "type": "array",
+              "items": { "enum": ["test-data", "sharing"] },
+              "description": "purposes whose every candidate must train with differential privacy"
+            },
+            "gates": {
+              "type": "object",
+              "description": "floors: a use case's gate is raised to this when it is looser (quality gates too)",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "maxProperties": 1,
+                "properties": { "min": { "type": "number" }, "max": { "type": "number" } }
+              }
+            },
+            "required_approvers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,30}$"
+              },
+              "description": "approver groups that must approve a synthetic release before it leaves (Pipewright Enterprise)"
+            }
+          }
         }
       }
     },

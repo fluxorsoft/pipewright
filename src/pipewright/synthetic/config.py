@@ -136,6 +136,39 @@ def check(ml: dict, columns: dict, label: str | None, known, problems: list[str]
         problems.append(f"{where}.evaluation.attacks: at least 100 (fewer gives confidence bounds too wide to gate)")
 
 
+def apply_policy(syn: dict, policy: dict, env_name: str, approver_groups: dict | None, problems: list[str]) -> None:
+    """The platform's limits (manifest policies.synthetic): whether synthetic data is allowed here, for which
+    purposes and engines, where differential privacy is required, gate floors (a looser use case gate is raised to
+    the floor), and the approver groups a release needs (recorded in synthetic.approvers for Enterprise)."""
+    where = f"(platform policy in {env_name})"
+    if policy.get("allowed") is False:
+        problems.append(f"synthetic: synthetic data is not allowed in {env_name} {where}")
+        return
+    if policy.get("allowed_purposes") and syn["purpose"] not in policy["allowed_purposes"]:
+        problems.append(f"synthetic.purpose {syn['purpose']} is not allowed in {env_name} {where}: "
+                        f"{', '.join(policy['allowed_purposes'])}")
+    for c in syn.get("candidates") or []:
+        if policy.get("allowed_engines") and c["engine"] not in policy["allowed_engines"]:
+            problems.append(f"synthetic candidate {c['name']}: engine {c['engine']} is not allowed in {env_name} "
+                            f"{where}: {', '.join(policy['allowed_engines'])}")
+        if syn["purpose"] in (policy.get("differential_privacy_for") or []) and not c.get("differential_privacy"):
+            problems.append(f"synthetic candidate {c['name']}: purpose {syn['purpose']} requires differential "
+                            f"privacy in {env_name} {where}: set differential_privacy: {{epsilon: ...}}")
+    for metric, floor in (policy.get("gates") or {}).items() if syn["tier"] == "learned" else ():
+        if metric not in syn["gates"] or gates.GATES[metric][0] not in floor:
+            continue                       # (unknown gates and tstr_drop without a label: nothing to raise)
+        direction = gates.GATES[metric][0]
+        current = syn["gates"][metric][direction]
+        syn["gates"][metric] = {direction: (max if direction == "min" else min)(current, floor[direction])}
+    approvers = list(policy.get("required_approvers") or [])
+    if approvers and approver_groups is not None:
+        for group in approvers:
+            if group not in approver_groups:
+                problems.append(f"policies.synthetic.required_approvers: {group!r} is not an approver group in "
+                                f"{env_name}")
+    syn["approvers"] = approvers
+
+
 def default_candidates(engine: dict) -> list[dict]:
     """Without synthetic.candidates: the engine as given and, for MOSTLY AI at temperature 1, a wider sampling
     temperature too. In the spike, temperature 1.3 passed the sharing gates on real census records (singling out
