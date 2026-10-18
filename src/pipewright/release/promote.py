@@ -64,6 +64,20 @@ def destination_image(image: str, registry: str) -> str:
     return f"{registry.rstrip('/')}/{path.rsplit('/', 1)[-1]}@{digest}"
 
 
+class _Sized:
+    """A response stream with a known length, so requests streams it without asking the stream for a file
+    descriptor (Windows refuses fstat on a socket stream: WinError 6)."""
+
+    def __init__(self, raw, length: str | None):
+        self.raw, self.length = raw, int(length or 0)
+
+    def __len__(self) -> int:
+        return self.length
+
+    def read(self, size: int = -1) -> bytes:
+        return self.raw.read(size)
+
+
 def copy_image(gcp: Gcp, source: str, dest: str, log=print) -> str:
     """Copies an image between registries through the registry API: the manifest and every blob, byte for byte,
     so the digest cannot change. Returns the destination digest (checked equal to the source's)."""
@@ -101,7 +115,8 @@ def copy_image(gcp: Gcp, source: str, dest: str, log=print) -> str:
         if location.startswith("/"):
             location = f"https://{dhost}{location}"
         sep = "&" if "?" in location else "?"
-        put = s.put(f"{location}{sep}digest={quote(blob)}", data=src.raw, timeout=1800,
+        put = s.put(f"{location}{sep}digest={quote(blob)}", data=_Sized(src.raw, src.headers.get("Content-Length")),
+                    timeout=1800,
                     headers={"Content-Type": "application/octet-stream",
                              "Content-Length": src.headers.get("Content-Length", "")})
         if put.status_code not in (201, 204):

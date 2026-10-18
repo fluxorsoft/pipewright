@@ -214,7 +214,7 @@ class Registry:
 
     def put(self, url, data=None, **kw):
         if "/blobs/uploads/" in url:
-            self.objects[("dst", "blobs", url.split("digest=")[1].replace("%3A", ":"))] = data
+            self.objects[("dst", "blobs", url.split("digest=")[1].replace("%3A", ":"))] = data.read() if hasattr(data, "read") else data
         else:
             self.objects[("dst", "manifests", url.rsplit("/", 1)[1])] = data
         return self._resp(201)
