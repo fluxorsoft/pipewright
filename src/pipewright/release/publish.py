@@ -23,11 +23,18 @@ def _tag(value: str) -> str:
     return re.sub(r"[^a-z0-9-]", "-", value.lower()).strip("-")[:120]
 
 
-def compile_pinned(uc: ResolvedUseCase, component_image: str, out_dir: Path) -> dict[str, TemplateInfo]:
-    """Every pipeline of the use case, with `steps` applied."""
-    infos = compile_all(uc, component_image=component_image, out_dir=out_dir)
+def compile_pinned(uc: ResolvedUseCase, component_image: str, out_dir: Path,
+                   synthetic_image: str | None = None) -> dict[str, TemplateInfo]:
+    """Every pipeline of the use case, with `steps` applied. The synthetic pipeline runs on the synthetic image."""
+    from pipewright.synthetic import PIPELINE as SYNTHETIC
+
+    if SYNTHETIC in uc.pipelines and not synthetic_image:
+        raise ConfigError("the synthetic pipeline needs the use case's synthetic image")
+    infos = compile_all(uc, component_image=component_image, out_dir=out_dir,
+                        **({"synthetic_image": synthetic_image} if synthetic_image else {}))
     for name, info in infos.items():
-        if info.images != {component_image}:
+        expected = synthetic_image if name == SYNTHETIC else component_image
+        if info.images != {expected}:
             raise ConfigError(f"{name} template uses unexpected images: {sorted(info.images)}")
     problems, _ = check_parameters(uc, infos)
     if problems:

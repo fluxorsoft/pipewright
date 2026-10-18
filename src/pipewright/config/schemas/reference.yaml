@@ -223,6 +223,67 @@ data_protection.personal_data_columns: Columns that hold personal data; recorded
 data_protection.erasure: How a data subject's rows are found for `pipewright data erase`.
 data_protection.erasure.key_column: The column that identifies a data subject, such as customer_id.
 
+synthetic: Synthetic data generation. Off unless enabled; with it off nothing is compiled, built or released for it.
+synthetic.enabled: Switches synthetic data on for this use case. May differ per environment (for example on in production-grade environments only).
+synthetic.purpose: Sets the default gates. test-data stays in the organisation; sharing leaves it and has stricter privacy gates.
+synthetic.tier: learned (an engine learns from real data inside this environment, in the synthetic pipeline) or contract (rows from the data contract and rules alone, no real data, from `pipewright synthetic generate`).
+synthetic.source_uri: The data the engine learns from, bq:// or gs://, read point in time like training (with data.features_from, the entity table).
+synthetic.output_table: The table in outputs.bigquery.tables that receives the synthetic rows. Its schema holds the contract's columns and a run_id column.
+synthetic.rows: "How many rows to generate. Default: as many as the source has. May differ per environment."
+synthetic.holdout_fraction: Real rows kept back from the engine, to test utility and privacy against.
+synthetic.seed: "Seed for the holdout split and the rules. Default: training.seed."
+synthetic.engine: The engine and its settings. Every candidate starts from these.
+synthetic.engine.type: mostlyai (MOSTLY AI Synthetic Data SDK in local mode, Apache-2.0, the default) or sdv (SDV, only if your team installs it under its own licence; see synthetic.requirements).
+synthetic.engine.model: "mostlyai: MOSTLY_AI/Small, MOSTLY_AI/Medium (default) or MOSTLY_AI/Large. sdv: gaussian_copula, ctgan, tvae or copulagan."
+synthetic.engine.max_training_minutes: The training time limit per candidate. May differ per environment.
+synthetic.engine.differential_privacy: Trains with a differential privacy budget (mostlyai). Lowers privacy risk at a cost in fidelity and utility.
+synthetic.engine.differential_privacy.epsilon: The privacy budget; lower is more private.
+synthetic.engine.sampling_temperature: "mostlyai: above 1 spreads generated rows further from the training rows (more private, less faithful). Chosen at generation, so it costs no extra training."
+synthetic.engine.rare_categories: "mostlyai: rare categories become a _RARE_ token (constant) or common categories (sample)."
+synthetic.engine.epochs: "sdv deep synthesizers (ctgan, tvae, copulagan): training epochs."
+synthetic.candidates: "Variants of the engine tried side by side, each with a name; the best one that passes every gate is kept. Default for mostlyai: the engine as given and the same at sampling temperature 1.3."
+synthetic.candidates.type: As synthetic.engine.type, for this candidate.
+synthetic.candidates.model: As synthetic.engine.model, for this candidate.
+synthetic.candidates.max_training_minutes: As synthetic.engine.max_training_minutes, for this candidate.
+synthetic.candidates.differential_privacy: As synthetic.engine.differential_privacy, for this candidate.
+synthetic.candidates.differential_privacy.epsilon: The privacy budget for this candidate.
+synthetic.candidates.sampling_temperature: As synthetic.engine.sampling_temperature, for this candidate.
+synthetic.candidates.rare_categories: As synthetic.engine.rare_categories, for this candidate.
+synthetic.candidates.epochs: As synthetic.engine.epochs, for this candidate.
+synthetic.columns: "Columns decided by rules instead of learned: keys, personal data, time grids. Personal-data columns without a rule become new keys (if unique) or nulls; they are never learned."
+synthetic.columns.<name>.rule: key (new unique keys), fake (made-up personal data), constant, drop (null), time (dates on a grid), values (a categorical with chosen frequencies) or range (uniform between min and max).
+synthetic.columns.<name>.prefix: "rule key: the text before the number (default SYN-)."
+synthetic.columns.<name>.provider: "rule fake: email, name, phone, uuid or text. Emails use example.com and phone numbers the reserved drama range."
+synthetic.columns.<name>.value: "rule constant: the value."
+synthetic.columns.<name>.from: "rule time: the first date (YYYY-MM-DD)."
+synthetic.columns.<name>.to: "rule time: the last date (YYYY-MM-DD)."
+synthetic.columns.<name>.step: "rule time: day (any day) or month_end (the last day of each month)."
+synthetic.columns.<name>.values: "rule values: the values to choose from."
+synthetic.columns.<name>.weights: "rule values: how often each value appears, one number per value."
+synthetic.columns.<name>.min: "rule range: the lowest value."
+synthetic.columns.<name>.max: "rule range: the highest value."
+synthetic.sensitive_columns: Columns an inference attack tries to recover, besides the label (for example a health condition).
+synthetic.gates: Overrides of the purpose's gates. Pipewright recomputes every gate before publishing; privacy gates may only be made stricter.
+synthetic.gates.fidelity: How closely the synthetic data matches the real data's distributions (SDMetrics quality score, 0 to 1).
+synthetic.gates.fidelity.min: "The lowest acceptable score. Defaults: 0.90 (test-data), 0.85 (sharing)."
+synthetic.gates.tstr_drop: How much worse a model trained on synthetic data scores on real data (AUC) than one trained on real data.
+synthetic.gates.tstr_drop.max: "The largest acceptable drop. Defaults: 0.05 (test-data), 0.08 (sharing)."
+synthetic.gates.exact_copies: The share of synthetic rows identical to a training row.
+synthetic.gates.exact_copies.max: Default 0 for both purposes.
+synthetic.gates.dcr_ratio: How far synthetic rows are from the training rows compared with unseen real rows (median distance to the closest record). Below 1 is a sign of copying.
+synthetic.gates.dcr_ratio.min: "Defaults: 0.9 (test-data), 1.0 (sharing)."
+synthetic.gates.closer_than_p5: The share of synthetic rows closer to a training row than 95% of unseen real rows are. Independent data gives about 5%.
+synthetic.gates.closer_than_p5.max: "Defaults: 0.10 (test-data), 0.05 (sharing)."
+synthetic.gates.singling_out: The risk that an attacker can single out one real person (Anonymeter, upper confidence bound).
+synthetic.gates.singling_out.max: "Defaults: 0.30 (test-data), 0.20 (sharing)."
+synthetic.gates.linkability: The risk that an attacker can link records of one real person (Anonymeter, upper confidence bound).
+synthetic.gates.linkability.max: "Defaults: 0.10 (test-data), 0.05 (sharing)."
+synthetic.gates.inference: The risk that an attacker can infer the label or a sensitive column of a real person (Anonymeter, upper confidence bound, the worst column).
+synthetic.gates.inference.max: "Defaults: 0.50 (test-data), 0.25 (sharing)."
+synthetic.evaluation: How candidates are scored.
+synthetic.evaluation.attacks: Anonymeter attacks per risk (default 1000). Fewer give confidence bounds too wide to gate on.
+synthetic.requirements: A requirements file of extra packages for the synthetic image, for example SDV (installed by your team, which accepts its licence directly).
+
 tests: How `pipewright test` and the release check the use case's code.
 tests.command: The command run in the use case folder; it must exit 0.
 

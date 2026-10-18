@@ -1,7 +1,7 @@
 """ML lifecycle sections: defaults and cross-checks.
 
 data · features · training · evaluation · explainability · registry · model_card · inference · monitoring ·
-retraining · data_protection
+retraining · data_protection · synthetic
 
 Pipewright checks that the sections agree with each other and with the data contract; the pipeline code does
 the ML. The resolved sections reach the pipeline as one `ml_config` parameter.
@@ -13,6 +13,8 @@ import copy
 import re
 
 from pipewright.config.merge import deep_merge
+from pipewright.synthetic import config as synthetic_config
+from pipewright.synthetic.config import DEFAULTS as SYNTHETIC_DEFAULTS
 
 METRICS = {"auc", "pr_auc", "accuracy", "f1", "precision", "recall", "log_loss", "brier", "calibration_error"}
 LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error"}
@@ -50,6 +52,7 @@ DEFAULTS = {
                    "approvals": {"required": [], "separate_from_requester": True},
                    "snooze": {"max_days": 30, "reopen_when_worse_by": 0.1}},
     "data_protection": {"personal_data_columns": [], "erasure": None},
+    "synthetic": SYNTHETIC_DEFAULTS,               # FR-49: off unless synthetic.enabled
 }
 SECTIONS = tuple(DEFAULTS)
 
@@ -204,6 +207,12 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
     erasure = protection.get("erasure")
     if erasure:
         known(erasure["key_column"], "data_protection.erasure.key_column")
+
+    # ---- synthetic data (off unless enabled). Left out when off, so a use case without it resolves, compiles and
+    # releases exactly as before (its ml_config and template digests do not change).
+    synthetic_config.check(ml, columns, label, known, problems)
+    if not ml["synthetic"]["enabled"]:
+        del ml["synthetic"]
 
     return copy.deepcopy(ml)
 
