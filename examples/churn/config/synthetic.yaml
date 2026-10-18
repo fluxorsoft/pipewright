@@ -1,0 +1,22 @@
+# Synthetic data: off until your team needs it. With it off, nothing is built, compiled or released for it.
+#
+# learned (switch on with enabled: true): an engine learns from the real data inside this environment, in the
+#   synthetic pipeline Pipewright provides (`pipewright run --pipeline synthetic`, or a schedule with
+#   pipeline: synthetic). Pipewright scores every candidate (fidelity, utility, privacy), recomputes the gates of
+#   the purpose, and appends the best passing one to output_table. Also add that table to outputs.bigquery.tables
+#   in usecase.yaml: the contract's columns plus a run_id column (STRING).
+# contract: no real data at all. `pipewright synthetic generate --env dev --usecase <name> --out rows.csv` writes
+#   rows from data.contract and the rules below, for development, CI and demos.
+#
+# `pipewright synthetic gates --env <env> --usecase <name>` lists the gates in force; `pipewright explain synthetic`
+# describes every key.
+synthetic:
+  enabled: false
+  purpose: test-data                     # test-data stays in the organisation; sharing has stricter privacy gates
+  tier: learned
+  # source_uri: bq://${project}.${resources.bigquery_dataset}.<training table>    # read like training data
+  # output_table: synthetic_customers
+  engine: { type: mostlyai, max_training_minutes: 10 }    # MOSTLY AI SDK in local mode (Apache-2.0)
+  columns:                               # decided by rules, never learned
+    customer_id: { rule: key, prefix: "SYN-" }
+    snapshot_date: { rule: time, from: "2025-01-31", to: "2025-12-31", step: month_end }   # contract tier
