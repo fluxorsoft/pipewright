@@ -324,6 +324,10 @@ synthetic:
   rules; a real holdout is kept back from the engine; the generator stays inside the step.
 - **Released like any pipeline:** the synthetic pipeline runs on two images Pipewright builds (the engine, and
   the evaluation), recorded in the release contract by digest, verified, and copied by `promote`.
+- **Relational and sequential** (`mode: relational`): the entity table and its child tables in one model, the
+  feature tables of `data.features_from` and event tables in `synthetic.sequences` (ordered per entity). Keys
+  stay consistent across tables, history keeps its timing against each cut-off, and the gates are measured on
+  the point-in-time join of the synthetic tables; each table goes to its own output table.
 - **Events:** `synthetic.evaluated`, `synthetic.rejected` and `synthetic.generated` carry the gates, the chosen
   candidate and where the rows went.
 
@@ -475,7 +479,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Online serving from Bigtable (endpoints read features by entity ID) | Planned |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 | Synthetic data (learned inside the environment and gated, or from the data contract alone) | Built and used end to end on Kubeflow in private GKE, inside an enforced perimeter (feature branch) |
-| Synthetic data follow-ups: relational and sequential generation, SmartNoise (differential privacy), AI-assisted authoring of the `synthetic` section | Roadmap (good to have) |
+| Relational and sequential synthetic data (`mode: relational`: the entity table with its feature tables and event sequences) | Built and used end to end on Kubeflow (feature branch) |
+| SmartNoise as a differentially private engine | Roadmap (later) |
 
 Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
 
