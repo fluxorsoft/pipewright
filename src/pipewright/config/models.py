@@ -108,7 +108,8 @@ class ResolvedUseCase:
             "tenant": self.tenant,
             "sources": self.sources,
             "resources": self.resources,
-            "pipelines": {n: {"file": rel(p.file), "function": p.function} for n, p in self.pipelines.items()},
+            "pipelines": {n: ({"provided_by": "pipewright (synthetic.enabled)"} if n == "synthetic" and self.synthetic
+                              else {"file": rel(p.file), "function": p.function}) for n, p in self.pipelines.items()},
             "components": {"dir": rel(self.components_dir), "requirements": rel(self.requirements)},
             "framework": self.framework,
             "triggers": self.triggers,
