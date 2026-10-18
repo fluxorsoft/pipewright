@@ -386,18 +386,20 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     registry = dst_env.artifact_registry["docker"]
     dst_image = destination_image(source.component_image, registry)
     dst_ray = destination_image(source.ray["image"], registry) if source.ray else None
+    # Synthetic data may be switched off in the destination (it is not part of what a model release carries): the
+    # synthetic pipeline is then left out. Switched on there but not in the source, nothing tested would be promoted.
+    if uc_dst.synthetic_image_needed and not source.synthetic:
+        raise ConfigError(f"synthetic data is on for {uc_dst.name} in {dst_env.name} but the source release has no "
+                          "synthetic pipeline: release it with synthetic data on in the source first")
     dst_synthetic = (tuple(destination_image(source.synthetic[k], registry) for k in ("image", "evaluation_image"))
-                     if source.synthetic else None)
+                     if source.synthetic and uc_dst.synthetic_image_needed else None)
     rewrites = {source.component_image: dst_image, **({source.ray["image"]: dst_ray} if dst_ray else {}),
                 **({source.synthetic["image"]: dst_synthetic[0],
                     source.synthetic["evaluation_image"]: dst_synthetic[1]} if dst_synthetic else {})}
-    if bool(dst_synthetic) != uc_dst.synthetic_image_needed:
-        state = ("on", "off") if uc_dst.synthetic_image_needed else ("off", "on")
-        raise ConfigError(f"synthetic data is {state[0]} for {uc_dst.name} in {dst_env.name} but {state[1]} in the "
-                          "source release: promote releases what was tested; align synthetic.enabled first")
     out_dir = build_dir or (uc_dst.directory / ".pipewright" / "promote")
     infos = publish.compile_pinned(uc_dst, dst_image, out_dir, dst_synthetic)
-    if set(infos) != set(source.pipeline_names):
+    expected = set(source.pipeline_names) - ({"synthetic"} if source.synthetic and not dst_synthetic else set())
+    if set(infos) != expected:
         raise ConfigError(f"the destination compiles pipelines {sorted(infos)}, the source release has "
                           f"{source.pipeline_names}")
     differences = {}
