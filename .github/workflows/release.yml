@@ -6,8 +6,11 @@
 #                     (ghcr.io/<owner>/pipewright-launcher:<version>), linked to this repository so it inherits the
 #                     repository's access; platform teams copy it by digest into their environment's own registry
 #   github-release    the GitHub release: the wheel and sdist as files, and the launcher image digest
+#   publish-pypi      the same wheel and sdist to PyPI (pipewright-mlops), real versions only, after the GitHub
+#                     release; PyPI Trusted Publishing, so no API token is stored anywhere
 #
-# Keyless: GitHub's built-in token publishes the image and the release; nothing else is configured. A rehearsal
+# Keyless: GitHub's built-in token publishes the image and the release, and PyPI trusts this workflow through
+# OpenID Connect (a trusted publisher for repository fluxorsoft/pipewright, workflow release.yml, environment pypi). A rehearsal
 # (v<version>-rehearsal.<n>) publishes a pre-release and an image tagged <version>-rehearsal.<n>, to be deleted
 # afterwards. A real version is published once: do not delete and re-create its release.
 name: release
@@ -101,7 +104,7 @@ jobs:
           Pipewright $VERSION
 
           - **Python package:** download the wheel below (\`gh release download $GITHUB_REF_NAME -R $GITHUB_REPOSITORY\`)
-            and install it, or put it in your organization's package index and pin \`pipewright-mlops[gcp]==$VERSION\`.
+            and install it, or pin \`pipewright-mlops[gcp]==$VERSION\` from PyPI or your organisation's package index.
           - **Launcher image:** copy it into your environment's own registry by digest, then pin that digest in the
             platform's Terraform:
             \`$IMAGE\`
@@ -111,3 +114,19 @@ jobs:
           flag=""; [ "$PRERELEASE" = true ] && flag="--prerelease"
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Pipewright $GITHUB_REF_NAME" \
             --notes-file notes.md $flag
+
+  publish-pypi:
+    needs: [version, github-release]
+    if: needs.version.outputs.prerelease == 'false'     # rehearsals never reach PyPI: a version there is final
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pipewright-mlops/${{ needs.version.outputs.version }}/
+    permissions:
+      id-token: write                                   # PyPI Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@v1.12.4

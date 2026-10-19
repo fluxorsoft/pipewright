@@ -3,27 +3,27 @@
 **Configurable, governed MLOps on Google Cloud.** Build, release, run and monitor models from configuration, with a
 human in the loop for every retrain decision.
 
-Pipewright is open source under the [Apache License 2.0](LICENSE) and maintained by
+Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
 > **Status: 1.0.0.** Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
-> configuration format is stable ([STABILITY.md](STABILITY.md)). Releases are on GitHub (the wheel as a release
-> file, the launcher image in GitHub Container Registry); PyPI follows.
+> configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
+> file, the launcher image in GitHub Container Registry) and on PyPI as `pipewright-mlops`.
 
 ## At a glance
 
-![Pipewright (open source) on Google Cloud: the building blocks and the main flows](docs/images/pipewright-architecture.png)
+![Pipewright (open source) on Google Cloud: the building blocks and the main flows](https://github.com/fluxorsoft/pipewright/raw/main/docs/images/pipewright-architecture.png)
 
-<sub>Editable source: [docs/images/pipewright-architecture.drawio](docs/images/pipewright-architecture.drawio) (draw.io, official Google Cloud icons).</sub>
+<sub>Editable source: [docs/images/pipewright-architecture.drawio](https://github.com/fluxorsoft/pipewright/blob/main/docs/images/pipewright-architecture.drawio) (draw.io, official Google Cloud icons).</sub>
 
 **The same environment on private GKE.** One setting in the manifest (`orchestrator: kfp`) runs the same pipelines
 on Kubeflow Pipelines in a private GKE cluster, with Ray on KubeRay and online serving on KServe. Templates,
 contracts, the CLI and everything outside the cluster stay the same.
 
-![Pipewright (open source) on Google Cloud with private GKE: Kubeflow Pipelines, KubeRay and KServe in the cluster](docs/images/pipewright-gke-architecture.png)
+![Pipewright (open source) on Google Cloud with private GKE: Kubeflow Pipelines, KubeRay and KServe in the cluster](https://github.com/fluxorsoft/pipewright/raw/main/docs/images/pipewright-gke-architecture.png)
 
-<sub>Editable source: [docs/images/pipewright-gke-architecture.drawio](docs/images/pipewright-gke-architecture.drawio).</sub>
+<sub>Editable source: [docs/images/pipewright-gke-architecture.drawio](https://github.com/fluxorsoft/pipewright/blob/main/docs/images/pipewright-gke-architecture.drawio).</sub>
 
 The platform team builds the environment once and publishes an **environment manifest**: the names of everything a
 team may use. ML teams then work only with their own configuration and code; the `pipewright` CLI and the shared
@@ -163,7 +163,7 @@ Two personas, one contract between them (the diagram at the top shows the flow):
   a pointer to a new, verified contract.
 - **Every step runs as the team's own identity**, with the environment's key and network applied from the manifest.
 
-[CONTEXT.md](CONTEXT.md) describes the design, the decisions behind it and every interface in detail.
+[CONTEXT.md](https://github.com/fluxorsoft/pipewright/blob/main/CONTEXT.md) describes the design, the decisions behind it and every interface in detail.
 
 ## Your code and Pipewright
 
@@ -258,7 +258,7 @@ code runs in both; only who owns the cluster changes.
 Instead of one prepared table per use case, a use case can name the features it needs and the BigQuery feature
 tables that hold them. Feature tables belong to whoever produces the features (a data team, or the team itself);
 Pipewright only reads them. The recommended way to use features, how a feature table must look and the mistakes to
-avoid: [docs/FEATURES.md](docs/FEATURES.md).
+avoid: [docs/FEATURES.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/FEATURES.md).
 
 ```yaml
 # config/data.yaml
@@ -363,21 +363,19 @@ release live in test (and its approved model) to production without rebuilding a
 
 - **On your machine:** Python 3.11, [uv](https://docs.astral.sh/uv/), Docker (component images), and the Google
   Cloud CLI or Application Default Credentials.
-- **On Google Cloud:** an environment with the [building blocks](#building-blocks-what-you-need-on-google-cloud)
-  above and its environment manifest. [docs/ONBOARDING.md](docs/ONBOARDING.md) lists what the platform team hands to
+- **On Google Cloud:** an environment with the [building blocks](https://github.com/fluxorsoft/pipewright#building-blocks-what-you-need-on-google-cloud)
+  above and its environment manifest. [docs/ONBOARDING.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/ONBOARDING.md) lists what the platform team hands to
   each ML team.
 
 ### Install a release
 
-Releases are on GitHub: the package is a file on each release.
-
 ```bash
-gh release download v1.0.0 -R fluxorsoft/pipewright --pattern '*.whl'
-pip install "pipewright_mlops-1.0.0-py3-none-any.whl[gcp]"
+pip install "pipewright-mlops[gcp]==1.0.0"     # the command is `pipewright`
 ```
 
-Teams usually put the wheel in their organisation's package index and pin `pipewright-mlops[gcp]==1.0.0`
-everywhere, CI included. The launcher image for platform teams is in GitHub Container Registry
+Each release is also on GitHub, with the wheel and sdist as release files
+(`gh release download v1.0.0 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
 ### Install from source
@@ -389,8 +387,7 @@ uv sync --all-extras                # Python 3.11 virtual environment with the g
 uv run pipewright --help
 ```
 
-Or install the CLI into another environment from the checkout: `pip install "<path to the checkout>[gcp]"`. PyPI
-follows: `pip install "pipewright-mlops[gcp]"` (the command is still `pipewright`).
+Or install the CLI into another environment from the checkout: `pip install "<path to the checkout>[gcp]"`.
 
 ### Your first use case
 
@@ -415,7 +412,7 @@ pipewright release  --env dev
 
 The churn example (`examples/churn/`) is a complete reference: training and inference pipelines, components, a
 data contract, gates, monitoring, retrain decisions, table schemas, tests and generated sample data. The full
-walkthrough, including what the platform team hands over, is in [docs/ONBOARDING.md](docs/ONBOARDING.md).
+walkthrough, including what the platform team hands over, is in [docs/ONBOARDING.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/ONBOARDING.md).
 
 ### Help with the YAML
 
@@ -480,7 +477,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Planned |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
@@ -502,12 +499,12 @@ uv run ruff check .               # lint
 uv run --no-project --with-requirements examples/churn/tests/requirements.txt python -m pytest examples/churn/tests
 ```
 
-[CONTEXT.md](CONTEXT.md) is the place to start before changing anything: requirements, decisions, design and
-conventions, with stable IDs to refer to. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
-[SECURITY.md](SECURITY.md) to report a vulnerability.
+[CONTEXT.md](https://github.com/fluxorsoft/pipewright/blob/main/CONTEXT.md) is the place to start before changing anything: requirements, decisions, design and
+conventions, with stable IDs to refer to. See [CONTRIBUTING.md](https://github.com/fluxorsoft/pipewright/blob/main/CONTRIBUTING.md) for how to propose changes, and
+[SECURITY.md](https://github.com/fluxorsoft/pipewright/blob/main/SECURITY.md) to report a vulnerability.
 
 ## License
 
-Copyright 2026 Fluxor Software Limited. Licensed under the [Apache License, Version 2.0](LICENSE); see
-[NOTICE](NOTICE). "Pipewright" and "Fluxor" are names of Fluxor Software Limited; the license does not grant
+Copyright 2026 Fluxor Software Limited. Licensed under the [Apache License, Version 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE); see
+[NOTICE](https://github.com/fluxorsoft/pipewright/blob/main/NOTICE). "Pipewright" and "Fluxor" are names of Fluxor Software Limited; the license does not grant
 permission to use them beyond describing the origin of the work.

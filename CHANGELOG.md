@@ -5,7 +5,8 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [1.0.0] - 2026-10-18
 
-First release. First published on 2026-10-17 and re-cut on 2026-10-18 to include synthetic data.
+First release, on GitHub and on PyPI (`pipewright-mlops`). First published on GitHub on 2026-10-17 and re-cut to
+include synthetic data and, for PyPI, a README whose links work outside the repository.
 
 ### Added
 
