@@ -6,10 +6,10 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.0.0 (private beta).** Working end to end on Google Cloud, including private environments with
+> **Status: 1.0.0.** Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](STABILITY.md)). Releases are on GitHub (the wheel as a release
-> file, the launcher image in GitHub Container Registry); PyPI follows when the repository goes public.
+> file, the launcher image in GitHub Container Registry); PyPI follows.
 
 ## At a glance
 
@@ -369,7 +369,7 @@ release live in test (and its approved model) to production without rebuilding a
 
 ### Install a release
 
-Releases are on GitHub: the package is a file on each release. With read access to the repository:
+Releases are on GitHub: the package is a file on each release.
 
 ```bash
 gh release download v1.0.0 -R fluxorsoft/pipewright --pattern '*.whl'
@@ -389,9 +389,8 @@ uv sync --all-extras                # Python 3.11 virtual environment with the g
 uv run pipewright --help
 ```
 
-Or install the CLI into another environment from the checkout: `pip install "<path to the checkout>[gcp]"`. When the
-repository is public it will also be on PyPI: `pip install "pipewright-mlops[gcp]"` (the command is still
-`pipewright`).
+Or install the CLI into another environment from the checkout: `pip install "<path to the checkout>[gcp]"`. PyPI
+follows: `pip install "pipewright-mlops[gcp]"` (the command is still `pipewright`).
 
 ### Your first use case
 
@@ -481,7 +480,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | When the repository is public |
+| PyPI release (`pipewright-mlops`) | Planned |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
