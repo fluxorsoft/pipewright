@@ -43,7 +43,7 @@ resources in each environment's project and describes them in the manifest
 | Pipelines | Agent Platform Pipelines (formerly Vertex AI Pipelines), or Kubeflow Pipelines v2 in a private GKE cluster (manifest `orchestrator: kfp`) | Training and inference runs | Always (one of the two) |
 | Kubernetes (private GKE only) | GKE: private nodes and endpoint, the API through its DNS endpoint, Workload Identity; Kubeflow Pipelines, KubeRay and optionally KServe installed, their images mirrored into Artifact Registry | Kubeflow runs as each team's identity, Ray clusters, online serving, optionally schedules as CronJobs and the launcher as a pull worker | With `orchestrator: kfp` |
 | Models | Model Registry; Agent Platform endpoints or KServe for online serving | Versions, the champion, approvals; serving (canary on endpoints) | Always (serving optional) |
-| Team data | BigQuery: one dataset per team | Raw data, predictions, metrics and monitoring tables | Always |
+| Team data | BigQuery: one dataset per team | Raw data, predictions, metrics and monitoring tables, synthetic data | Always |
 | Launcher | Cloud Run, from `images/launcher.Dockerfile`, with its own service account | Turns files, schedules, API calls and run requests into pipeline runs; handles retrain decisions | Always |
 | Identities | IAM service accounts: the launcher, one runner per team, CI (Workload Identity Federation) | Every pipeline step runs as its team's runner; nothing uses keys | Always |
 | Messaging | Pub/Sub topics: landing events, run requests, lifecycle events, one per approver group | Triggers, runs from inside a private network, events for alerts and audit, approvals | Events and approvals recommended; run requests for private networks |
@@ -234,9 +234,10 @@ with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by
 
   Pipewright Enterprise's Terraform grants all of it, with the Private Service Connect network for private
   environments.
-- **A Ray head needs 16 vCPUs:** a cluster with a smaller head runs, but its job API never answers (found live).
-  `validate` checks it, with more than 18 GB of memory.
-- **A Ray step does not size itself:** no `cpu`, `memory` or `gpu` on a Ray step (Agent Platform runs sized steps where the metadata server issues no ID tokens, so the step could not ask the launcher); size the cluster.
+- **A Ray head needs at least 16 vCPUs and more than 18 GB of memory:** with fewer vCPUs the cluster runs but
+  its job API never answers (found live), and Agent Platform refuses less memory. `validate` checks both.
+- **A Ray step does not size itself:** no `cpu`, `memory` or `gpu` on a Ray step (Agent Platform runs sized steps
+  where the metadata server issues no ID tokens, so the step could not ask the launcher); size the cluster instead.
 - **Checks:** `validate` refuses a step over the limits and a Ray client that does not match the clusters
   (`ray[default]` pinned in the component requirements, with `google-cloud-aiplatform[ray]`).
 - **On private GKE** (`orchestrator: kfp`): the same `ray_cluster()` and `ray_job()` calls get a KubeRay RayCluster
@@ -247,7 +248,10 @@ with ray_cluster(ml_config, "tune-on-ray", run_id) as cluster:      # created by
 
 `pipewright new-usecase --from ray` starts from an example that runs the churn tuning trials in parallel on Ray.
 
-**Development and pipelines:** while developing, data scientists use a standalone Ray cluster of their own (made in the console, used from a notebook with `ray.init("vertex_ray://<cluster>")`, Python and Ray versions matching the cluster). Pipelines never use it: every run, dev to prod, gets its own cluster from Pipewright. The same Ray code runs in both; only who owns the cluster changes.
+**Development and pipelines:** while developing, data scientists use a standalone Ray cluster of their own (made
+in the console, used from a notebook with `ray.init("vertex_ray://<cluster>")`, Python and Ray versions matching
+the cluster). Pipelines never use it: every run, dev to prod, gets its own cluster from Pipewright. The same Ray
+code runs in both; only who owns the cluster changes.
 
 ## Features from feature tables
 
@@ -281,7 +285,6 @@ data:
 - **Checks:** `validate` checks the block against the data contract (every feature in the contract, no clashes,
   not the label, a date or timestamp cut-off) and refuses landing-file triggers, since the source must be a
   `bq://` table; `doctor` checks each feature table has the columns, with types the contract accepts.
-
 - **The platform decides where features may come from** (manifest): `tenants.<t>.features.datasets` lists a
   tenant's feature datasets, and `features.required: true` makes feature tables the only source of model
   features. `validate` refuses anything else.
@@ -373,7 +376,7 @@ gh release download v1.0.0 -R fluxorsoft/pipewright --pattern '*.whl'
 pip install "pipewright_mlops-1.0.0-py3-none-any.whl[gcp]"
 ```
 
-Teams usually put the wheel in their organization's package index and pin `pipewright-mlops[gcp]==1.0.0`
+Teams usually put the wheel in their organisation's package index and pin `pipewright-mlops[gcp]==1.0.0`
 everywhere, CI included. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -386,7 +389,7 @@ uv sync --all-extras                # Python 3.11 virtual environment with the g
 uv run pipewright --help
 ```
 
-Or install the CLI into another environment from the checkout: `pip install "./pipewright[gcp]"`. When the
+Or install the CLI into another environment from the checkout: `pip install "<path to the checkout>[gcp]"`. When the
 repository is public it will also be on PyPI: `pip install "pipewright-mlops[gcp]"` (the command is still
 `pipewright`).
 
@@ -412,7 +415,7 @@ pipewright release  --env dev
 ```
 
 The churn example (`examples/churn/`) is a complete reference: training and inference pipelines, components, a
-data contract, gates, monitoring, retrain decisions, table schemas, tests and synthetic sample data. The full
+data contract, gates, monitoring, retrain decisions, table schemas, tests and generated sample data. The full
 walkthrough, including what the platform team hands over, is in [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 ### Help with the YAML
@@ -433,8 +436,8 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 | Stage | Commands |
 |---|---|
 | Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test` |
-| Release | `tables sync`, `release`, `status`, `rollback`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model approve`, `deploy-model`, `monitor status`, `data erase`, `synthetic generate`, `synthetic gates` |
+| Release | `tables sync`, `release`, `status`, `rollback`, `promote`, `schedules sync`, `alerts sync`, `ci init` |
+| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze` |
 | Extend | `plugins` (commands added by installed packages) |
 
@@ -452,9 +455,15 @@ never by patching this package.
 | Shared launcher, release contracts, rollback | Yes | Yes |
 | Monitoring, alerts, lifecycle events | Yes | Yes |
 | Retrain decisions with approver quorum | Yes | Yes |
-| Private-managed Terraform blueprint (CMEK everywhere, private network, internal launcher, VPC Service Controls, organization policies) | No | Yes |
+| Promotion between environments by digest | Yes | Yes |
+| Features from feature tables and Feature Store groups, point in time | Yes | Yes |
+| Ray steps; Kubeflow Pipelines, KubeRay and KServe on private GKE | Yes | Yes |
+| Synthetic data: learned and gated in the environment, one table or related tables and sequences | Yes | Yes |
+| Private-managed Terraform blueprint (CMEK everywhere, private network, internal launcher, VPC Service Controls, organization policies), with private GKE | No | Yes |
 | Approver groups, decision feeds and scheduler jobs provisioned | You provide them | Yes |
 | Evidence packs: a tamper-evident audit record per model version | No | Yes |
+| Synthetic data releases between environments: approver groups, policy per environment, evidence; settings drafted with Gemini | No | Yes |
+| Fleet View: every environment, team and model in one read-only view | No | Yes |
 | Support, onboarding and platform build-outs | Community | Fluxor Software |
 
 Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pipewright.html).
@@ -467,7 +476,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Shared launcher, release contract v3, multi-pipeline releases | Built and used end to end |
 | Retrain decisions | Built and used end to end |
 | Private-environment support (CMEK, VPC, internal launcher, Pub/Sub run requests) | Built and used end to end |
-| Promotion of a release and its approved model between environments | Built |
+| Promotion of a release and its approved model between environments | Built and used end to end |
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |

@@ -900,8 +900,8 @@ cluster), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and the CA variables in D-49.
 that meets keys it does not know (anywhere the schema forbids extra keys) **ignores them and says so**: `validate`
 prints a warning, `doctor` lists them, the launcher logs them. Everything it does know is still validated in full.
 A key that is a **policy** (one an older version must not silently skip, such as `features.required`) comes with
-`requires` in the manifest, a version specifier such as `">=0.5"`: older versions then refuse the manifest with
-"this environment needs Pipewright >=0.5", and the launcher keeps its last good manifest. So app teams' pinned CLIs
+`requires` in the manifest, a version specifier such as `">=1.1"`: older versions then refuse the manifest with
+"this environment needs Pipewright >=1.1", and the launcher keeps its last good manifest. So app teams' pinned CLIs
 keep working when the platform adds a field, and never run with a policy they cannot apply.
 
 ### 9.3 Use case and environment files

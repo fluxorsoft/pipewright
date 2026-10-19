@@ -21,4 +21,4 @@ Security fixes are made on the latest release (1.0.x) and on `main`.
   only). Exposing it without authentication is not a supported configuration.
 - Retrain approvals rely on Google Cloud IAM for approver group membership. Anyone with project-wide Pub/Sub publish
   permissions (Owner, Editor, Pub/Sub roles on the project) counts as a member of every approver group; `pipewright
-  doctor` names them. See CONTEXT.md, retrain decisions.
+  doctor` names them. See [CONTEXT.md](CONTEXT.md), section 8.7 (retrain decisions).

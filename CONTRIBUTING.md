@@ -6,7 +6,7 @@ requests.
 ## Before you start
 
 - **Read [CONTEXT.md](CONTEXT.md).** It holds the requirements, design decisions and conventions, each with a stable
-  ID (`FR-`, `NFR-`, `D-`). A pull request that changes behaviour should say which IDs it touches, and update
+  ID (`FR-`, `NFR-`, `C-`, `D-`, `R-`). A pull request that changes behaviour should say which IDs it touches, and update
   CONTEXT.md in the same change if it alters one.
 - **For anything larger than a fix, open an issue first** so we can agree the approach before you spend time on it.
 - **Google Cloud only.** Pipewright deliberately targets one cloud (CONTEXT.md, C-01); multi-cloud abstractions are

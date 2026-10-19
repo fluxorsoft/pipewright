@@ -14,7 +14,7 @@ A change that breaks any of these needs a new major version (2.0):
 | CLI | Command names, flags, their meaning and exit codes (0 success, 1 a check failed, 2 a configuration error) |
 | Lifecycle events | Event types and their fields, on Pub/Sub and in structured logs |
 | Plugin API | `register(subparsers, common)` for the `pipewright.commands` entry point group (plugin API v1) |
-| Component runtime | The documented functions of `pipewright_runtime` (`read_source`, `write_table`, `log`, `emit_event`, `ray_cluster`, `ray_job`) |
+| Component runtime | The documented functions of `pipewright_runtime` (`read_source`, `write_table`, `bigquery_client`, `log`, `emit_event`, `ray_cluster`, `ray_job`) |
 
 ## Not covered
 
@@ -37,4 +37,5 @@ These may change in any release:
 
 ## Reporting a problem
 
-Security issues: email enterprise@fluxorsoft.com rather than opening a public issue.
+Security issues: report them privately as [SECURITY.md](SECURITY.md) describes, never in a public issue. Anything
+else: open an issue.
