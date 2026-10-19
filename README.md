@@ -482,7 +482,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Relational and sequential synthetic data (`mode: relational`: the entity table with its feature tables and event sequences) | Released in 1.0.0; used end to end on Kubeflow in private GKE |
 | SmartNoise as a differentially private engine | Roadmap (later) |
 
-Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; the example uses PyTorch.
+Google Cloud only, by design. Pipelines are Kubeflow Pipelines v2; bring any Python ML framework (the example uses
+PyTorch).
 
 ## Development
 

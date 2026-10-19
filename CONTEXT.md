@@ -5,7 +5,7 @@
 > (design), the interfaces it promises, and how to work on it (conventions). It summarises; the code is the final
 > authority.
 >
-> **Last updated:** 2026-10-08. **Version:** 1.0.0 (unreleased). **Release contract:** 3. **Configuration and manifest
+> **Last updated:** 2026-10-19. **Version:** 1.0.0 (released 2026-10-17, re-cut 2026-10-18). **Release contract:** 3. **Configuration and manifest
 > API:** `pipewright/v1`.
 
 **How to use this file**
@@ -58,7 +58,7 @@ retraining; governance assembled after the fact.
 
 **Open core (D-31):** this repository is Pipewright, licensed under Apache-2.0. Pipewright Enterprise, from Fluxor
 Software, adds a private-by-default platform blueprint, evidence packs (tamper-evident audit records per model
-version), and support. Enterprise uses published extension points and never patches this package (D-34).
+version), governed synthetic data releases, Fleet View across environments, and support. Enterprise uses published extension points and never patches this package (D-34).
 
 ---
 
@@ -80,8 +80,10 @@ perimeter, on Agent Platform and on private GKE.
 | CI for app teams (`pipewright ci init`, self-hosted runners) | Built |
 | Product CI and release workflows (`.github/workflows/`) | Built |
 | Promotion between environments (`pipewright promote`) | Built, tested live 2026-10-11 |
-| First release, 1.0.0 (wheel as GitHub release files, launcher image in GitHub Container Registry) | Released 2026-10-17 |
+| First release, 1.0.0 (wheel as GitHub release files, launcher image in GitHub Container Registry) | Released 2026-10-17; re-cut 2026-10-18 with synthetic data |
 | Private GKE (section 8.15): orchestrator `kfp`, Ray on KubeRay per run or standing, KServe serving, CronJob schedules, the launcher as a pull worker, the read-only Kubeflow UI | Built, used end to end under an enforced perimeter (2026-10-17) |
+| Features from feature tables and Feature Store feature groups, point in time (section 8.11) | Built, used end to end |
+| Synthetic data (FR-49): one table, or an entity table with its feature tables and event sequences | Built, used end to end on Agent Platform and private GKE |
 | OpenTelemetry export | Planned |
 | Terraform for the platform side | In a separate starter repository, shared on request (R-20) |
 
@@ -102,10 +104,12 @@ src/pipewright/             the Python package, one subpackage per responsibilit
 examples/churn/             the reference use case copied by `pipewright new-usecase`
 examples/minimal/           the churn training code with only the required configuration (example.yaml)
 examples/ray/               the churn training code with the tuning trials run in parallel on a Ray cluster
+examples/features/          the churn sample as an entity table and two feature tables (section 8.11)
 images/launcher.Dockerfile  the launcher image, built from the wheel
 tests/                      offline unit tests (fakes for Google Cloud)
 scripts/                    check_package.py (wheel contents), smoke_test.sh (installed CLI, no cloud)
 docs/ONBOARDING.md          how a platform team prepares a tenant and an ML team starts a use case
+docs/FEATURES.md            features the recommended way: feature tables and groups, read point in time
 .github/workflows/          ci.yml (tests, wheel, smoke test, launcher image), release.yml (tagged releases)
 ```
 
@@ -113,7 +117,8 @@ docs/ONBOARDING.md          how a platform team prepares a tenant and an ML team
 
 ## 4. Requirements
 
-Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliberately not done).
+Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliberately not done), **Replaced** (by the
+requirements named).
 
 ### 4.1 Functional requirements
 
@@ -132,13 +137,6 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-11 | Sources may be CSV or Parquet on GCS, or BigQuery tables and views (`bq://`) | Met | `pipewright_runtime.read_source` |
 | FR-12 | Training: data contract checks, splits (random, stratified, time), tuning with parallel trials, experiments | Met | example, `config/ml.py` |
 | FR-13 | Evaluation: metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data; a model card | Met | example |
-| FR-45 | **Ray on Agent Platform inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
-| FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
-| FR-47 | **Features by registered name:** a source may name a Feature Store feature group; the Feature Registry gives its table, columns and each feature's column at run time, and the same point-in-time query runs | Met | `pipewright_runtime.resolve_feature_groups`, `checks/doctor.py`, section 8.11 |
-| FR-48 | **The closed retrain loop across environments:** a case opened in production trains in test on production-eligible data, is compared with the model production serves, is validated in test, promoted, approved and verified in production, and the case closes with the final production model; one case ID end to end | Planned (roadmap, D-85) | section 8.13 |
-| FR-49 | **Synthetic data generation:** a `synthetic` section in the use case configuration; contract-only generation from the data contract (no real data); learned generation through an engine interface (MOSTLY AI Synthetic Data SDK in local mode by default; SDV as an opt-in adapter that loads only if the team installed SDV, whose Business Source Licence the team accepts directly; never a dependency); evaluation of fidelity, utility (train on synthetic, test on real) and privacy, with gates Pipewright recomputes. Approval, release across environments and evidence are Pipewright Enterprise | Built, released in 1.0.0 (2026-10-18): the section (off unless enabled), the synthetic pipeline on two images, policies.synthetic, `synthetic generate|gates`; used end to end on Kubeflow in private GKE | section 13 |
-| FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
-| FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
 | FR-14 | Model registry: the default version is the champion; who promotes follows the approval policy | Met | `models/registry.py` |
 | FR-15 | Online serving with approval gate, canary, promote and undeploy | Met | `models/deploy.py` |
 | FR-16 | Inference scores with the champion and monitors feature drift, prediction drift and live performance (PSI) | Met | example, `monitoring/` |
@@ -156,6 +154,13 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | FR-40 | **Retraining modes per use case:** `off` (alerts only), `propose` (nothing trains until a person approves), `candidate` (trains a candidate, never promotes); the platform can limit the modes per environment | Met | `retraining/`, `config/ml.py` |
 | FR-41 | **Approver groups with a quorum:** several groups may be required, the platform can add required groups per environment, the proposer cannot approve, one identity counts once, approvals are authenticated actions by named identities | Met | `retraining/` |
 | FR-42 | **Decision events:** always on the lifecycle events topic; an opt-in per-tenant decision feed; email to configured addresses; a weekly digest | Met | `retraining/`, `alerts/sync.py` |
+| FR-43 | **Gates checked by Pipewright, not trusted from the pipeline:** a version becomes the champion or is served only when its evaluation record passes the configured gates, recomputed by Pipewright | Met | `models/gates.py`, `model approve`, `deploy-model`, `model list` |
+| FR-44 | **Help with the YAML:** editor completion, hover text and underlined mistakes from exported schemas; `pipewright explain <key>`; a minimal example; a data contract drafted from a BigQuery table's schema | Met | `config/reference.py`, `scaffold/from_bq.py`, `examples/minimal/` |
+| FR-45 | **Ray on Agent Platform inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
+| FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
+| FR-47 | **Features by registered name:** a source may name a Feature Store feature group; the Feature Registry gives its table, columns and each feature's column at run time, and the same point-in-time query runs | Met | `pipewright_runtime.resolve_feature_groups`, `checks/doctor.py`, section 8.11 |
+| FR-48 | **The closed retrain loop across environments:** a case opened in production trains in test on production-eligible data, is compared with the model production serves, is validated in test, promoted, approved and verified in production, and the case closes with the final production model; one case ID end to end | Planned (roadmap, D-85) | section 8.13 |
+| FR-49 | **Synthetic data generation:** a `synthetic` section in the use case configuration; contract-only generation from the data contract (no real data); learned generation through an engine interface (MOSTLY AI Synthetic Data SDK in local mode by default; SDV as an opt-in adapter that loads only if the team installed SDV, whose Business Source Licence the team accepts directly; never a dependency); evaluation of fidelity, utility (train on synthetic, test on real) and privacy, with gates Pipewright recomputes. Approval, release across environments and evidence are Pipewright Enterprise | Met (released in 1.0.0, 2026-10-18): the section (off unless enabled), the synthetic pipeline on two images, `policies.synthetic`, `synthetic generate` and `synthetic gates`, relational and sequential mode; used end to end on Agent Platform and on Kubeflow in private GKE | `synthetic/`, section 13 |
 
 ### 4.2 Non-functional requirements
 
@@ -169,7 +174,7 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | NFR-09 | **Auditability:** every change and use of a model is traceable to identity, data, release and approval | Met | events carry `by`; contracts carry provenance |
 | NFR-11 | **Fail early, in plain language:** schema, pre-flight and verify gates before anything goes live | Met | `validate`, `doctor`, release verify |
 | NFR-12 | **Vendor-neutral observability:** structured logs and events; tools connect through platform configuration | Met | D-30 |
-| NFR-13 | **Use-case code does not change between deployment profiles** | Met for managed pipelines | adapters, manifest |
+| NFR-13 | **Use-case code does not change between deployment profiles** | Met: Agent Platform Pipelines and Kubeflow Pipelines on private GKE run the same compiled templates | adapters, manifest |
 | NFR-14 | **Works behind TLS-inspecting proxies** | Met | D-49 |
 | NFR-18 | **Value-free error messages:** errors name the column and rule, never the offending value | Planned | D-65 |
 
@@ -180,9 +185,9 @@ Status: **Met** (built and verified), **Partial**, **Planned**, **Out** (deliber
 | C-01 | Google Cloud only. No AWS or Azure work, and no multi-cloud abstractions |
 | C-02 | Pipelines are Kubeflow Pipelines v2; `kfp` pinned to the compiler's major.minor (2.17) |
 | C-03 | Python 3.11; uv for environments; ruff, line length 120 |
-| C-04 | PyTorch is the supported framework for the example and serving |
+| C-04 | Any Python ML framework: a use case's components install what they need from its `components/requirements.txt`, and its register step names the serving container (an Agent Platform prebuilt or the team's own). The example uses PyTorch |
 | C-06 | Agent Platform naming: Gemini Enterprise Agent Platform was formerly Vertex AI (renamed April 2026). APIs, SDK, IAM roles and the orchestrator value `vertex` are unchanged |
-| C-07 | Ingestion frameworks (dlt, Dataflow, Airflow) are out of scope; Pipewright starts at a `source_uri` |
+| C-07 | Pipewright starts at a `source_uri` (files on Cloud Storage, or BigQuery tables and views); how data gets there is the team's own pipeline (D-17) |
 | C-08 | GenAI and LLM fine-tuning are out of scope for v1 |
 
 ---
@@ -252,7 +257,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-09 | One project per environment | Isolation, simple IAM | Active |
 | D-13 | The package is installable from a private Python repository; images are built in the user's project | Supply chain stays inside the user's organisation | Active |
 | D-15 | Models can be promoted between environments (`model` default, `retrain` optional) | Governed path to production | Active (built 2026-10-11: section 8.12, D-84) |
-| D-16 | PyTorch first | Focus | Active |
+| D-16 | Framework-neutral: teams bring their own ML stack through their component requirements and serving container; the example uses PyTorch | Teams keep the tools they know; Pipewright governs the lifecycle, not the model code | Active (revised 2026-10-19; was "PyTorch first") |
 | D-17 | Ingestion is left to ML teams | Scope | Active |
 | D-21 | One use-case definition for all environments; a fixed key list may vary | Production is the same model judged the same way | Active |
 | D-22 | Schemas live with the use case; `tables sync` alone changes tables, additive only | No surprise breaking changes | Active |
@@ -283,15 +288,16 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-68 | **Drift opens a human decision; no automatic retraining.** Modes `off`, `propose` (the recommended minimum for production), `candidate` (never promotes) | Retraining on the same data does not improve a model; drift has causes needing opposite responses (data bug, seasonality, real change, harmless shift) | Active |
 | D-69 | **Email notifies; an authenticated identity approves.** Approval is `pipewright retrain approve`; approvers are verified when they act | Anyone can forward an email; regulated approvals need a named, verified approver | Active |
 | D-70 | **Decision events always go on the lifecycle events topic;** delivery to a team's own app is an opt-in, per-tenant filtered subscription (`retraining.decisions.publish`), checked by `doctor` | Audit needs every decision; topics stay platform-owned while teams choose delivery | Active |
+| D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
 | D-72 | **Pipewright verifies the evaluation gates itself** from the version's evaluation record (`evaluation.json` next to the model artifacts) at `model approve` and `deploy-model`, against the configuration in force now; a missing champion comparison passes only when no earlier version exists | Teams write their own evaluation code; a rewritten step could drop a gate silently. Checking the record makes the freedom safe without constraining the code | Active (2026-10-09) |
 | D-73 | **One spelling for configuration files: `.yaml`.** A `.yml` file where Pipewright looks (use case file, included config, per-environment overrides, environment files) is refused with a rename message | A `dev.yml` override that is silently ignored is hard to spot | Active (2026-10-09) |
 | D-74 | **One description per key, next to the schema.** `schemas/reference.yaml` holds one line per dotted use case key; it is merged into the schemas the editor reads and into `pipewright explain`, and a test fails when a key has no description or a description has no key | The schemas say what is valid, not what it means; one source keeps hover text, `explain` and the docs from drifting apart | Active (2026-10-09) |
 | D-75 | **Editor schemas are files in the MLOps repo**, `.pipewright-schemas/`, written by `pipewright schemas` and `new-usecase`, with a `yaml-language-server` line in each YAML file pointing at its schema by relative path | Works offline, in any editor that uses the YAML language server, and matches the installed Pipewright version; no hosted schema URL to keep in step | Active (2026-10-09) |
 | D-76 | **`--from-bq` drafts; it does not decide.** From the table come the columns, types, required columns, the label's 0/1 values, a time split when there is a date column, and non-numeric columns excluded from features. Ranges, allowed values, uniqueness and personal data are left to the team, with a note on columns that look like identifiers | The schema cannot know what a column means; a draft that guessed would be trusted without review | Active (2026-10-09) |
 | D-77 | **A Ray cluster per Ray step of a run, made by the launcher from the release.** The step names itself; the launcher checks the caller is the use case's runner, takes the size from the live contract (checked against the platform's limits at release) and the image from the release, and creates the cluster as the runner with the environment's key and network attachment. Requests travel like run requests (Pub/Sub inside a perimeter, with the runner's ID token; HTTP otherwise). Clusters carry run labels and a deadline; the tick deletes clusters of ended runs | Creating a cluster that runs as the runner needs permission to act as it, which the launcher has and tenants do not; sizing from the reviewed release means a request cannot ask for more | Active (2026-10-10) |
-| D-78 | **Standalone Ray clusters for development, a cluster per run for pipelines.** Data scientists develop on standalone clusters of their own (console, notebook, Ray Client); every Pipewright run gets its own cluster (D-77). Pipewright has no standing mode: `ray.mode` has one value, `per_run`. A Terraform-managed standing cluster would also wait for the Google provider (no Ray settings on `google_vertex_ai_persistent_resource`) or a GKE blueprint (KubeRay) | What is released, gated and audited runs on clusters Pipewright made for it; development stays free | Active (2026-10-10) |
+| D-78 | **Standalone Ray clusters for development, a cluster per run for pipelines.** Data scientists develop on standalone clusters of their own (console, notebook, Ray Client); every Pipewright run gets its own cluster (D-77). On Agent Platform there is no standing mode (the Google provider has no Ray settings on `google_vertex_ai_persistent_resource`). On private GKE the platform may give a tenant a standing KubeRay cluster (`ray.mode: standing`, section 8.15); a cluster per run stays the default | What is released, gated and audited runs on clusters Pipewright made for it, or on the tenant's cluster the platform keeps; development stays free | Active (2026-10-10; standing on private GKE 2026-10-17) |
 | D-79 | **Pipewright consumes features; it never produces them.** Feature tables (entity columns, a timestamp, feature columns), their views and any Feature Store registration belong to the features' owners (D-17). A use case names features; the run's source becomes the entity table (entity IDs, the cut-off time per row, the label); ingest joins the two and everything after ingest is unchanged | One owner per feature; the data contract, validation, training, gates and monitoring keep working as they are | Active (2026-10-10) |
-| D-80 | **Feature sources are pluggable; BigQuery feature tables first.** A source is a BigQuery table or view named in the use case. The point-in-time join is SQL Pipewright generates and runs as the runner with CMEK (D-44): for each distinct (entity, cut-off) the newest row dated at or before the cut-off, joined back on (entity, cut-off). A registered Feature Store feature group is a later kind of source that resolves to the same table and columns; the SDK's Preview fetch is not used. Online serving, when built, uses Bigtable | Google is thinning the managed product (section 8.11); BigQuery is the stable part, so Pipewright depends only on it | Active (2026-10-10) |
+| D-80 | **Feature sources are pluggable; BigQuery feature tables first.** A source is a BigQuery table or view named in the use case. The point-in-time join is SQL Pipewright generates and runs as the runner with CMEK (D-44): for each distinct (entity, cut-off) the newest row dated at or before the cut-off, joined back on (entity, cut-off). A registered Feature Store feature group is a second kind of source (built, D-82) that resolves to the same table and columns; the SDK's Preview fetch is not used. Online serving, when built, uses Bigtable | Google is thinning the managed product (section 8.11); BigQuery is the stable part, so Pipewright depends only on it | Active (2026-10-10) |
 | D-81 | **The platform decides where features may come from, in the manifest.** `tenants.<t>.features.datasets` lists a tenant's feature datasets; `features.required` makes `data.features_from` the only source of model features. Both are checked at `validate`, so a use case that breaks them never releases | Access is the platform's decision and reaches teams the same way as every other platform setting; a refusal at validate names what to change | Active (2026-10-10) |
 | D-82 | **A feature group is resolved through the Feature Registry at each run, not pinned at release.** The registry is the owners' source of truth: when they move a group to a new table, runs follow it. The event records what each run actually read (group and table), and the tenant's datasets bound where a group may point | Registration is what makes a feature defined once; copying its resolution into each release would let use cases drift from it | Active (2026-10-10) |
 | D-83 | **Newer manifest fields are ignored with a warning; policies carry `requires`.** Unknown keys are pruned using the schema itself, then the rest is validated in full; `requires` (a version specifier) makes an older version refuse the manifest when a key must not be skipped | App teams pin their CLI in CI; a platform adding a field must not break every team, and a policy must never be silently ignored. Built before the first release, because the oldest released version is the one that has to tolerate newer manifests | Active (2026-10-10) |
@@ -300,8 +306,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-86 | **The first release is 1.0.0 stable, no release candidate.** Nothing was ever published, so no one depends on a 0.x. From 1.0 a breaking change to the stable surface means 2.0: the use case and environment YAML (`pipewright/v1`), the manifest fields the CLI reads, release contract v3, CLI commands, flags and exit codes, lifecycle event types and fields, plugin API v1. Not covered: Python internals, undocumented runtime helpers, message wording, generated workflow contents. Removals are deprecated (a warning) for at least one minor release first. A throwaway pre-release tag rehearses the release workflow before `v1.0.0` | Fluxor's proof of concept with a very large customer gave positive feedback, which is the outside use a release candidate or a 0.9 would have waited for; the roadmap is additive (1.x); regulated buyers read 0.x as not production | Active (2026-10-11, replaces the 1.0.0rc1 plan); done at release time |
 | D-87 | **No Iceberg (BigLake) tables.** Row-level deletes at scale are served by BigQuery tables and the feature team's feature tables, following the feature governance guidelines; Parquet outputs keep erasure by rewriting files with generation checks | The Feature Store path covers the need without a second table format | Active (2026-10-11) |
 | D-88 | **Private beta before open source.** 1.0.0 ships on GitHub to early champions and customers (read access to the private repositories; packages as release files, images in GitHub Container Registry), with Fluxor engagements to help them adopt it. Making the repository public, and PyPI, are decided after that | Real use with support shapes the product before it is public; it is the ideal path for regulated buyers | Active (2026-10-11) |
-| D-89 | **Kubernetes: `private-gke` next; on premises only on demand.** GKE keeps Google Cloud's data services and is private anyway, so it is the next platform. Plain Kubernetes on premises (no Google services) is not planned: it is built only when a large customer base asks, with one reference stack | No customer asks for on premises today; it would mean a second platform under Pipewright (section 8.14) | Active (2026-10-15) |
-| D-71 | **Cases re-open on time, on worsening and on escalation, within a policy cap:** snooze and decline expiry; immediate re-open when drift worsens (worst PSI up by `reopen_when_worse_by`, a new feature drifting, performance below its minimum); escalation when undecided; declines and snoozes need a reason from a short list plus free text | Time alone hides serious worsening and lets cases go stale | Active |
+| D-89 | **Kubernetes: `private-gke` (built 2026-10-17); on premises only on demand.** GKE keeps Google Cloud's data services and is private anyway, so it was the next platform. Plain Kubernetes on premises (no Google services) is not planned: it is built only when a large customer base asks, with one reference stack | No customer asks for on premises today; it would mean a second platform under Pipewright (section 8.14) | Active (2026-10-15) |
 
 ---
 
@@ -315,7 +320,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | `build` | Compile pipelines, patch `steps` into the compiled template, build the component image (injects `pipewright_runtime.py`) |
 | `checks` | `doctor`, the `kfp` and Ray client pin checks |
 | `ray_clusters` | Ray clusters for steps, on Agent Platform or KubeRay, per run or standing: the platform's settings and limits and a step's cluster (`settings`), the launcher's create, delete and cleanup (`service`) |
-| `release` | Contract v3, pointers, template upload, verify gate, release and rollback |
+| `release` | Contract v3, pointers, template upload, verify gate, release and rollback, promotion between environments (`promote`) |
 | `launcher` | Flask app, pure routing, live contract registry; `pull`, the same routes from Pub/Sub pull subscriptions (the launcher in a private cluster) |
 | `adapters` | Orchestrator submit (`vertex`: Agent Platform Pipelines; `kfp`: Kubeflow Pipelines through the Kubernetes API), applying the manifest `security` block |
 | `retraining` | Retrain decisions: the case state machine (pure), the decision pack summary, the case store, ID token checks, the launcher's handling, the `retrain` CLI |
@@ -324,6 +329,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | `kube`, `pipelines_ui` (modules) | A small Kubernetes client (no kubeconfig); `pipewright pipelines-ui` |
 | `observability` | Lifecycle events (regional publish) |
 | `data` | Erasure in BigQuery and Parquet |
+| `synthetic` | Synthetic data (FR-49): the section's defaults, checks and the platform's policy (`config`), the built-in `synthetic` pipeline and its steps, and `runtime/` (gates, column rules, engines, evaluation, relational helpers), copied into the two synthetic images |
 | `runs` | `pipewright run` (Pub/Sub or HTTP) |
 | `scaffold`, `testing`, `gcp`, `cli`, `plugins` | New use case and CI workflows; `pipewright test`; REST session, GCS, BigQuery; argument wiring; plugin loading |
 
@@ -331,7 +337,8 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 
 **Files:** `environments/<env>.yaml` points at the manifest. `usecases/<name>/usecase.yaml` holds identity, tenant,
 pipelines, model and approvals, plus `include: [config/*.yaml]`. The `config/*.yaml` files hold one section each:
-triggers, runtime, tables, data, training, evaluation, operations. Overrides go in
+triggers, runtime, tables, data, training, evaluation, operations, and `synthetic` when a team switches it on.
+Overrides go in
 `usecases/<name>/environments/<env>.yaml`.
 
 **Resolution** (`resolve_usecase`):
@@ -392,7 +399,7 @@ them (`retraining.when`, not `on`) and accepts `false` where `off` is meant (`re
 
 ### 8.5 Component runtime (`pipewright_runtime.py`, injected into every component image)
 
-- `read_source`: CSV, Parquet or `bq://` sources.
+- `read_source`: CSV, Parquet or `bq://` sources, with the point-in-time feature join (section 8.11).
 - `write_table`: store-aware, conforms rows to the schema, uses load jobs.
 - `bigquery_client`: queries with the environment's key.
 - `log`: labelled JSON lines.
@@ -402,7 +409,10 @@ them (`retraining.when`, not `on`) and accepts `false` where `off` is meant (`re
 ### 8.6 Events
 
 - `run.submitted`, `run.duplicate`: launcher.
-- `release.live`, `release.rolled_back`, `model.approved`, `model.deployed`, `data.erased`: CLI, each with `by`.
+- `release.live`, `release.rolled_back`, `release.promoted`, `model.approved`, `model.deployed`, `data.erased`: CLI,
+  each with `by`.
+- `data.features.resolved`, `ray.cluster.used`: the component runtime; `ray.cluster.created`: the launcher.
+- `synthetic.evaluated`, `synthetic.rejected`, `synthetic.generated`: the synthetic pipeline.
 - `training.evaluated`, `model.registered`, `monitoring.recorded`, `monitoring.alert`: components.
 - `retrain.proposed`, `retrain.approval`, `retrain.approved`, `retrain.declined`, `retrain.snoozed`,
   `retrain.reopened`, `retrain.escalated`, `retrain.digest`: launcher (data: `case_id`, `state`, `mode`, `summary`,
@@ -501,7 +511,8 @@ A step that declares `steps.<step>.ray` gets a Ray on Agent Platform cluster for
 
 Without a `ray` block in the manifest, Ray is on with defaults (public endpoint, the runner identity, a prebuilt
 image, at most 2 workers on n1-standard-4 or -8, 120 minutes). A private blueprint writes `ray.enabled: false`
-unless its platform file turns Ray on. `ray.mode` accepts only `per_run` (D-78).
+unless its platform file turns Ray on. On Agent Platform `ray.mode` is `per_run`; on private GKE a tenant may be
+`standing` (D-78, section 8.15).
 
 ### 8.10 Plugins
 
@@ -640,6 +651,7 @@ them.
     cut-off column normally doubles as the scoring date.
   - A run requested within 60 seconds of a release can still get the previous release (the launcher caches
     pointers, `POINTER_TTL`); this is by design.
+
 ### 8.12 Promotion between environments (FR-29, built 2026-10-11)
 
 **The invariant:** what runs in production is what was tested. The code (the component image, and the Ray image
@@ -773,11 +785,11 @@ rollback. A person carries the case across.
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
 approval for production; phase 4 monitoring-driven retraining with deduplication and safeguards.
 
-### 8.14 Running on Kubernetes: GKE next, on-premises on request (design note, 2026-10-15; GKE built: section 8.15)
+### 8.14 Running on Kubernetes: private GKE, and on premises on request (design note, 2026-10-15; `private-gke` built: section 8.15)
 
 Two targets, very different in size:
 
-- **`private-gke` (next on the roadmap):** Kubernetes on Google Cloud. Compute moves into the cluster; Cloud
+- **`private-gke` (built 2026-10-17, section 8.15):** Kubernetes on Google Cloud. Compute moves into the cluster; Cloud
   Storage, BigQuery, Artifact Registry, IAM, KMS and VPC Service Controls stay. GKE is private anyway, so it serves
   the customers who want Kubernetes without leaving Google Cloud.
 - **Plain Kubernetes on premises:** no Google services at all; every building block needs a replacement. Not
@@ -815,15 +827,13 @@ runtime (`read_source`, `write_table`) split the same way.
 (Kubernetes audit logs, KubeRay, KServe); Fleet View gains a collector per platform; keyless CI reaches the cluster
 through Workload Identity.
 
-**Worth testing early on `private-gke`:** Ray under an enforced perimeter. KubeRay runs inside the cluster, so a
-step reaches its Ray head directly instead of through Agent Platform's dashboard tunnel, which is what blocks Ray
-under an enforced perimeter today (Enterprise R-23).
+**Confirmed on `private-gke`:** Ray works under an enforced perimeter. KubeRay runs inside the cluster, so a step
+reaches its Ray head directly instead of through Agent Platform's dashboard tunnel, which is what blocks Ray on
+Agent Platform under an enforced perimeter (Enterprise R-23).
 
 **If on premises is ever built:** one opinionated reference stack (for example MinIO, Kafka, Harbor, MLflow,
 KServe, KubeRay, Trino or Postgres, Keycloak, Vault, Prometheus), shaped by the customer who asks, rather than
 pluggable backends; Enterprise only, as `private-gke` is.
-
----
 
 ### 8.15 Private GKE as built (2026-10-17)
 
@@ -849,15 +859,17 @@ a named image user Kubernetes cannot verify as non-root (now numeric); release r
 wins). The platform side (the cluster, Kubeflow and KubeRay from mirrored images, KServe, finished pods deleted a
 minute after they succeed so the logging agent keeps up) is the platform's, not this repository's.
 
+---
+
 ## 9. Interfaces and contracts
 
 ### 9.1 CLI (`pipewright`)
 
 | Stage | Commands |
 |---|---|
-| Configure | `new-usecase`, `validate`, `resolve`, `doctor`, `test` |
-| Release | `tables sync`, `release`, `rollback`, `status`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `data erase`, `pipelines-ui` (private GKE) |
+| Configure | `new-usecase` (also `--from-bq`), `validate`, `resolve`, `doctor`, `test`, `schemas`, `explain` |
+| Release | `tables sync`, `release`, `rollback`, `promote`, `status`, `schedules sync`, `alerts sync`, `ci init` |
+| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze` (with `--env` or `--manifest gs://...`) |
 | Extend | `plugins` |
 
@@ -873,7 +885,7 @@ cluster), `PIPEWRIGHT_BUILD_CA_BUNDLE`, and the CA variables in D-49.
 | Field | Contents |
 |---|---|
 | Required | `apiVersion`, `environment`, `blueprint`, `orchestrator`, `project`, `region`, `artifact_registry{docker, kfp, python?}`, `artifacts_bucket`, `landing_bucket`, `launcher{service_account, url?, service?, subscription?, run_requests_topic?}`, `tenants{name: {runner_service_account, bigquery_dataset, landing_prefix?, online_serving?, namespace?, outputs_uri?, decision_feed?}}` |
-| `policies` | `deploy_model`, `promote_model` (`manual` or `auto`); `retraining{allowed_modes, required_approvers, max_snooze_days}` |
+| `policies` | `deploy_model`, `promote_model` (`manual` or `auto`); `retraining{allowed_modes, required_approvers, max_snooze_days}`; `synthetic{allowed, allowed_purposes, allowed_engines, differential_privacy_for, gates, required_approvers}` |
 | `approver_groups` | `{name: {topic, subscription, description?}}` |
 | `observability` | `events_topic`, `evidence_dataset`, `evidence_uri`, `log_sinks`, `otlp_endpoint` |
 | `security` | `kms_key`, `bigquery_kms_key`, `network`, `reserved_ip_ranges`, `perimeter` |
@@ -919,7 +931,7 @@ Entry point group `pipewright.commands`, signature `register(subparsers, common)
 
 | Layer | Command | What it covers |
 |---|---|---|
-| Unit tests | `uv run pytest` | Configuration, releases, launcher routing and routes, retrain decisions, alerts, tables, erasure, plugins; offline, with fakes |
+| Unit tests | `uv run pytest` | Configuration, releases, promotion, launcher routing and routes, retrain decisions, features, Ray clusters, the `kfp` adapter, synthetic data, alerts, tables, erasure, plugins; offline, with fakes |
 | Lint | `uv run ruff check .` | |
 | Example | `uv run --no-project --with-requirements examples/churn/tests/requirements.txt python -m pytest examples/churn/tests` | The example's ML helpers |
 | Package | `scripts/check_package.py dist/`, `scripts/smoke_test.sh <pipewright>` | Wheel contents; the installed CLI scaffolds, validates and resolves a use case and writes CI workflows, with no cloud access |
@@ -976,7 +988,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Persistent resources for Ray (Ray on Agent Platform), the Ray client in `google-cloud-aiplatform[ray]` | Supported; no deprecation notice |
 | `google-cloud-aiplatform` 2.x (examples pin 2.3.0) | The classic ML surface is "fully supported"; 2.0.0 must not be installed (the core excludes it) |
 | BigQuery, including `ML.FEATURES_AT_TIME` and `ML.ENTITY_FEATURES_AT_TIME` | Supported |
-| Planned: Feature Store feature groups and the Feature Registry; Bigtable online serving; Knowledge Catalog (Dataplex renamed, same APIs) | Supported; Bigtable is Google's recommended replacement for Optimized online serving |
+| Feature Store feature groups and the Feature Registry (used since 2026-10-10); planned: Bigtable online serving, Knowledge Catalog (Dataplex renamed, same APIs) | Supported; Bigtable is Google's recommended replacement for Optimized online serving |
 
 | Retiring | Shutdown | Effect on Pipewright |
 |---|---|---|
@@ -991,7 +1003,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 | Item | Status |
 |---|---|
-| First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Released 2026-10-17 |
+| First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Released 2026-10-17; re-cut 2026-10-18 with synthetic data |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
 | OpenTelemetry export from the launcher | Planned |
@@ -1000,7 +1012,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
 | `predict` in the generated operate workflow | Built 2026-10-17 |
 | Plain Kubernetes on premises (section 8.14) | On demand only (D-89) |
-| Synthetic data generation (FR-49): the `synthetic` section, contract-only generation, an engine interface (MOSTLY AI SDK local mode by default, SDV opt-in), evaluation and gates | Built on the feature branch; used end to end (2026-10-18) |
+| Synthetic data generation (FR-49): the `synthetic` section, contract-only generation, an engine interface (MOSTLY AI SDK local mode by default, SDV opt-in), evaluation and gates | Built, released in 1.0.0 (2026-10-18); used end to end on Agent Platform and on Kubeflow |
 | Synthetic data: relational generation (FR-49 follow-up): the entity table and its child tables together (keys, history per entity, timing against each cut-off), so point-in-time joins and feature tables are tested on synthetic data; the spike showed MOSTLY AI does it (TSTR drop 0.003 on churn) | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
 | Synthetic data: sequential generation (FR-49 follow-up): event histories per entity (transactions, sessions, claims) where order and gaps matter | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
 | Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: later (user to revisit) |
@@ -1024,7 +1036,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Environment manifest | `environment.json`: the names of everything a tenant may use, written by the platform |
 | Blueprint, profile | A deployment profile named in the manifest: `poc`, `private-managed`, `private-gke` |
 | Release, contract, pointer | A release is a verified, digest-pinned build; its contract is the write-once record; the pointer says which release is live |
-| Launcher | The shared Cloud Run service that turns files, schedules and run requests into pipeline runs |
+| Launcher | The shared service (Cloud Run, or a pull worker in a private GKE cluster) that turns files, schedules and run requests into pipeline runs |
 | Runner | A tenant's service account that every pipeline step runs as |
 | Champion | The registry's default model version, the current best |
 | `ml_config` | The resolved configuration every pipeline receives |
