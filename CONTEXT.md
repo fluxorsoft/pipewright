@@ -779,7 +779,17 @@ rollback. A person carries the case across.
 4. What counts as validated in test before promotion: a batch scoring run, a canary, or both.
 5. Health checks after deploy (error rate, latency, prediction distribution); automatic or human rollback.
 6. Ground truth per use case: source, delay, the minimum labelled volume before performance opens a case.
-7. Data versioning: a BigQuery snapshot per run or a recorded time-travel timestamp (seven days of history).
+7. Data versioning: a BigQuery snapshot per run or a recorded time-travel timestamp (seven days of history), so
+   that rerunning the same release reads the same rows. Today a release pins code and configuration, not data: a
+   source view anchored on "now" or on the newest event (for example the latest sale) moves between runs, and the
+   ingest step's per-run copy (`run_id` in the raw table) is the only way back to a run's rows. Raised by a user
+   on 2026-10-21 (a lead scoring model with a label window).
+8. Label maturity window: a label source with its own time column and a window declared in the use case (for
+   example "a purchase within 20 days of sign-up"), so rows whose window has not closed are dropped by
+   Pipewright, 1s and 0s together, anchored on the newest label event rather than on today, and the anchor is
+   recorded with the run. Today the rule lives in training code or the entity view; a pipeline parameter with no
+   default (`parameters`) at least makes a forgotten window fail the release instead of training on a fallback.
+   Raised with item 7 (2026-10-21).
 
 **Delivery, when started:** phase 1 a manually started loop end to end with rejection and rollback; phase 2
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
