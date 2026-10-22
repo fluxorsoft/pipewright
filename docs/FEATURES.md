@@ -109,6 +109,79 @@ Compute the feature, append a row per change, keep the timestamp honest, keep th
 columns; do not rename or retype them), register the group if your organisation uses the Feature Store, and handle
 erasure requests in their tables (`pipewright data erase` covers only a use case's own tables).
 
+## Building feature tables: dbt or Dataform
+
+Pipewright reads feature tables; it does not build them. Any tool works if the table follows the rules above. Two
+tools make that easy on BigQuery:
+
+| | Dataform | dbt |
+|---|---|---|
+| Runs | Managed, inside Google Cloud, in the BigQuery console; nothing to host | dbt Core (free) needs a runner such as Cloud Run jobs, Cloud Composer or CI; dbt Cloud is managed and paid |
+| A row only when a value changes | An incremental table with your own MERGE logic | Snapshots, out of the box |
+| Tests | Assertions | Tests, plus packages such as dbt-utils |
+| Best when | The organisation is Google Cloud only and wants nothing extra to run, including in private environments | The data team already uses dbt, or works across warehouses |
+
+Whichever you choose: partition by `feature_timestamp`, cluster by the entity column, test that (entity,
+timestamp) is unique and never null, check freshness, keep the code in the feature team's own repository with
+reviews, and put the tables in a dataset the platform lists for the tenant (`tenants.<t>.features.datasets`).
+Avoid loose scheduled queries: no tests, no dependencies, no review.
+
+**dbt: a row each time a value changes.** A snapshot records each change; `dbt_valid_from` is when the snapshot saw
+it, which is when the value became known.
+
+```sql
+-- snapshots/customer_profile_snapshot.sql
+{% snapshot customer_profile_snapshot %}
+{{ config(target_schema='features_staging', unique_key='customer_id', strategy='check',
+          check_cols=['tenure_months', 'monthly_charges', 'contract_length_months']) }}
+select customer_id, tenure_months, monthly_charges, contract_length_months
+from {{ source('crm', 'customers') }}
+{% endsnapshot %}
+```
+
+```sql
+-- models/features/customer_profile.sql: the feature table Pipewright reads
+{{ config(materialized='table', cluster_by=['customer_id'],
+          partition_by={'field': 'feature_timestamp', 'data_type': 'timestamp', 'granularity': 'day'}) }}
+select customer_id, dbt_valid_from as feature_timestamp, tenure_months, monthly_charges, contract_length_months
+from {{ ref('customer_profile_snapshot') }}
+```
+
+```yaml
+# models/features/customer_profile.yml
+models:
+  - name: customer_profile
+    tests:
+      - dbt_utils.unique_combination_of_columns: { combination_of_columns: [customer_id, feature_timestamp] }
+    columns:
+      - { name: customer_id, tests: [not_null] }
+      - { name: feature_timestamp, tests: [not_null] }
+```
+
+**Dataform: one row per entity per run.** An incremental table appends each run's values, stamped with the time
+they were computed. Run it on a schedule (for example daily).
+
+```sql
+-- definitions/features/support_activity.sqlx
+config {
+  type: "incremental",
+  schema: "features",
+  bigquery: { partitionBy: "DATE(feature_timestamp)", clusterBy: ["customer_id"] },
+  assertions: { uniqueKey: ["customer_id", "feature_timestamp"], nonNull: ["customer_id", "feature_timestamp"] }
+}
+
+select
+  customer_id,
+  current_timestamp() as feature_timestamp,
+  countif(created_at >= timestamp_sub(current_timestamp(), interval 30 day)) as num_support_tickets
+from ${ref("support_tickets")}
+group by customer_id
+```
+
+**History before the first run.** A snapshot or incremental table only knows values from its first run onwards.
+To train on earlier periods, backfill with a query that computes each past value from the data that was available
+at that time, stamped with that time; never stamp backfilled rows with today's date.
+
 ## Synthetic copies of feature tables
 
 When a team switches synthetic data on with `mode: relational` (see the README's *Synthetic data*), the engine
