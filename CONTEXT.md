@@ -159,8 +159,12 @@ requirements named).
 | FR-45 | **Ray on Agent Platform inside the lifecycle:** a step asks for a cluster (`steps.<step>.ray`) and gets one for that run only, within the platform's limits, with the environment's key, network and the runner identity; it is always deleted (by the step, or by the launcher's cleanup) | Met | `ray_clusters/`, launcher `/ray/clusters`, `pipewright_runtime.ray_cluster`, `examples/ray/` |
 | FR-46 | **Features from feature tables:** a use case names features and the BigQuery feature tables that hold them (`data.features_from`); ingest builds point-in-time correct data from the run's entity table; batch scoring reads the latest values the same way; a `data.features.resolved` event records what was read | Met | `pipewright_runtime.read_source`, `config/ml.py`, `checks/doctor.py`, `examples/features/`, section 8.11 |
 | FR-47 | **Features by registered name:** a source may name a Feature Store feature group; the Feature Registry gives its table, columns and each feature's column at run time, and the same point-in-time query runs | Met | `pipewright_runtime.resolve_feature_groups`, `checks/doctor.py`, section 8.11 |
-| FR-48 | **The closed retrain loop across environments:** a case opened in production trains in test on production-eligible data, is compared with the model production serves, is validated in test, promoted, approved and verified in production, and the case closes with the final production model; one case ID end to end | Planned (roadmap, D-85) | section 8.13 |
+| FR-48 | **The closed retrain loop across environments:** a case opened in production trains in test on production-eligible data, is compared with the model production serves, is validated in test, promoted, approved and verified in production, and the case closes with the final production model; one case ID end to end | Planned: phase 1 (D-85, revised 2026-10-22) | section 8.13 |
 | FR-49 | **Synthetic data generation:** a `synthetic` section in the use case configuration; contract-only generation from the data contract (no real data); learned generation through an engine interface (MOSTLY AI Synthetic Data SDK in local mode by default; SDV as an opt-in adapter that loads only if the team installed SDV, whose Business Source Licence the team accepts directly; never a dependency); evaluation of fidelity, utility (train on synthetic, test on real) and privacy, with gates Pipewright recomputes. Approval, release across environments and evidence are Pipewright Enterprise | Met (released in 1.0.0, 2026-10-18): the section (off unless enabled), the synthetic pipeline on two images, `policies.synthetic`, `synthetic generate` and `synthetic gates`, relational and sequential mode; used end to end on Agent Platform and on Kubeflow in private GKE | `synthetic/`, section 13 |
+| FR-51 | **Online feature lookup, a toggle:** online serving fetches a request's features by entity ID from a Feature Store Bigtable online store instead of the caller sending the feature vector. Off unless the use case switches it on (`model.serving.features: online`) and the platform allows it per environment (`policies.online_features`, with the tenant's online store and node limits), because a Bigtable online store has a standing cost. The feature views come from the same `data.features_from` block training and batch scoring read, so online, batch and training share one feature definition (no training-serving skew); the serving handler fetches by ID, then calls the model, on Agent Platform endpoints and KServe; `doctor` checks the views exist and are fresh; events record which view served. The online store and its views belong to the platform or the features' owners (D-79). Enterprise: Terraform for the online store (CMEK, in the perimeter), cost limits in the platform file, an evidence control for online features | Planned (user, 2026-10-22) | section 8.11 |
+| FR-52 | **Regression and multi-class models:** evaluation metrics (for example rmse, mae, r2; macro and weighted f1, per-class recall), gates with the right direction, champion comparison, slice gates and prediction drift for continuous and multi-class outputs, for container and BigQuery ML use cases alike. Today `config/ml.py` knows binary classification metrics only (auc, pr_auc, accuracy, f1, precision, recall, log_loss, brier, calibration_error) | Planned (user, 2026-10-22) | `config/ml.py`, `models/gates.py` |
+| FR-53 | **Fairness metrics and gates:** bias measures per protected or sensitive attribute (for example demographic parity difference, equal opportunity and equalised odds differences), computed on the test set next to slice metrics, gated like other metrics and recorded in the evaluation record and the model card. The attributes are declared in the data contract; they may be measured without being features | Planned (user, 2026-10-22) | `config/ml.py`, `models/gates.py` |
+| FR-54 | **Approved image allow-list:** the platform lists, per environment, the base images and package indexes a use case's images may be built from (component, Ray and synthetic images); `validate` and `release` refuse anything else, and the release contract records the base images by digest. Declared in the manifest like other platform policy (D-81); Pipewright Enterprise sets it in the platform file. Raised with the forecasting route of the BigQuery ML design (approved libraries such as statsmodels and Prophet) | Planned (user, 2026-10-22) | manifest `policies`, `build/images.py` |
 
 ### 4.2 Non-functional requirements
 
@@ -302,7 +306,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-82 | **A feature group is resolved through the Feature Registry at each run, not pinned at release.** The registry is the owners' source of truth: when they move a group to a new table, runs follow it. The event records what each run actually read (group and table), and the tenant's datasets bound where a group may point | Registration is what makes a feature defined once; copying its resolution into each release would let use cases drift from it | Active (2026-10-10) |
 | D-83 | **Newer manifest fields are ignored with a warning; policies carry `requires`.** Unknown keys are pruned using the schema itself, then the rest is validated in full; `requires` (a version specifier) makes an older version refuse the manifest when a key must not be skipped | App teams pin their CLI in CI; a platform adding a field must not break every team, and a policy must never be silently ignored. Built before the first release, because the oldest released version is the one that has to tolerate newer manifests | Active (2026-10-10) |
 | D-84 | **Promotion keeps the code identical and resolves the configuration for the destination.** Images move by digest; templates are recompiled for the destination and must equal the source's with only the registry address changed; `ml_config` comes from the destination's resolution of the same commit. A model is promoted as its files, checksum-verified, because Model Registry copies only within a project | A byte-identical template cannot point at the destination's own registry, and configuration is legitimately per environment; claiming either is identical would be false. What must not change, the code and the model, is verified | Active (2026-10-11) |
-| D-85 | **The closed retrain loop waits for real use.** Each half is built (retrain decisions in one environment; promotion between environments) and a person can carry a case across them with today's commands. The open choices (comparison policy, what counts as validated in test, health checks, ground truth per use case) are best settled by a team running real use cases | Building on guesses would fix policies before anyone has used the halves | Active (2026-10-11) |
+| D-85 | **The closed retrain loop waits for real use.** Each half is built (retrain decisions in one environment; promotion between environments) and a person can carry a case across them with today's commands. The open choices (comparison policy, what counts as validated in test, health checks, ground truth per use case) are best settled by a team running real use cases | Building on guesses would fix policies before anyone has used the halves | Revised 2026-10-22 (user): brought into phase 1 alongside BigQuery ML; the open decisions in section 8.13 are settled first, as the start of the work (was: wait until teams use the halves, 2026-10-11) |
 | D-86 | **The first release is 1.0.0 stable, no release candidate.** Nothing was ever published, so no one depends on a 0.x. From 1.0 a breaking change to the stable surface means 2.0: the use case and environment YAML (`pipewright/v1`), the manifest fields the CLI reads, release contract v3, CLI commands, flags and exit codes, lifecycle event types and fields, plugin API v1. Not covered: Python internals, undocumented runtime helpers, message wording, generated workflow contents. Removals are deprecated (a warning) for at least one minor release first. A throwaway pre-release tag rehearses the release workflow before `v1.0.0` | Fluxor's proof of concept with a very large customer gave positive feedback, which is the outside use a release candidate or a 0.9 would have waited for; the roadmap is additive (1.x); regulated buyers read 0.x as not production | Active (2026-10-11, replaces the 1.0.0rc1 plan); done at release time |
 | D-87 | **No Iceberg (BigLake) tables.** Row-level deletes at scale are served by BigQuery tables and the feature team's feature tables, following the feature governance guidelines; Parquet outputs keep erasure by rewriting files with generation checks | The Feature Store path covers the need without a second table format | Active (2026-10-11) |
 | D-88 | **Early users first, then a public repository.** 1.0.0 shipped on GitHub to early champions and customers first (packages as release files, images in GitHub Container Registry), with Fluxor engagements to help them adopt it; the repository then opens to everyone (October 2026), and 1.0.0 is on PyPI (`pipewright-mlops`) | Real use with support shapes the product before it is public; it is the ideal path for regulated buyers | Active (2026-10-11) |
@@ -622,8 +626,10 @@ instead of a table:
 
 **Later:**
 
-- **Online serving from Bigtable**, on demand: Feature Store Bigtable online serving (which syncs BigQuery to
-  Bigtable), or Pipewright's own export. The serving handler would read by entity ID.
+- **Online feature lookup (FR-51)**, a toggle: Feature Store Bigtable online serving (which syncs BigQuery to
+  Bigtable), with feature views derived from `data.features_from`. The serving handler reads by entity ID. Off unless
+  the use case switches it on and the platform allows it, because Bigtable has a standing cost. Until then, online
+  requests carry the full feature vector, and batch scoring reads features point in time like training.
 
 **Example:** `examples/features/` (`new-usecase --from features`): the churn sample split into an entity table and
 two feature tables, each with rows dated after the cut-off that must never be used. `data/load_tables.sh` loads
@@ -770,7 +776,8 @@ View show one loop as one record.
 window, rejection or approval, a test inference run, `pipewright promote`, production approval, canary, promote,
 rollback. A person carries the case across.
 
-**Open decisions:**
+**Open decisions** (to settle first: the loop is in phase 1 since 2026-10-22, D-85; 7 and 8 are shared with the
+BigQuery ML work):
 
 1. Where retraining for a production case runs (proposed: test).
 2. Production data access for test: a read-only grant or a copy, who approves it, whether dev stays on sample data.
@@ -1011,28 +1018,35 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 ## 13. Roadmap
 
+**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks.
+
 | Item | Status |
 |---|---|
 | First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Released 2026-10-17; re-cut 2026-10-18 with synthetic data |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
-| OpenTelemetry export from the launcher | Planned |
+| OpenTelemetry export from the launcher | Planned: phase 2 |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
-| The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Roadmap (D-85) |
+| The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Planned: phase 1, alongside BigQuery ML; settle the open decisions in section 8.13 first (D-85, revised 2026-10-22) |
 | `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
 | `predict` in the generated operate workflow | Built 2026-10-17 |
 | Plain Kubernetes on premises (section 8.14) | On demand only (D-89) |
 | Synthetic data generation (FR-49): the `synthetic` section, contract-only generation, an engine interface (MOSTLY AI SDK local mode by default, SDV opt-in), evaluation and gates | Built, released in 1.0.0 (2026-10-18); used end to end on Agent Platform and on Kubeflow |
 | Synthetic data: relational generation (FR-49 follow-up): the entity table and its child tables together (keys, history per entity, timing against each cut-off), so point-in-time joins and feature tables are tested on synthetic data; the spike showed MOSTLY AI does it (TSTR drop 0.003 on churn) | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
 | Synthetic data: sequential generation (FR-49 follow-up): event histories per entity (transactions, sessions, claims) where order and gaps matter | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
-| Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: later (user to revisit) |
+| Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: phase 3 (user to revisit) |
 | Synthetic data: AI-assisted authoring (FR-49 follow-up): a drafted `synthetic` section and column rules from a table's schema and profile (Gemini), for a person to review | Built in Pipewright Enterprise (`pipewright synthetic-draft`, 2026-10-18) |
-| Value-free error messages (NFR-18, D-65) | Planned |
+| Value-free error messages (NFR-18, D-65) | Planned: phase 1 |
 | Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters, a long-lived cluster per tenant (section 8.15): on private GKE, kept by the platform as a KubeRay cluster whose workers scale to zero; a cluster per run stays the default. Not on Agent Platform | Built 2026-10-17 |
 | Features from BigQuery feature tables, point in time, for training and batch scoring (FR-46, D-79, D-80, section 8.11) | Built 2026-10-10 |
 | Feature Store feature groups as a feature source (D-82) | Built 2026-10-10 |
-| Online serving from Bigtable: endpoints read features by entity ID | Planned (on demand) |
+| Online feature lookup (FR-51): endpoints read features by entity ID from a Bigtable online store, a toggle per use case and environment | Planned: phase 2 (user, 2026-10-22) |
+| BigQuery ML as a training engine (the design is kept with Pipewright Enterprise): a spike inside an enforced perimeter, then built-in `bqml-training` and `bqml-scoring` pipelines for binary classification; later regression, imported models, promotion by files, online serving, k-means and PCA, forecasting exceptions | Planned: phase 1 (spike and binary classification), phase 2 and 3 (the rest) (user, 2026-10-22) |
+| Per-run data versioning and a label maturity window (section 8.13, open decisions 7 and 8) | Planned: phase 1 (user, 2026-10-22) |
+| Regression and multi-class models (FR-52): metrics, gates, champion comparison and drift beyond binary classification | Planned: phase 1 (user, 2026-10-22) |
+| Fairness metrics and gates (FR-53) | Planned: phase 2 (user, 2026-10-22) |
+| Approved image allow-list (FR-54): base images and package indexes per environment, refused at validate and release | Planned: phase 2 (user, 2026-10-22) |
 
 ---
 
