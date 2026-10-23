@@ -333,7 +333,10 @@ accept, and the defaults when the use case names none:
 Errors (rmse, mae, mape, median_absolute_error, log_loss) are lower-is-better: a gate on them takes a `max`, the
 champion must have a lower value, and tuning minimises them. A regression use case splits at random unless
 `data.split.strategy` says `time`; stratified needs classes. The example's `mlkit.py` has `regression_metrics` and
-`multiclass_metrics` (with per-class precision, recall and f1) next to the binary `compute_metrics`.
+`multiclass_metrics` (with per-class precision, recall and f1) next to the binary `compute_metrics`. Prediction
+drift works for both: `psi_baseline` bins a regression model's predictions like a probability, and `class_baseline`
+records a multi-class model's share of each predicted class, which `psi` compares (a class training never predicted
+counts as drift).
 
 ## Synthetic data
 

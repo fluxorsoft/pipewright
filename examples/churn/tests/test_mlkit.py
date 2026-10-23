@@ -170,3 +170,18 @@ def test_multiclass_metrics():
     assert m["_per_class"]["b"] == {"precision": 1.0, "recall": 0.5, "f1": round(2 / 3, 6), "support": 2}
     assert m["f1_macro"] == round((2 / 3 + 2 / 3 + 1) / 3, 6)
     assert m["log_loss"] == round(-np.mean(np.log([0.8, 0.7, 0.6, 0.3])), 6)
+
+
+def test_prediction_drift_on_classes():
+    base = mlkit.class_baseline(["a"] * 50 + ["b"] * 30 + ["c"] * 20)
+    assert base == {"classes": ["a", "b", "c"], "fractions": [0.5, 0.3, 0.2]}
+    assert mlkit.psi(base, ["a"] * 5 + ["b"] * 3 + ["c"] * 2) < 1e-6
+    assert mlkit.psi(base, ["a"] * 2 + ["b"] * 3 + ["c"] * 5) > 0.2
+    assert mlkit.psi(base, ["a"] * 5 + ["b"] * 3 + ["d"] * 2) > 0.2           # a class training never predicted
+    assert mlkit.psi(base, []) == 0.0
+
+
+def test_prediction_drift_on_regression_outputs_uses_quantile_bins():
+    rng = np.random.default_rng(1)
+    base = mlkit.psi_baseline(rng.normal(100, 10, 5000))
+    assert mlkit.psi(base, rng.normal(100, 10, 2000)) < 0.05 and mlkit.psi(base, rng.normal(120, 10, 2000)) > 0.2

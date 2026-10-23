@@ -20,7 +20,8 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   precision_macro, recall_macro, log_loss; regression: rmse, mae, mape, r2, median_absolute_error), checked in
   primary metric, metrics, gates, slice gates, tuning and monitoring. rmse, mae, mape and median_absolute_error are
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
-  split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics` and `multiclass_metrics`.
+  split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
+  `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
 
 ## [1.0.0] - 2026-10-18
 

@@ -374,13 +374,34 @@ def psi_baseline(values, bins: int = 10) -> dict:
     return {"edges": edges, "fractions": _fractions(values, edges)}
 
 
+def class_baseline(values) -> dict:
+    """Training share of each predicted class, for prediction drift on a multiclass model (data.label.task)."""
+    shares = pd.Series(values).dropna().astype(str).value_counts(normalize=True).sort_index()
+    return {"classes": shares.index.tolist(), "fractions": shares.round(6).tolist()}
+
+
+def _class_fractions(values, classes) -> list[float]:
+    """Share of each baseline class, then one share for classes training never predicted."""
+    values = pd.Series(values).dropna().astype(str)
+    counts = values.value_counts()
+    known = [int(counts.get(c, 0)) for c in classes]
+    return (np.asarray([*known, len(values) - sum(known)]) / max(len(values), 1)).round(6).tolist()
+
+
 def _fractions(values, edges) -> list[float]:
     counts = np.bincount(np.searchsorted(np.asarray(edges), values, side="right"), minlength=len(edges) + 1)
     return (counts / max(counts.sum(), 1)).round(6).tolist()
 
 
 def psi(baseline: dict, values) -> float:
-    """Population stability index of `values` against a training baseline. 0.1 = moderate, 0.2+ = large."""
+    """Population stability index of `values` against a training baseline. 0.1 = moderate, 0.2+ = large.
+    A class_baseline compares class shares (a class training never predicted counts in its own bucket)."""
+    if "classes" in baseline:
+        if pd.Series(values).dropna().empty:
+            return 0.0
+        expected = np.clip(np.asarray([*baseline["fractions"], 0.0]), EPS, None)
+        actual = np.clip(np.asarray(_class_fractions(values, baseline["classes"])), EPS, None)
+        return float(np.sum((actual - expected) * np.log(actual / expected)))
     values = pd.to_numeric(pd.Series(values), errors="coerce").dropna().to_numpy()
     if len(values) == 0:
         return 0.0
