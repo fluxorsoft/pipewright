@@ -15,6 +15,12 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
 - **Label maturity window** (D-111): `data.label_source` takes the label from a table of events within
   `window_days` after each row's cut-off, drops rows whose window has not closed by the newest event and records
   that anchor (`data.labels.resolved`). Applied by training's ingest step with `read_source(..., labels=True)`.
+- **Regression and multi-class models** (FR-52): `data.label.task` is `binary` (the default), `multiclass` or
+  `regression`. Each task has its own metrics (multiclass: accuracy, balanced_accuracy, f1_macro, f1_weighted,
+  precision_macro, recall_macro, log_loss; regression: rmse, mae, mape, r2, median_absolute_error), checked in
+  primary metric, metrics, gates, slice gates, tuning and monitoring. rmse, mae, mape and median_absolute_error are
+  lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
+  split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics` and `multiclass_metrics`.
 
 ## [1.0.0] - 2026-10-18
 

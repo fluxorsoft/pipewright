@@ -17,7 +17,19 @@ from pipewright.synthetic import config as synthetic_config
 from pipewright.synthetic.config import DEFAULTS as SYNTHETIC_DEFAULTS
 
 METRICS = {"auc", "pr_auc", "accuracy", "f1", "precision", "recall", "log_loss", "brier", "calibration_error"}
-LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error"}
+# data.label.task (FR-52). binary is the default, and its metrics are METRICS: a 1.0 use case resolves unchanged.
+TASK_METRICS = {
+    "binary": METRICS,
+    "multiclass": {"accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "precision_macro", "recall_macro",
+                   "log_loss"},
+    "regression": {"rmse", "mae", "mape", "r2", "median_absolute_error"},
+}
+# Used when the use case sets none: primary metric, metrics.
+TASK_DEFAULTS = {
+    "multiclass": ("f1_macro", ["accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "log_loss"]),
+    "regression": ("rmse", ["rmse", "mae", "r2"]),
+}
+LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error"}
 TIME_TYPES = {"date", "timestamp"}
 RETRAINING_MODES = ("off", "propose", "candidate")
 
@@ -74,10 +86,16 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
             return False
         return True
 
-    # ---- label, split
+    # ---- label, task, split
     label = (data.get("label") or {}).get("column")
     if label:
         known(label, "data.label.column")
+    task = (data.get("label") or {}).get("task", "binary")
+    if task not in TASK_METRICS:
+        problems.append(f"data.label.task {task!r} is not one of {', '.join(TASK_METRICS)}")
+        task = "binary"
+    metrics_known = TASK_METRICS[task]
+    _task_defaults(task, spec, data, evaluation)
     for col in (contract or {}).get("unique", []):
         known(col, "data.contract.unique")
     split = data["split"]
@@ -90,6 +108,8 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
             problems.append(f"data.split.time_column {tc!r} must be a date or timestamp column")
     if split["strategy"] == "stratified" and not label and contract:
         problems.append("data.split: strategy stratified needs data.label.column")
+    if split["strategy"] == "stratified" and task == "regression":
+        problems.append("data.split: strategy stratified needs a class label; use random or time for regression")
     if split["test_fraction"] + split.get("validation_fraction", 0) >= 1:
         problems.append("data.split: test_fraction + validation_fraction must be below 1")
 
@@ -120,8 +140,10 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         training["experiment"]["name"] = usecase
     tuning = training["tuning"]
     tuning["metric"] = tuning["metric"] or evaluation["primary_metric"]
-    if tuning["metric"] not in METRICS:
-        problems.append(f"training.tuning.metric {tuning['metric']!r} is not one of {sorted(METRICS)}")
+    if tuning["metric"] not in metrics_known:
+        problems.append(f"training.tuning.metric {tuning['metric']!r} is not one of {sorted(metrics_known)}")
+    if task != "binary" and not ((spec.get("training") or {}).get("tuning") or {}).get("goal"):
+        tuning["goal"] = "minimize" if tuning["metric"] in LOWER_IS_BETTER else "maximize"
     if tuning["enabled"]:
         if not tuning["search_space"]:
             problems.append("training.tuning: enabled but search_space is empty")
@@ -143,23 +165,28 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
             problems.append(f"{where}: type {dim['type']} needs values")
 
     # ---- evaluation
-    if evaluation["primary_metric"] not in METRICS:
-        problems.append(f"evaluation.primary_metric {evaluation['primary_metric']!r} is not one of {sorted(METRICS)}")
+    of = (f"is not one of {sorted(METRICS)}" if task == "binary"           # the 1.0 message
+          else f"is not a {task} metric ({', '.join(sorted(metrics_known))})")
+    if evaluation["primary_metric"] not in metrics_known:
+        problems.append(f"evaluation.primary_metric {evaluation['primary_metric']!r} {of}")
     for m in evaluation["metrics"]:
-        if m not in METRICS:
-            problems.append(f"evaluation.metrics: {m!r} is not one of {sorted(METRICS)}")
+        if m not in metrics_known:
+            problems.append(f"evaluation.metrics: {m!r} {of}")
     for g in evaluation["gates"]:
-        if g["metric"] not in METRICS:
-            problems.append(f"evaluation.gates: {g['metric']!r} is not one of {sorted(METRICS)}")
+        if g["metric"] not in metrics_known:
+            problems.append(f"evaluation.gates: {g['metric']!r} {of}")
         if "min" not in g and "max" not in g:
             problems.append(f"evaluation.gates: {g['metric']} needs min or max")
+    for g in evaluation["slice_gates"]:
+        if task != "binary" and g["metric"] not in metrics_known:
+            problems.append(f"evaluation.slice_gates: {g['metric']!r} {of}")
     # Every metric a gate or the champion comparison uses must be computed.
     needed = {evaluation["primary_metric"], *(g["metric"] for g in evaluation["gates"]),
               *(g["metric"] for g in evaluation["slice_gates"])}
     champion = evaluation["champion"]
     champion["metric"] = champion["metric"] or evaluation["primary_metric"]
     needed.add(champion["metric"])
-    evaluation["metrics"] = sorted(set(evaluation["metrics"]) | (needed & METRICS))
+    evaluation["metrics"] = sorted(set(evaluation["metrics"]) | (needed & metrics_known))
     evaluation["lower_is_better"] = sorted(m for m in evaluation["metrics"] if m in LOWER_IS_BETTER)
     for col in evaluation["slices"]:
         known(col, "evaluation.slices")
@@ -177,6 +204,8 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
             problems.append(f"monitoring.drift.features: {col!r} is not a model feature")
     perf = monitoring["performance"]
     perf["metric"] = perf["metric"] or evaluation["primary_metric"]
+    if task != "binary" and perf["metric"] not in metrics_known:
+        problems.append(f"monitoring.performance.metric {perf['metric']!r} {of}")
     if perf["enabled"] and not perf.get("labels"):
         problems.append("monitoring.performance: enabled but labels (table, key, label) are not set")
     monitoring_on = drift["enabled"] or monitoring["prediction_drift"]["enabled"] or perf["enabled"]
@@ -219,6 +248,20 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         del ml["synthetic"]
 
     return copy.deepcopy(ml)
+
+
+def _task_defaults(task: str, spec: dict, data: dict, evaluation: dict) -> None:
+    """Defaults for a regression or multi-class use case where the use case sets none. Binary keeps DEFAULTS."""
+    if task == "binary":
+        return
+    given = spec.get("evaluation") or {}
+    primary, metrics = TASK_DEFAULTS[task]
+    if "primary_metric" not in given:
+        evaluation["primary_metric"] = primary
+    if "metrics" not in given:
+        evaluation["metrics"] = list(metrics)
+    if task == "regression" and "strategy" not in ((spec.get("data") or {}).get("split") or {}):
+        data["split"]["strategy"] = "random"        # stratified needs classes
 
 
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")

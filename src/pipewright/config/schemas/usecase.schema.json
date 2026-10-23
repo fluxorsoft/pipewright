@@ -315,7 +315,8 @@
           "properties": {
             "column": { "type": "string" },
             "values": { "type": "array" },
-            "positive": {}
+            "positive": {},
+            "task": { "enum": ["binary", "multiclass", "regression"] }
           }
         },
         "split": {

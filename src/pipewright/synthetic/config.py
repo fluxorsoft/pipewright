@@ -148,8 +148,8 @@ def check(ml: dict, columns: dict, label: str | None, known, problems: list[str]
         resolved_candidates.append(c)
     syn["candidates"] = resolved_candidates
     syn["gates"] = gates.effective(syn["purpose"], syn["gates"], problems)
-    if not label:
-        syn["gates"].pop("tstr_drop", None)           # utility needs a label to train on
+    if not label or (ml["data"].get("label") or {}).get("task", "binary") != "binary":
+        syn["gates"].pop("tstr_drop", None)           # utility trains a binary classifier on the label
     if syn["evaluation"]["attacks"] < 100:
         problems.append(f"{where}.evaluation.attacks: at least 100 (fewer gives confidence bounds too wide to gate)")
 

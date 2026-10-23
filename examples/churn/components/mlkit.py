@@ -12,7 +12,7 @@ import random
 import numpy as np
 import pandas as pd
 
-LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error"}
+LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error"}
 EPS = 1e-4
 
 
@@ -223,6 +223,57 @@ def compute_metrics(y, p, threshold: float, names) -> dict:
         v = every[n]()
         out[n] = None if v is None else round(float(v), 6)
     out["_confusion"] = {"tp": tp, "fp": fp, "fn": fn, "tn": tn}
+    return out
+
+
+def regression_metrics(y, p, names) -> dict:
+    """data.label.task regression: y observed values, p predictions."""
+    y, p = np.asarray(y, dtype=float), np.asarray(p, dtype=float)
+    err = p - y
+    nonzero = y != 0
+    total = float(((y - y.mean()) ** 2).sum()) if len(y) else 0.0
+    every = {
+        "rmse": lambda: float(np.sqrt(np.mean(err ** 2))) if len(y) else None,
+        "mae": lambda: float(np.mean(np.abs(err))) if len(y) else None,
+        "median_absolute_error": lambda: float(np.median(np.abs(err))) if len(y) else None,
+        # rows with y == 0 have no percentage error; None when every row is 0
+        "mape": lambda: float(np.mean(np.abs(err[nonzero] / y[nonzero]))) if nonzero.any() else None,
+        "r2": lambda: 1 - float((err ** 2).sum()) / total if total else None,
+    }
+    return {n: None if (v := every[n]()) is None else round(v, 6) for n in names}
+
+
+def multiclass_metrics(y, proba: pd.DataFrame, names) -> dict:
+    """data.label.task multiclass: y observed classes, proba one column of probabilities per class."""
+    classes = list(proba.columns)
+    y = np.asarray(y).astype(str)
+    p = np.clip(proba.to_numpy(dtype=float), 1e-7, 1.0)
+    pred = np.asarray([str(c) for c in classes])[p.argmax(axis=1)]
+    per_class = {}
+    for c in map(str, classes):
+        tp = int(((pred == c) & (y == c)).sum())
+        fp, fn = int(((pred == c) & (y != c)).sum()), int(((pred != c) & (y == c)).sum())
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        per_class[c] = {"precision": precision, "recall": recall, "f1": f1, "support": tp + fn}
+    seen = [v for v in per_class.values() if v["support"]]
+    support = sum(v["support"] for v in seen)
+    index = {str(c): i for i, c in enumerate(classes)}
+    known = np.asarray([v in index for v in y])
+    every = {
+        "accuracy": lambda: float((pred == y).mean()) if len(y) else None,
+        "balanced_accuracy": lambda: float(np.mean([v["recall"] for v in seen])) if seen else None,
+        "f1_macro": lambda: float(np.mean([v["f1"] for v in seen])) if seen else None,
+        "f1_weighted": lambda: sum(v["f1"] * v["support"] for v in seen) / support if support else None,
+        "precision_macro": lambda: float(np.mean([v["precision"] for v in seen])) if seen else None,
+        "recall_macro": lambda: float(np.mean([v["recall"] for v in seen])) if seen else None,
+        "log_loss": lambda: float(-np.mean(np.log(p[known.nonzero()[0], [index[v] for v in y[known]]])))
+        if known.any() else None,
+    }
+    out = {n: None if (v := every[n]()) is None else round(float(v), 6) for n in names}
+    out["_per_class"] = {c: {k: round(v, 6) if isinstance(v, float) else v for k, v in m.items()}
+                         for c, m in per_class.items()}
     return out
 
 

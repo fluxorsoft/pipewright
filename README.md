@@ -318,6 +318,23 @@ data:
   applies it (`read_source(..., labels=True)`); scoring never does. The key and cut-off default to
   `data.features_from.entity`.
 
+## Regression and multi-class models
+
+`data.label.task` says what the model predicts: `binary` (the default, as in 1.0), `multiclass` or `regression`
+(new in 1.1). The task decides which metrics evaluation, gates, the champion comparison, tuning and monitoring
+accept, and the defaults when the use case names none:
+
+| Task | Metrics | Default primary metric |
+|---|---|---|
+| binary | auc, pr_auc, accuracy, f1, precision, recall, log_loss, brier, calibration_error | auc |
+| multiclass | accuracy, balanced_accuracy, f1_macro, f1_weighted, precision_macro, recall_macro, log_loss | f1_macro |
+| regression | rmse, mae, mape, r2, median_absolute_error | rmse |
+
+Errors (rmse, mae, mape, median_absolute_error, log_loss) are lower-is-better: a gate on them takes a `max`, the
+champion must have a lower value, and tuning minimises them. A regression use case splits at random unless
+`data.split.strategy` says `time`; stratified needs classes. The example's `mlkit.py` has `regression_metrics` and
+`multiclass_metrics` (with per-class precision, recall and f1) next to the binary `compute_metrics`.
+
 ## Synthetic data
 
 Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,

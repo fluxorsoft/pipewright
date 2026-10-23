@@ -147,3 +147,26 @@ def test_slice_keys_are_readable():
     df = pd.DataFrame({"plan": [1.0, 1.0, 12.0, 12.0], "y": [0, 1, 0, 1], "p": [0.2, 0.8, 0.3, 0.6]})
     out = mlkit.slice_metrics(df, "y", "p", ["plan"], 0.5, ["auc"])
     assert set(out["plan"]) == {"1", "12"} and out["plan"]["1"] == {"rows": 2, "auc": 1.0}
+
+
+# ---------------------------------------------------- regression and multiclass (FR-52) --
+
+def test_regression_metrics():
+    m = mlkit.regression_metrics([1.0, 2.0, 3.0, 0.0], [1.5, 2.0, 2.0, 0.5], ["rmse", "mae", "mape", "r2",
+                                                                              "median_absolute_error"])
+    assert m["mae"] == 0.5 and m["median_absolute_error"] == 0.5
+    assert m["rmse"] == round(np.sqrt((0.25 + 0 + 1 + 0.25) / 4), 6)
+    assert m["mape"] == round((0.5 + 0 + 1 / 3) / 3, 6)            # the y == 0 row has no percentage error
+    assert m["r2"] == round(1 - 1.5 / 5.0, 6)
+    assert mlkit.better("rmse", 0.4, 0.5) and not mlkit.better("r2", 0.4, 0.5)
+
+
+def test_multiclass_metrics():
+    proba = pd.DataFrame({"a": [0.8, 0.1, 0.2, 0.6], "b": [0.1, 0.7, 0.2, 0.3], "c": [0.1, 0.2, 0.6, 0.1]})
+    m = mlkit.multiclass_metrics(["a", "b", "c", "b"], proba, ["accuracy", "balanced_accuracy", "f1_macro",
+                                                               "f1_weighted", "log_loss"])
+    assert m["accuracy"] == 0.75                                    # the last row is predicted a, observed b
+    assert m["balanced_accuracy"] == round((1 + 0.5 + 1) / 3, 6)
+    assert m["_per_class"]["b"] == {"precision": 1.0, "recall": 0.5, "f1": round(2 / 3, 6), "support": 2}
+    assert m["f1_macro"] == round((2 / 3 + 2 / 3 + 1) / 3, 6)
+    assert m["log_loss"] == round(-np.mean(np.log([0.8, 0.7, 0.6, 0.3])), 6)
