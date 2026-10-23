@@ -3,6 +3,19 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [Unreleased] (1.1.0)
+
+Additive: a 1.0 use case, manifest and release behave exactly as before.
+
+### Added
+
+- **Reproducible runs** (D-110): `data.snapshot_table` names the table where the ingest step keeps the rows each run
+  read; `write_snapshot()` in the component runtime writes them with the run; `pipewright run --replay <run_id>`
+  trains again on exactly those rows. Events `data.snapshot.written` and `data.snapshot.replayed`.
+- **Label maturity window** (D-111): `data.label_source` takes the label from a table of events within
+  `window_days` after each row's cut-off, drops rows whose window has not closed by the newest event and records
+  that anchor (`data.labels.resolved`). Applied by training's ingest step with `read_source(..., labels=True)`.
+
 ## [1.0.0] - 2026-10-18
 
 First release, on GitHub and on PyPI (`pipewright-mlops`). First published on GitHub on 2026-10-17 and re-cut to

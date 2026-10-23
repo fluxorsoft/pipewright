@@ -376,12 +376,26 @@ def cmd_run(args) -> int:
         return 0
     found = _selected(Path(args.root), [args.usecase])
     source_uri = args.source_uri
+    replay = getattr(args, "replay", None)
+    if replay:
+        from pipewright.runs import sources
+
+        if source_uri or args.schedule:
+            raise ConfigError("--replay reads an earlier run's snapshot: give it without --source-uri or --schedule")
+        if not (resolve_usecase(found[args.usecase], env).ml.get("data") or {}).get("snapshot_table"):
+            raise ConfigError(f"{args.usecase} sets no data.snapshot_table in {env.name}: there is no snapshot to "
+                              "replay")
+        try:
+            source_uri = sources.snapshot_uri(replay)
+        except ValueError as e:
+            raise ConfigError(str(e)) from None
     if args.pipeline == "synthetic" and not source_uri and not args.schedule:
         synthetic = resolve_usecase(found[args.usecase], env).synthetic or {}
         source_uri = synthetic.get("source_uri")          # the data the engine learns from, as configured
         if not source_uri:
             raise ConfigError(f"{args.usecase} has no synthetic pipeline in {env.name} (synthetic.enabled)")
-    result = launch.run(env, launch.body(args.usecase, args.pipeline, source_uri, args.schedule, args.run_key))
+    result = launch.run(env, launch.body(args.usecase, args.pipeline, source_uri, args.schedule, args.run_key,
+                                         replay=bool(replay)))
     if result.get("status") == "requested":
         print(f"requested: {result['usecase']} {result['pipeline']} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")
@@ -729,6 +743,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--pipeline", help="training (default), inference or synthetic")
     sp.add_argument("--source-uri", help="gs:// path of the data")
     sp.add_argument("--schedule", help="run one of the use case's schedules now")
+    sp.add_argument("--replay", metavar="RUN_ID",
+                    help="train on exactly the rows an earlier run read (its snapshot in data.snapshot_table)")
     sp.add_argument("--run-key", help="idempotency key: the same key never starts a second run")
     sp.add_argument("--print-launcher-url", action="store_true", help="print the launcher URL and exit")
     sp.set_defaults(func=cmd_run)

@@ -102,6 +102,13 @@ data.split.time_column: The column that orders rows in time; needed with strateg
 data.split.test_fraction: The share of rows held back for testing.
 data.split.validation_fraction: The share of rows held back for validation during training.
 data.split.seed: The random seed, so a split can be repeated.
+data.snapshot_table: "The table, in outputs.bigquery.tables, where the ingest step keeps a copy of exactly what each run read, tagged with run_id (its schema needs run_id, source_uri and ingested_at). `pipewright run --replay <run_id>` reads those rows again, so a rerun of the same release trains on the same data."
+data.label_source: "Take the label from a table of events instead of the run's source: a row is 1 when an event for its key falls within window_days after its cut-off, otherwise 0. Rows whose window has not closed by the newest event are dropped, 1s and 0s alike. Applied by training's ingest step (read_source with labels=True)."
+data.label_source.table: "The label events: bq://project.dataset.table, with the key columns and a time column. The runner needs read access."
+data.label_source.key: The columns that match an event to a row, named the same in both tables. Default data.features_from.entity.columns.
+data.label_source.time_column: When each event happened, a date or timestamp column of the label table.
+data.label_source.window_days: "How many days after a row's cut-off an event still counts, for example 20 for a purchase within 20 days of sign-up."
+data.label_source.cutoff_column: "The row's cut-off in the run's source, a date or timestamp column. Default data.features_from.entity.time_column, else data.split.time_column."
 data.features_from: "Read features from feature tables instead of taking every column from the run's source. The source becomes the entity table: the entity IDs, a cut-off time per row and the label. Each row gets the latest feature values at or before its cut-off, so nothing from after it reaches training."
 data.features_from.entity: The entity table's key and cut-off columns.
 data.features_from.entity.columns: The columns that identify an entity, such as customer_id.

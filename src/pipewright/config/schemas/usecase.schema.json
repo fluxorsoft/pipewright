@@ -329,6 +329,19 @@
             "seed": { "type": "integer" }
           }
         },
+        "snapshot_table": { "type": "string", "minLength": 1 },
+        "label_source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["table", "time_column", "window_days"],
+          "properties": {
+            "table": { "type": "string", "pattern": "^bq://" },
+            "key": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "time_column": { "type": "string" },
+            "window_days": { "type": "integer", "minimum": 1 },
+            "cutoff_column": { "type": "string" }
+          }
+        },
         "features_from": {
           "type": "object",
           "additionalProperties": false,

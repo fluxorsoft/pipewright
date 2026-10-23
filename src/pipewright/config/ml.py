@@ -94,6 +94,10 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         problems.append("data.split: test_fraction + validation_fraction must be below 1")
 
     _features_from(data.get("features_from"), columns, label, known, problems)
+    _label_source(data, columns, label, known, problems)
+    snapshot = data.get("snapshot_table")
+    if snapshot and table_names and snapshot not in table_names:
+        problems.append(f"data.snapshot_table {snapshot!r} is not in outputs.bigquery.tables")
 
     # ---- features
     personal = set(protection["personal_data_columns"])
@@ -229,6 +233,36 @@ def feature_columns(features_from: dict | None) -> dict[str, tuple[int, str]]:
         for col in src.get("features") or []:
             out.setdefault(src.get("prefix", "") + col, (i, col))
     return out
+
+
+def _label_source(data: dict, columns: dict, label: str | None, known, problems: list[str]) -> None:
+    """data.label_source: the label comes from a table of events within a window after each row's cut-off. Fills
+    in the key and cut-off column defaults, so the runtime receives them resolved."""
+    spec = data.get("label_source")
+    if not spec:
+        return
+    where = "data.label_source"
+    if not label:
+        problems.append(f"{where} needs data.label.column (the column it fills)")
+    entity = (data.get("features_from") or {}).get("entity") or {}
+    key = spec.get("key") or entity.get("columns")
+    if not key:
+        problems.append(f"{where}.key: give the columns that match an event to a row (no data.features_from to "
+                        "take them from)")
+    else:
+        spec["key"] = list(key)
+        for col in key:
+            known(col, f"{where}.key")
+            if col == label:
+                problems.append(f"{where}.key: {col!r} is the label")
+    cut = spec.get("cutoff_column") or entity.get("time_column") or (data.get("split") or {}).get("time_column")
+    if not cut:
+        problems.append(f"{where}.cutoff_column: give the row's cut-off column (no data.features_from.entity."
+                        "time_column or data.split.time_column to take it from)")
+    else:
+        spec["cutoff_column"] = cut
+        if known(cut, f"{where}.cutoff_column") and columns and columns[cut]["type"] not in TIME_TYPES:
+            problems.append(f"{where}.cutoff_column {cut!r} must be a date or timestamp column")
 
 
 def _features_from(spec: dict | None, columns: dict, label: str | None, known, problems: list[str]) -> None:

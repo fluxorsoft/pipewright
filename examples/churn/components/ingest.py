@@ -28,18 +28,25 @@ def ingest_data(
     ml_config: dict,
     raw_data: dsl.Output[dsl.Dataset],
 ) -> int:
-    """Reads the source, keeps a copy in `raw_table` (columns the table knows) and emits a Parquet Dataset."""
+    """Reads the source, keeps a copy in `raw_table` (columns the table knows) and emits a Parquet Dataset.
+
+    With data.snapshot_table the copy is the run's snapshot, so `pipewright run --replay <run_id>` can train on
+    exactly these rows again; with data.label_source the label comes from its table, within its window."""
     import logging
     from datetime import datetime, timezone
 
-    from pipewright_runtime import read_source, write_table
+    from pipewright_runtime import read_source, write_snapshot, write_table
 
     logging.basicConfig(level=logging.INFO)
-    df = read_source(source_uri, project, ml_config, run_id)
+    df = read_source(source_uri, project, ml_config, run_id, labels=True)
     logging.info("read %d rows / %d columns from %s", len(df), df.shape[1], source_uri)
     df.to_parquet(raw_data.path, index=False)
     raw_data.metadata.update({"source_uri": source_uri, "rows": len(df), "columns": list(df.columns)})
 
+    if (ml_config.get("data") or {}).get("snapshot_table"):
+        where = write_snapshot(df, ml_config, project, bq_dataset, run_id, source_uri)
+        logging.info("snapshot of %d rows in %s", len(df), where)
+        return len(df)
     rows = df.copy()
     rows["run_id"] = run_id
     rows["source_uri"] = source_uri

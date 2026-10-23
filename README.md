@@ -295,6 +295,29 @@ source that resolves to the same tables: `- feature_group: customer_profile` wit
 from the Feature Registry at each run. `pipewright new-usecase --from features` starts from an example with two
 feature tables.
 
+## Reproducible runs and label windows
+
+Two optional keys in `config/data.yaml`, both off unless set (new in 1.1):
+
+```yaml
+data:
+  snapshot_table: churn_raw_customers   # in outputs.bigquery.tables, with run_id, source_uri and ingested_at
+  label_source:                          # the label from a table of events, within a window
+    table: bq://${project}.sales.purchases
+    time_column: purchased_at
+    window_days: 20                      # a purchase within 20 days of the row's cut-off is a 1
+```
+
+- **Replay a run:** the ingest step writes the rows each run read to `snapshot_table`, tagged with the run
+  (`write_snapshot`), and `pipewright run --replay <run_id>` trains again on exactly those rows, whatever has changed
+  in the source since. Events `data.snapshot.written` and `data.snapshot.replayed` record both.
+- **Labels that are still maturing are not negatives:** a row is 1 when the label table has an event for its key
+  within `window_days` after its cut-off. Rows whose window has not closed by the newest event are dropped, 1s and
+  0s alike, so a sign-up from last week is not counted as a 0. The anchor is the newest event, not today, so late
+  data never turns real buyers into 0s; `data.labels.resolved` records it with the run. Training's ingest step
+  applies it (`read_source(..., labels=True)`); scoring never does. The key and cut-off default to
+  `data.features_from.entity`.
+
 ## Synthetic data
 
 Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,

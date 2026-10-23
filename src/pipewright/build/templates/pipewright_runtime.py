@@ -4,8 +4,11 @@
     from pipewright_runtime import emit_event, log, read_source, write_table
 
 read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or view; with data.features_from, the
-              source is the entity table and features are joined point in time from the feature tables
+              source is the entity table and features are joined point in time from the feature tables; with
+              labels=True and data.label_source, the label comes from the label table within its window; a
+              snapshot://<run_id> source replays the rows an earlier run read (data.snapshot_table)
 write_table   writes rows to the use case's store (outputs.store): BigQuery, Parquet on GCS, or both
+write_snapshot  writes the rows a run read to data.snapshot_table, tagged with the run, so the run can be replayed
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
 ray_cluster   a Ray on Agent Platform cluster for this step of this run (steps.<step>.ray), deleted when the block ends
@@ -103,22 +106,36 @@ def bigquery_client(project: str, ml_config: dict | None = None):
     return bigquery.Client(project=project, default_query_job_config=config)
 
 
-def read_source(source_uri: str, project: str, ml_config: dict | None = None, run_id: str | None = None):
+def read_source(source_uri: str, project: str, ml_config: dict | None = None, run_id: str | None = None,
+                labels: bool = False):
     """A run's input as a DataFrame. gs://.../*.parquet is read as Parquet, any other gs:// object as CSV;
     bq:// reads a table or a view with a query, so filtering and joins can live in a view.
 
     With data.features_from in ml_config the source is the entity table (bq:// only) and each row gets the latest
     values of the named features at or before its cut-off time; a `data.features.resolved` event records what was
-    read."""
+    read.
+
+    labels=True (training's ingest step) with data.label_source: the label comes from the label table, 1 when an
+    event falls within the window after the row's cut-off, and rows whose window has not closed by the newest label
+    event are dropped; a `data.labels.resolved` event records the anchor. Without data.label_source it does nothing.
+
+    snapshot://<run_id> replays exactly the rows that run read, from data.snapshot_table: no feature or label join
+    runs again, since the snapshot already holds their result."""
     import pandas as pd
 
-    features_from = ((ml_config or {}).get("data") or {}).get("features_from")
-    if features_from and not source_uri.startswith("bq://"):
-        raise ValueError(f"{source_uri!r}: with data.features_from the run's source is the entity table, a bq:// "
-                         "table or view")
+    data = (ml_config or {}).get("data") or {}
+    features_from = data.get("features_from")
+    label_source = data.get("label_source") if labels else None
+    if source_uri.startswith(SNAPSHOT_SCHEME):
+        return _read_snapshot(source_uri, project, ml_config or {}, run_id)
+    if (features_from or label_source) and not source_uri.startswith("bq://"):
+        what = "data.features_from" if features_from else "data.label_source"
+        raise ValueError(f"{source_uri!r}: with {what} the run's source is the entity table, a bq:// table or view")
     if source_uri.startswith("bq://"):
         ref = bq_table(source_uri, project)
         client = bigquery_client(project, ml_config)
+        if label_source:
+            ref = _labelled_entities(client, ref, project, label_source, data, ml_config or {}, run_id)
         if features_from:
             df = _read_with_features(client, ref, project, features_from, ml_config or {}, run_id)
         else:
@@ -134,6 +151,129 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None, ru
         payload = storage.Client(project=project).bucket(bucket).blob(name).download_as_bytes()
         return pd.read_parquet(io.BytesIO(payload)) if name.endswith(".parquet") else pd.read_csv(io.BytesIO(payload))
     raise ValueError(f"{source_uri!r}: source_uri must start with gs:// or bq://")
+
+
+# ---------------------------------------------------- labels and snapshots --
+# A label source (data.label_source) turns events into labels: a row is 1 when the label table has an event for its
+# key at or after the row's cut-off and before cut-off + window_days, else 0. A row whose window ends after the
+# newest event in the label table is still maturing: it is dropped, 1s and 0s alike. The anchor is that newest
+# event, not today, so late-arriving events never turn real positives into 0s. A `date` cut-off is the start of that
+# day (UTC), as for features.
+#
+# A run's snapshot (data.snapshot_table) is the per-run copy of what its ingest step read, tagged with run_id;
+# snapshot://<run_id> reads exactly those rows back.
+
+SNAPSHOT_SCHEME = "snapshot://"
+SNAPSHOT_COLUMNS = ("run_id", "source_uri", "ingested_at")      # added by write_snapshot, dropped on replay
+_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def label_query(entity_ref: str, label_source: dict, label_column: str, anchor: str, project: str) -> str:
+    """The SQL for read_source(labels=True): the entity rows whose window has closed by `anchor` (an ISO timestamp,
+    the newest label event), with `label_column` from the label table."""
+    table = bq_table(label_source["table"], project)
+    keys, cut, days = label_source["key"], label_source["cutoff_column"], int(label_source["window_days"])
+    t = f"CAST(l.{_q(label_source['time_column'])} AS TIMESTAMP)"
+    c = f"CAST(e.{_q(cut)} AS TIMESTAMP)"
+    match = " AND ".join(f"l.{_q(k)} = e.{_q(k)}" for k in keys)
+    return (f"SELECT e.*, IF(EXISTS(SELECT 1 FROM `{table}` AS l WHERE {match} AND {t} >= {c} "
+            f"AND {t} < TIMESTAMP_ADD({c}, INTERVAL {days} DAY)), 1, 0) AS {_q(label_column)}\n"
+            f"FROM `{entity_ref}` AS e\n"
+            f"WHERE TIMESTAMP_ADD({c}, INTERVAL {days} DAY) <= TIMESTAMP '{anchor}'")
+
+
+def _labelled_entities(client, entity_ref: str, project: str, label_source: dict, data: dict, ml_config: dict,
+                       run_id: str | None) -> str:
+    """Runs the label query and returns the table holding its result (the query's own result table), so the
+    feature join, when there is one, reads it like any entity table."""
+    label_column = (data.get("label") or {}).get("column")
+    if not label_column:
+        raise ValueError("data.label_source needs data.label.column")
+    columns = [f.name for f in client.get_table(entity_ref).schema]
+    if label_column in columns:
+        raise ValueError(f"{entity_ref} already has the label column {label_column!r}: with data.label_source the "
+                         "label comes from the label table")
+    for col in [*label_source["key"], label_source["cutoff_column"]]:
+        if col not in columns:
+            raise ValueError(f"{entity_ref} has no column {col!r} (data.label_source)")
+    table = bq_table(label_source["table"], project)
+    tcol = _q(label_source["time_column"])
+    row = list(client.query(f"SELECT MAX(CAST({tcol} AS TIMESTAMP)) AS anchor FROM `{table}`").result())[0]
+    if row["anchor"] is None:
+        raise ValueError(f"{table} has no label events: nothing to anchor the label window on")
+    anchor = row["anchor"].isoformat()
+    total = list(client.query(f"SELECT COUNT(*) AS n FROM `{entity_ref}`").result())[0]["n"]
+    job = client.query(label_query(entity_ref, label_source, label_column, anchor, project))
+    job.result()
+    dest = job.destination
+    ref = f"{dest.project}.{dest.dataset_id}.{dest.table_id}"
+    counts = list(client.query(f"SELECT COUNT(*) AS n, COUNTIF({_q(label_column)} = 1) AS positives "
+                               f"FROM `{ref}`").result())[0]
+    record = {"entity_table": entity_ref, "label_table": table, "key": label_source["key"],
+              "time_column": label_source["time_column"], "cutoff_column": label_source["cutoff_column"],
+              "window_days": int(label_source["window_days"]), "anchor": anchor, "query_job": job.job_id,
+              "entity_rows": int(total), "rows": int(counts["n"]), "positives": int(counts["positives"]),
+              "dropped_open_window": int(total) - int(counts["n"])}
+    log(f"labels from {table}: {record['rows']} of {total} rows have a closed {record['window_days']}-day window "
+        f"(anchor {anchor}), {record['positives']} positive", ml_config, run_id=run_id)
+    emit_event("data.labels.resolved", ml_config, run_id, **record)
+    return ref
+
+
+def snapshot_table_ref(ml_config: dict, project: str) -> str:
+    """project.dataset.table of data.snapshot_table, in the use case's dataset."""
+    table = ((ml_config.get("data") or {}).get("snapshot_table"))
+    if not table:
+        raise ValueError(f"{ml_config.get('usecase')} sets no data.snapshot_table: there is no snapshot to replay")
+    dataset = (ml_config.get("platform") or {}).get("bigquery_dataset")
+    return f"{project}.{dataset}.{table}"
+
+
+def _read_snapshot(source_uri: str, project: str, ml_config: dict, run_id: str | None):
+    from google.cloud import bigquery
+
+    replayed = source_uri.removeprefix(SNAPSHOT_SCHEME)
+    if not _RUN_ID.match(replayed):
+        raise ValueError(f"{source_uri!r} is not snapshot://<run id>")
+    if ((ml_config.get("outputs") or {}).get("store") or "bigquery") == "gcs":
+        raise ValueError("replaying a snapshot needs the BigQuery store (outputs.store bigquery or both)")
+    ref = snapshot_table_ref(ml_config, project)
+    client = bigquery_client(project, ml_config)
+    columns = [f.name for f in client.get_table(ref).schema if f.name not in SNAPSHOT_COLUMNS]
+    job = client.query(f"SELECT {', '.join(_q(c) for c in columns)} FROM `{ref}` WHERE `run_id` = @run_id",
+                       job_config=bigquery.QueryJobConfig(query_parameters=[
+                           bigquery.ScalarQueryParameter("run_id", "STRING", replayed)]))
+    df = job.to_dataframe(create_bqstorage_client=False)
+    if df.empty:
+        raise ValueError(f"no rows of run {replayed} in {ref}: nothing to replay")
+    for col in df.columns:
+        if str(df[col].dtype) == "dbdate":
+            import pandas as pd
+
+            df[col] = pd.to_datetime(df[col]).dt.strftime("%Y-%m-%d")
+    emit_event("data.snapshot.replayed", ml_config, run_id, replayed_run=replayed, table=ref, rows=len(df),
+               query_job=job.job_id)
+    return df
+
+
+def write_snapshot(rows, ml_config: dict, project: str, dataset: str, run_id: str, source_uri: str) -> list[str]:
+    """Writes the rows a run read to data.snapshot_table with run_id, source_uri and ingested_at, so
+    `pipewright run --replay <run_id>` can read exactly these rows again. Returns where they went."""
+    import pandas as pd
+
+    table = (ml_config.get("data") or {}).get("snapshot_table")
+    if not table:
+        raise ValueError(f"{ml_config.get('usecase')} sets no data.snapshot_table")
+    fields = ((ml_config.get("outputs") or {}).get("tables") or {}).get(table) or []
+    missing = [c for c in SNAPSHOT_COLUMNS if c not in {f.get("name") for f in fields}]
+    if missing:
+        raise ValueError(f"data.snapshot_table {table}: its schema needs the columns {', '.join(missing)}")
+    df = (rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))).copy()
+    df["run_id"], df["source_uri"], df["ingested_at"] = run_id, source_uri, datetime.now(timezone.utc)
+    where = write_table(table, df, ml_config, project, dataset, run_id)
+    emit_event("data.snapshot.written", ml_config, run_id, table=table, rows=len(df), source_uri=source_uri,
+               locations=where)
+    return where
 
 
 # ----------------------------------------------------------------- features --

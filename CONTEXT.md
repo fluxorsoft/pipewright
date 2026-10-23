@@ -1044,7 +1044,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Feature Store feature groups as a feature source (D-82) | Built 2026-10-10 |
 | Online feature lookup (FR-51): endpoints read features by entity ID from a Bigtable online store, a toggle per use case and environment | Planned: phase 2 (user, 2026-10-22) |
 | BigQuery ML as a training engine (the design is kept with Pipewright Enterprise): a spike inside an enforced perimeter, then built-in `bqml-training` and `bqml-scoring` pipelines for binary classification; later regression, imported models, promotion by files, online serving, k-means and PCA, forecasting exceptions | Planned: phase 1 (spike and binary classification), phase 2 and 3 (the rest) (user, 2026-10-22) |
-| Per-run data versioning and a label maturity window (section 8.13, open decisions 7 and 8) | Planned: phase 1 (user, 2026-10-22) |
+| Per-run data versioning and a label maturity window (D-110, D-111; `data.snapshot_table`, `pipewright run --replay`, `data.label_source`) | Phase 1: built on branch `phase-1` 2026-10-23, unit-tested; live test next |
 | Regression and multi-class models (FR-52): metrics, gates, champion comparison and drift beyond binary classification | Planned: phase 1 (user, 2026-10-22) |
 | Fairness metrics and gates (FR-53) | Planned: phase 2 (user, 2026-10-22) |
 | Approved image allow-list (FR-54): base images and package indexes per environment, refused at validate and release | Planned: phase 2 (user, 2026-10-22) |
