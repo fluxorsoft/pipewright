@@ -311,6 +311,14 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-87 | **No Iceberg (BigLake) tables.** Row-level deletes at scale are served by BigQuery tables and the feature team's feature tables, following the feature governance guidelines; Parquet outputs keep erasure by rewriting files with generation checks | The Feature Store path covers the need without a second table format | Active (2026-10-11) |
 | D-88 | **Early users first, then a public repository.** 1.0.0 shipped on GitHub to early champions and customers first (packages as release files, images in GitHub Container Registry), with Fluxor engagements to help them adopt it; the repository then opens to everyone (October 2026), and 1.0.0 is on PyPI (`pipewright-mlops`) | Real use with support shapes the product before it is public; it is the ideal path for regulated buyers | Active (2026-10-11) |
 | D-89 | **Kubernetes: `private-gke` (built 2026-10-17); on premises only on demand.** GKE keeps Google Cloud's data services and is private anyway, so it was the next platform. Plain Kubernetes on premises (no Google services) is not planned: it is built only when a large customer base asks, with one reference stack | No customer asks for on premises today; it would mean a second platform under Pipewright (section 8.14) | Active (2026-10-15) |
+| D-104 | **Retraining for a production case runs in test.** Production detects, decides, approves and serves; it never trains | Separation of duties; production keeps only what was tested and approved | Active (2026-10-23, user) |
+| D-105 | **Test reads production data through a read-only grant, never a copy.** The grant covers the specific production source tables or views, is approved by named approver groups (for example the data owner and data protection), is declared in the platform file and granted by Enterprise Terraform. Development stays on sample or synthetic data | One source of truth and no uncontrolled copies; access is reviewable and revocable | Active (2026-10-23, user) |
+| D-106 | **Comparison policy: no worse than the model production serves,** within `evaluation.champion.min_improvement` (a negative value means "no worse than by this much"), on the latest labelled window; the configured gates still apply. The production model is found through production's `promoted_from`, so test holds identical files (EV-15) | Comparing with test's own champion would judge against the wrong model; reusing the existing key keeps 1.0 configuration valid | Active (2026-10-23, user) |
+| D-107 | **Validated in test means a batch scoring run in test** on current data with the candidate, producing a monitoring record within thresholds and no errors; a canary as well only when the use case serves online | A real run on current data is the evidence that matters; a canary needs online traffic | Active (2026-10-23, user) |
+| D-108 | **Health checks after deploy:** online, error rate, latency and prediction drift over a set window from Cloud Monitoring, with automatic rollback of a canary and a person deciding for a full rollout; batch, the first production scoring run's monitoring record within thresholds | Automatic rollback is safe for a canary's small share; a full rollout's rollback is a business decision | Active (2026-10-23, user) |
+| D-109 | **Ground truth reuses `monitoring.performance.labels`** (table, key, label), with an optional label delay and a minimum labelled volume before performance can open a case | The block exists in 1.0; new keys are optional, so 1.0 use cases are unchanged | Active (2026-10-23, user) |
+| D-110 | **A run's data is its ingest snapshot.** The per-run copy the ingest step writes (with `run_id`) is recorded as the run's snapshot, and a replay option reads exactly those rows; every feature query also records its BigQuery time-travel timestamp. The BigQuery ML pipeline writes the same snapshot table | Reproducible beyond time travel's seven days, built once for container and BigQuery ML use cases | Active (2026-10-23, user) |
+| D-111 | **An optional label source with a maturity window** (table, key, event time, window in days, anchored on the newest label event): rows whose window has not closed are dropped, 1s and 0s alike, and the anchor is recorded with the run. Off unless declared | Labels that are still maturing are not negatives; anchoring on the newest event, not today, survives late-arriving data. Additive: 1.0 use cases do not change | Active (2026-10-23, user) |
 
 ---
 
@@ -776,27 +784,20 @@ View show one loop as one record.
 window, rejection or approval, a test inference run, `pipewright promote`, production approval, canary, promote,
 rollback. A person carries the case across.
 
-**Open decisions** (to settle first: the loop is in phase 1 since 2026-10-22, D-85; 7 and 8 are shared with the
-BigQuery ML work):
+**Decisions** (settled 2026-10-23; the loop is in phase 1, D-85; 7 and 8 are shared with the BigQuery ML work):
 
-1. Where retraining for a production case runs (proposed: test).
-2. Production data access for test: a read-only grant or a copy, who approves it, whether dev stays on sample data.
-3. Comparison policy: beat the production model, or no worse than it by more than a margin; on a fixed holdout or
-   the latest labelled window.
-4. What counts as validated in test before promotion: a batch scoring run, a canary, or both.
-5. Health checks after deploy (error rate, latency, prediction distribution); automatic or human rollback.
-6. Ground truth per use case: source, delay, the minimum labelled volume before performance opens a case.
-7. Data versioning: a BigQuery snapshot per run or a recorded time-travel timestamp (seven days of history), so
-   that rerunning the same release reads the same rows. Today a release pins code and configuration, not data: a
-   source view anchored on "now" or on the newest event (for example the latest sale) moves between runs, and the
-   ingest step's per-run copy (`run_id` in the raw table) is the only way back to a run's rows. Raised by a user
-   on 2026-10-21 (a lead scoring model with a label window).
-8. Label maturity window: a label source with its own time column and a window declared in the use case (for
-   example "a purchase within 20 days of sign-up"), so rows whose window has not closed are dropped by
-   Pipewright, 1s and 0s together, anchored on the newest label event rather than on today, and the anchor is
-   recorded with the run. Today the rule lives in training code or the entity view; a pipeline parameter with no
-   default (`parameters`) at least makes a forgotten window fail the release instead of training on a fallback.
-   Raised with item 7 (2026-10-21).
+1. Where retraining for a production case runs: in test (D-104).
+2. Production data access for test: a read-only grant approved by named groups, no copies; dev on sample or
+   synthetic data (D-105).
+3. Comparison policy: no worse than the production model within `evaluation.champion.min_improvement`, on the latest
+   labelled window (D-106).
+4. Validated in test: a batch scoring run on current data within thresholds; a canary too when served online (D-107).
+5. Health checks after deploy: automatic rollback for a canary, a person for a full rollout (D-108).
+6. Ground truth: `monitoring.performance.labels`, with an optional label delay and minimum labelled volume (D-109).
+7. Data versioning: the ingest snapshot per run, a replay option, time-travel timestamps recorded (D-110). Raised by a
+   user on 2026-10-21 (a lead scoring model with a label window).
+8. Label maturity window: an optional label source with a window, anchored on the newest label event (D-111).
+   Raised with item 7.
 
 **Delivery, when started:** phase 1 a manually started loop end to end with rejection and rollback; phase 2
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
