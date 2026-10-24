@@ -12,6 +12,7 @@ At an endpoint no SQL runs: callers send the prepared features (prepare.sql's ou
 from __future__ import annotations
 
 import json
+import re
 
 from pipewright.errors import ConfigError
 
@@ -19,11 +20,17 @@ TOLERANCE = 1e-6
 ROWS = 25
 
 
-def _test_table(uc, labels: dict) -> str:
-    from pipewright.bqml.steps.bqml_runtime import base_name, run_part
+def _part(name: str) -> str:            # as bqml_runtime.base_name and run_part name a run's tables
+    return re.sub(r"[^a-z0-9_]", "_", name.lower())
 
+
+def _q(name: str) -> str:
+    return "`" + name.replace("`", "") + "`"
+
+
+def _test_table(uc, labels: dict) -> str:
     return (f"{uc.platform['project']}.{uc.resources['bigquery_dataset']}."
-            f"{base_name(uc.name)}_bqml_test_{run_part(labels['pipewright-run'])}")
+            f"{_part(uc.name)}_bqml_test_{_part(labels['pipewright-run'])}")
 
 
 def feature_columns(gcp, uc, labels: dict) -> list[str]:
@@ -38,12 +45,11 @@ def feature_columns(gcp, uc, labels: dict) -> list[str]:
 
 def expected_rows(gcp, uc, env, labels: dict, columns: list[str]) -> list[tuple[dict, object]]:
     """(instance, ML.PREDICT's score or label) for up to ROWS test rows, in a fixed order."""
-    from pipewright.bqml.steps.bqml_runtime import q
     from pipewright.gcp.bigquery import query, rows
 
     task = uc.ml["data"]["label"].get("task", "binary")
     score = {"binary": "_pw_score", "regression": "_pw_prediction"}.get(task, "_pw_label")
-    instance = f"TO_JSON_STRING(STRUCT({', '.join(q(c) for c in columns)}))"
+    instance = f"TO_JSON_STRING(STRUCT({', '.join(_q(c) for c in columns)}))"
     sql = (f"SELECT {instance} AS instance, {score} AS expected FROM `{_test_table(uc, labels)}` "
            f"WHERE {score} IS NOT NULL ORDER BY FARM_FINGERPRINT({instance}) LIMIT {ROWS}")
     found = rows(query(gcp, env.project, sql, [], kms_key=env.security.get("bigquery_kms_key")))
