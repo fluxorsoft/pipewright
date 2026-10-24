@@ -199,9 +199,12 @@ def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = No
     if not contract.triggers.get("api"):
         raise BadRequest(f"{contract.usecase} does not accept API runs (triggers.api is false)")
     source = body.get("source_uri")
-    if sources.problem(source):
-        raise BadRequest(sources.problem(source))
     pipeline = body.get("pipeline") or "training"
+    # A replay (`pipewright run --replay`, D-110) trains on an earlier run's snapshot: an API request to the training
+    # pipeline only, never a schedule or a landing.
+    problem = sources.problem(source, allow_snapshot=pipeline == "training")
+    if problem:
+        raise BadRequest(problem)
     extra = tuple(overrides(target_for(contract, pipeline), body).items())
     key = body.get("run_key") or minute_key(now)
     parts = ["api", source, key] if pipeline == "training" else ["api", pipeline, source, key]
