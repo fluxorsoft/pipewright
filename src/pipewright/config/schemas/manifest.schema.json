@@ -763,6 +763,11 @@
             "pattern": "^[a-z][a-z0-9-]{4,61}[a-z0-9]\\.[A-Za-z0-9_]{1,1024}$"
           },
           "description": "project.dataset of each feature dataset the tenant may read; feature tables elsewhere are refused"
+        },
+        "online_store": {
+          "type": "string",
+          "pattern": "^projects/[^/]+/locations/[^/]+/featureOnlineStores/[^/]+$",
+          "description": "the tenant's Feature Store online store (Bigtable): use cases with model.serving.features online read their features from its views (Pipewright 1.1)"
         }
       }
     }

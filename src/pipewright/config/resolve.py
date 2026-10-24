@@ -214,6 +214,10 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         for where, uri in [*named, ("retraining.source_uri", retrain_source)]:
             if uri and uri.startswith("gs://"):
                 problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
+    if model["serving"].get("features") == "online":     # FR-51: only when set; 1.0 use cases resolve as before
+        online = _online_features(ml, env, tenant, problems)
+        if online:
+            ml["online_features"] = online
     if bqml_spec:
         _bqml_section(bqml_spec, ml, model, directory, env, tables, pipelines, triggers, steps_spec(eff),
                       f"{meta['name']}", tenant, problems)
@@ -294,6 +298,42 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                                   .get("datasets")) is not None else {})},
         outputs=outputs, ray_requirements=ray_requirements, synthetic_requirements=synthetic_requirements,
     )
+
+
+def _online_features(ml: dict, env: Environment, tenant: str, problems: list[str]) -> dict | None:
+    """model.serving.features online (FR-51): every model feature from a feature view of the tenant's online store,
+    by one entity key. Carried in ml_config, so the training step packages it with the model (serving.json)."""
+    where = "model.serving.features online"
+    ff = (ml.get("data") or {}).get("features_from")
+    if not ff:
+        problems.append(f"{where}: needs data.features_from (the views serve the same features training read)")
+        return None
+    store = (((env.tenants.get(tenant) or {}).get("features") or {}).get("online_store"))
+    if not store:
+        problems.append(f"{where}: tenant {tenant!r} has no online store in {env.name} "
+                        "(tenants.<tenant>.features.online_store, set by the platform team)")
+    key = (ff.get("entity") or {}).get("columns") or []
+    if len(key) != 1:
+        problems.append(f"{where}: needs one entity column (data.features_from.entity.columns has {len(key)})")
+    views, served = [], set()
+    for i, src in enumerate(ff.get("sources") or []):
+        view = src.get("online_view") or src.get("feature_group")
+        if not view:
+            problems.append(f"{where}: data.features_from.sources[{i}] reads a table: name its feature view "
+                            "(online_view)")
+            continue
+        prefix = src.get("prefix", "")
+        names = {prefix + f: f for f in src.get("features") or []}
+        served |= set(names)
+        views.append({"view": view, "features": names})
+    include = ((ml.get("features") or {}).get("include")) or []
+    missing = [f for f in include if f not in served]
+    if missing:
+        problems.append(f"{where}: model features no view serves: {', '.join(missing)} (with online features, "
+                        "every feature comes from a feature view)")
+    if not store or len(key) != 1:
+        return None
+    return {"store": store, "key": key[0], "views": views}
 
 
 def steps_spec(eff: dict) -> dict:

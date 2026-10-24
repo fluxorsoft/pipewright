@@ -106,9 +106,11 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     share = int(uc.model["serving"].get("canary_percent") or 10) if canary and previous else 100
     log(f"deploying {p.model} v{p.version} to {p.endpoint} on {p.machine} with {share}% of traffic "
         "(takes about 10-20 minutes)")
+    # Online features (FR-51): the endpoint reads the tenant's feature views, so it runs as the tenant's runner.
+    identity = uc.resources["runner_service_account"] if uc.ml.get("online_features") else None
     model.deploy(endpoint=endpoint, deployed_model_display_name=f"{p.model}-v{p.version}", machine_type=p.machine,
                  min_replica_count=max(p.replicas["min"], 1), max_replica_count=p.replicas["max"],
-                 traffic_percentage=share, sync=True)
+                 traffic_percentage=share, sync=True, **({"service_account": identity} if identity else {}))
     if (p.labels or {}).get("pipewright-engine") == "bqml":
         _bqml_parity(uc, env, creds, p, endpoint, previous, log)
     if share < 100:

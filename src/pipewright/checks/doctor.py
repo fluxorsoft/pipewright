@@ -380,6 +380,7 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
                                  "(roles/bigquery.dataViewer on the dataset)"))
 
     _check_feature_tables(uc, env, gcp, report)
+    _check_online_features(uc, gcp, report)
     _check_retraining(uc, env, gcp, report)
     requests_retrain =retrain["enabled"] and {"drift", "performance"} & set(retrain["when"])
     if not requests_retrain or env.launcher.get("run_requests_topic"):
@@ -415,6 +416,49 @@ _CONTRACT_TYPES = {"STRING": {"string"}, "INTEGER": {"integer", "float"}, "INT64
                    "BOOLEAN": {"boolean", "integer"}, "BOOL": {"boolean", "integer"}, "DATE": {"date"},
                    "TIMESTAMP": {"timestamp"}, "DATETIME": {"timestamp"}}
 _TIME_TYPES = {"DATE", "TIMESTAMP", "DATETIME"}
+
+
+ONLINE_STALE_HOURS = 48
+
+
+def _check_online_features(uc: ResolvedUseCase, gcp: Gcp, report: Report) -> None:
+    """model.serving.features online (FR-51): the online store and each feature view exist, and each view's last
+    sync finished within ONLINE_STALE_HOURS (an endpoint would serve older values)."""
+    online = uc.ml.get("online_features")
+    if not online:
+        return
+    from datetime import datetime, timezone
+
+    s = f"Online features of {uc.name}"
+    region = online["store"].split("/")[3]
+    api = f"https://{region}-aiplatform.googleapis.com/v1"
+    store = gcp.get(f"{api}/{online['store']}")
+    if not store.ok:
+        report.add(s, Result(FAIL, "online store", f"{online['store']}: HTTP {store.status}",
+                             "the platform team creates it (tenants.<tenant>.features.online_store)"))
+        return
+    report.add(s, Result(OK, "online store", online["store"].rsplit("/", 1)[-1]
+                         + (" (Bigtable)" if "bigtable" in (store.body or {}) else "")))
+    now = datetime.now(timezone.utc)
+    for view in online["views"]:
+        name = f"{online['store']}/featureViews/{view['view']}"
+        got = gcp.get(f"{api}/{name}")
+        if not got.ok:
+            report.add(s, Result(FAIL, f"view {view['view']}", f"HTTP {got.status}",
+                                 "the features' owners or the platform team create the view"))
+            continue
+        syncs = gcp.get(f"{api}/{name}/featureViewSyncs", pageSize=20)
+        finished = sorted(((x.get("runTime") or {}).get("endTime") for x in (syncs.body or {}).get(
+            "featureViewSyncs", []) if syncs.ok and not (x.get("finalStatus") or {}).get("code")), reverse=True)
+        finished = [f for f in finished if f]
+        if not finished:
+            report.add(s, Result(WARN, f"view {view['view']}", "no finished sync yet: it serves no values",
+                                 "wait for its sync schedule, or start a sync"))
+            continue
+        age = (now - datetime.fromisoformat(finished[0].replace("Z", "+00:00"))).total_seconds() / 3600
+        report.add(s, Result(OK if age <= ONLINE_STALE_HOURS else WARN, f"view {view['view']}",
+                             f"last sync {finished[0][:16]} ({age:.0f} h ago); {len(view['features'])} features",
+                             "" if age <= ONLINE_STALE_HOURS else "values older than the view's sync schedule"))
 
 
 def _check_feature_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:

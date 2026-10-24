@@ -375,7 +375,8 @@
                   "entity_columns": { "type": "array", "minItems": 1, "items": { "type": "string" } },
                   "time_column": { "type": "string" },
                   "features": { "type": "array", "minItems": 1, "items": { "type": "string" } },
-                  "prefix": { "type": "string" }
+                  "prefix": { "type": "string" },
+                  "online_view": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,59}$", "description": "the feature view online serving reads this source from (default: the feature group's name)" }
                 }
               }
             }
@@ -772,6 +773,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "target": { "enum": ["vertex", "kserve"] },
+        "features": { "enum": ["request", "online"], "description": "online: the endpoint takes entity IDs and reads the features from the tenant's online store (Pipewright 1.1); request (the default): callers send the features" },
         "machine": { "type": "string", "minLength": 1 },
         "replicas": {
           "type": "object",

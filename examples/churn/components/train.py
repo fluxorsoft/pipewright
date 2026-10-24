@@ -60,6 +60,11 @@ def train_model(
     for name, content in (("features.json", features), ("training_stats.json", stats)):
         with open(os.path.join(model.path, name), "w") as f:
             json.dump(content, f, indent=2, default=str)
+    extra = [os.path.join(model.path, "features.json")]
+    if ml_config.get("online_features"):        # model.serving.features online (Pipewright 1.1): views and key
+        with open(os.path.join(model.path, "serving.json"), "w") as f:
+            json.dump({"online_features": ml_config["online_features"]}, f, indent=2)
+        extra.append(os.path.join(model.path, "serving.json"))
 
     # Agent Platform prebuilt PyTorch serving runs <artifact_uri>/model.mar with TorchServe.
     handler = os.path.join(os.path.dirname(os.path.abspath(__file__)), "torchserve_handler.py")
@@ -68,7 +73,7 @@ def train_model(
         subprocess.run(
             [sys.executable, "-m", "model_archiver.model_packaging", "--model-name", "model", "--version", "1.0",
              "--serialized-file", model_pt, "--handler", handler,
-             "--extra-files", os.path.join(model.path, "features.json"), "--export-path", export_dir],
+             "--extra-files", ",".join(extra), "--export-path", export_dir],
             check=True, env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
         )
         shutil.copy(os.path.join(export_dir, "model.mar"), os.path.join(model.path, "model.mar"))
