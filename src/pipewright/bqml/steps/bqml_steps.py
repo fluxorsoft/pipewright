@@ -38,7 +38,7 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
         raise ValueError(f"{source_uri!r}: a bqml use case reads a bq:// table or view")
     data = ml_config["data"]
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-rows"}))
-    ref = bq_table(source_uri, project)
+    ref = named = bq_table(source_uri, project)
     if mode == "training" and data.get("label_source"):
         ref = _labelled_entities(bigquery_client(project, ml_config), ref, project, data["label_source"], data,
                                  ml_config, run_id)
@@ -56,7 +56,8 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
         hits = ", ".join(f"COUNTIF(__pw_hit_{i}) AS hit_{i}" for i in range(len(features_from["sources"])))
         counted = jobs.run(f"SELECT COUNT(*) AS n, {hits} FROM `{staged}`", "feature matches")[0]
         tc = features_from["entity"]["time_column"]
-        emit_event("data.features.resolved", ml_config, run_id, entity_table=ref,
+        emit_event("data.features.resolved", ml_config, run_id, entity_table=named,
+                   **({"labelled": True} if named != ref else {}),
                    cutoff=tc if tc in entity_columns else "query time", table=staged, sources=[
                        {"table": bq_table(s["table"], project),
                         "time_column": s.get("time_column", "feature_timestamp"),

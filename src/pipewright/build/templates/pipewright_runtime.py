@@ -134,10 +134,12 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None, ru
     if source_uri.startswith("bq://"):
         ref = bq_table(source_uri, project)
         client = bigquery_client(project, ml_config)
+        source_ref = ref
         if label_source:
             ref = _labelled_entities(client, ref, project, label_source, data, ml_config or {}, run_id)
         if features_from:
-            df = _read_with_features(client, ref, project, features_from, ml_config or {}, run_id)
+            df = _read_with_features(client, ref, project, features_from, ml_config or {}, run_id,
+                                     recorded_as=source_ref)
         else:
             df = client.query(f"SELECT * FROM `{ref}`").to_dataframe(create_bqstorage_client=False)
         for col in df.columns:               # BigQuery DATE arrives as dbdate: use ISO text, as CSV would give
@@ -214,6 +216,11 @@ def _labelled_entities(client, entity_ref: str, project: str, label_source: dict
               "window_days": int(label_source["window_days"]), "anchor": anchor, "query_job": job.job_id,
               "entity_rows": int(total), "rows": int(counts["n"]), "positives": int(counts["positives"]),
               "dropped_open_window": int(total) - int(counts["n"])}
+    if record["rows"] and record["positives"] in (0, record["rows"]):
+        only = "1" if record["positives"] else "0"
+        log(f"every labelled row is {only}: the {record['window_days']}-day window over {table} gives one class only, "
+            "so no classifier can learn from it and metrics such as auc cannot be computed (a shorter window, or "
+            "another label table)", ml_config, "WARNING", run_id)
     log(f"labels from {table}: {record['rows']} of {total} rows have a closed {record['window_days']}-day window "
         f"(anchor {anchor}), {record['positives']} positive", ml_config, run_id=run_id)
     emit_event("data.labels.resolved", ml_config, run_id, **record)
@@ -404,7 +411,8 @@ def _check_feature_datasets(features_from: dict, project: str, ml_config: dict) 
 
 
 def _read_with_features(client, entity_ref: str, project: str, features_from: dict, ml_config: dict,
-                        run_id: str | None):
+                        run_id: str | None, recorded_as: str | None = None):
+    """recorded_as: the entity table the run named, when entity_ref is the label window's result over it."""
     features_from = resolve_feature_groups(features_from, project, (ml_config.get("platform") or {}).get("region"))
     _check_feature_datasets(features_from, project, ml_config)
     entity_columns = [f.name for f in client.get_table(entity_ref).schema]
@@ -421,7 +429,9 @@ def _read_with_features(client, entity_ref: str, project: str, features_from: di
                         **({"feature_group": src["feature_group"], "columns": src["columns"]}
                            if src.get("feature_group") else {}),
                         "rows_matched": int(hit.sum()), "rows": len(df)})
-    record = {"entity_table": entity_ref, "cutoff": tc if tc in entity_columns else "query time",
+    record = {"entity_table": recorded_as or entity_ref,
+              **({"labelled": True} if recorded_as and recorded_as != entity_ref else {}),
+              "cutoff": tc if tc in entity_columns else "query time",
               "query_job": job.job_id, "read_at": (job.started or datetime.now(timezone.utc)).isoformat(),
               "sources": sources}
     for s in sources:
