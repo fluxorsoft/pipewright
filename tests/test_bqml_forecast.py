@@ -177,7 +177,7 @@ def test_an_ai_forecast_version_has_no_model_files():
                                 "k", session=Session())
     url, body = sent[0]
     assert version == "1" and url.endswith("/locations/us-central1/models:upload")
-    assert body == {"model": {"displayName": "demand", "description": "settings",
+    assert body == {"model": {"displayName": "demand", "description": "settings", "versionDescription": "settings",
                               "labels": {"pipewright-engine": "ai-forecast"},
                               "encryptionSpec": {"kmsKeyName": "k"}}, "modelId": "demand"}
     assert "containerSpec" not in body["model"] and "artifactUri" not in body["model"]

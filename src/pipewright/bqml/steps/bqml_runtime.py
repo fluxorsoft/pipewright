@@ -653,7 +653,8 @@ def upload_version(project: str, region: str, registry_id: str, labels: dict, de
     base = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}"
     parent = f"projects/{project}/locations/{region}/models/{registry_id}"
     exists = session.get(f"{base}/models/{registry_id}", timeout=60).status_code == 200
-    model = {"displayName": registry_id, "description": description, "labels": labels,
+    model = {"displayName": registry_id, "description": description, "versionDescription": description,
+             "labels": labels,
              **({"encryptionSpec": {"kmsKeyName": kms_key}} if kms_key else {})}
     r = session.post(f"{base}/models:upload", timeout=60,
                      json={"model": model, **({"parentModel": parent} if exists else {"modelId": registry_id})})
