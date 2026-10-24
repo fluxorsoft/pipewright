@@ -1027,14 +1027,14 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 ## 13. Roadmap
 
-**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks.
+**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence; phases 1 to 3 ship together as 1.1.0 (user, 2026-10-24), except AIOps (still to analyse). Phase 4 comes after 1.1.0. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks.
 
 | Item | Status |
 |---|---|
 | First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Released 2026-10-17; re-cut 2026-10-18 with synthetic data |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
-| OpenTelemetry export from the launcher | Planned: phase 2 |
+| OpenTelemetry export from the launcher | Planned: phase 4, after 1.1.0 (user, 2026-10-24) |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
 | The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Planned: phase 1, alongside BigQuery ML; settle the open decisions in section 8.13 first (D-85, revised 2026-10-22) |
 | `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
@@ -1043,7 +1043,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Synthetic data generation (FR-49): the `synthetic` section, contract-only generation, an engine interface (MOSTLY AI SDK local mode by default, SDV opt-in), evaluation and gates | Built, released in 1.0.0 (2026-10-18); used end to end on Agent Platform and on Kubeflow |
 | Synthetic data: relational generation (FR-49 follow-up): the entity table and its child tables together (keys, history per entity, timing against each cut-off), so point-in-time joins and feature tables are tested on synthetic data; the spike showed MOSTLY AI does it (TSTR drop 0.003 on churn) | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
 | Synthetic data: sequential generation (FR-49 follow-up): event histories per entity (transactions, sessions, claims) where order and gaps matter | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
-| Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: phase 3 (user to revisit) |
+| Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: phase 4, after 1.1.0 (user to revisit; 2026-10-24) |
 | Synthetic data: AI-assisted authoring (FR-49 follow-up): a drafted `synthetic` section and column rules from a table's schema and profile (Gemini), for a person to review | Built in Pipewright Enterprise (`pipewright synthetic-draft`, 2026-10-18) |
 | Value-free error messages (NFR-18, D-65) | Planned: phase 1 |
 | Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
