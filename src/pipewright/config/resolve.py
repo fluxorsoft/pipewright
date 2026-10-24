@@ -130,6 +130,11 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     # Model, serving, approvals, policies.
     model = {"promotion": "model", **eff["model"]}
+    if bqml_spec:          # the model stays in BigQuery: the next environment trains its own from the release
+        if eff["model"].get("promotion") == "model":
+            problems.append("model.promotion: a bqml model is promoted by retraining in the next environment; set "
+                            "promotion: retrain (or leave it out)")
+        model["promotion"] = "retrain"
     model["serving"] = deep_merge(_SERVING_DEFAULTS, eff["model"].get("serving", {}))
     serving = model["serving"]
     if serving["replicas"]["min"] > serving["replicas"]["max"]:
@@ -210,7 +215,8 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
             if uri and uri.startswith("gs://"):
                 problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
     if bqml_spec:
-        _bqml_section(bqml_spec, ml, model, directory, env, tables, pipelines, triggers, steps_spec(eff), problems)
+        _bqml_section(bqml_spec, ml, model, directory, env, tables, pipelines, triggers, steps_spec(eff),
+                      f"{meta['name']}", tenant, problems)
     if "synthetic" in ml:
         from pipewright.synthetic import config as synthetic_config
 
@@ -267,7 +273,8 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     return ResolvedUseCase(
         name=meta["name"], environment=env.name, owner=meta["owner"], tenant=tenant, resources=resources,
         directory=directory, pipelines=pipelines, components_dir=components_dir, requirements=requirements,
-        framework="bqml" if bqml_spec else eff.get("framework", "pytorch"), triggers=triggers, parameters=parameters, steps=steps,
+        framework="bqml" if bqml_spec else eff.get("framework", "pytorch"), triggers=triggers,
+        parameters=parameters, steps=steps,
         tables=tables, retention_days=bq.get("retention_days"), model=model, approvals=approvals,
         labels=meta.get("labels", {}), contacts=meta.get("contacts", []), source=str(path),
         description=meta.get("description", ""), objective=meta.get("objective", ""), ml=ml,
@@ -311,7 +318,8 @@ def _bqml_pipelines(eff: dict, pipelines: dict, problems: list[str]) -> dict | N
 
 
 def _bqml_section(spec: dict, ml: dict, model: dict, directory: Path, env: Environment, tables: dict,
-                  pipelines: dict, triggers: dict, steps: dict, problems: list[str]) -> None:
+                  pipelines: dict, triggers: dict, steps: dict, name: str, tenant: str,
+                  problems: list[str]) -> None:
     """ml["bqml"], and what a BigQuery ML use case cannot use: gs:// sources (the data is in BigQuery), Ray steps,
     KServe serving."""
     from pipewright.bqml import config as bqml_config
@@ -319,6 +327,9 @@ def _bqml_section(spec: dict, ml: dict, model: dict, directory: Path, env: Envir
     ml["bqml"] = bqml_config.resolve(spec, ml, directory, env.policies.get("bqml") or {}, tables,
                                      "inference" in pipelines, env.name, problems)
     ml["bqml"]["registry_id"] = model["name"]
+    # Each run's evaluation record, in the use case's pipeline root (publish.pipeline_root): `model approve`,
+    # `deploy-model` and evidence find a BigQuery ML version's record from its pipewright-run label.
+    ml["bqml"]["records"] = f"gs://{env.artifacts_bucket}/pipeline-root/{tenant}/{name}/bqml/"
     if triggers["landing"]:
         problems.append("triggers.landing delivers gs:// files; a bqml use case reads bq:// tables or views: use a "
                         "schedule or `pipewright run --source-uri bq://...`")

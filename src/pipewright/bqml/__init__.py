@@ -3,7 +3,7 @@ Pipewright provides. They run on the environment's orchestrator like any other p
 BigQuery jobs, so the data and the model stay in BigQuery.
 
 config.py       the `bqml` section: model types per task, options, the team's SQL files, byte limits
-sql/            the SQL the steps run, as templates (the team's own SQL comes from its use case folder)
+steps/sql/      the SQL the steps run, as templates (the team's own SQL comes from its use case folder)
 steps/          the pipelines' steps (KFP components on the use case's BQML image)
 pipelines.py    the training and scoring pipelines, compiled and released with the use case
 """

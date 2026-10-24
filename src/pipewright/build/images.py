@@ -73,6 +73,9 @@ def build_context(uc: ResolvedUseCase, dest: Path) -> Path:
             raise ConfigError("building the BigQuery ML steps image needs kfp installed (the GCP extra)")
         with open(dest / "requirements.txt", "a", encoding="utf-8") as f:
             f.write(f"kfp=={compiler_version()}\n")
+        # Gate 1 in the evaluate step is the same check `pipewright model approve` makes.
+        gates = resources.files("pipewright.models").joinpath("gates.py").read_text(encoding="utf-8")
+        (dest / "components" / "pipewright_gates.py").write_text(gates, encoding="utf-8")
     # Platform runtime helpers (write_table, log, emit_event): importable by every component.
     templates = resources.files("pipewright.build.templates")
     runtime = templates.joinpath("pipewright_runtime.py").read_text(encoding="utf-8")

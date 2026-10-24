@@ -53,7 +53,8 @@ def test_bqml_gets_pipewrights_pipelines_and_steps(repo):
     section = uc.ml["bqml"]
     assert section == {"model_type": "boosted_tree_classifier", "options": {}, "explain": False,
                        "max_bytes_billed": bqml.DEFAULT_MAX_BYTES_BILLED, "transform": None, "prepare": None,
-                       "registry_id": "churn-classifier"}
+                       "registry_id": "churn-classifier",
+                       "records": "gs://acme-ml-dev-artifacts/pipeline-root/churn/churn/bqml/"}
     assert uc.ml_config()["bqml"] == section          # pipelines receive it, the release contract pins it
 
 
@@ -150,3 +151,20 @@ def test_byte_limit_default_and_platform_policy(repo):
     assert resolve(repo).ml["bqml"]["max_bytes_billed"] == 1024 ** 3      # the platform's limit is the default
     bqml_repo(repo, model_type="logistic_reg", max_bytes_billed=1000)
     assert "bqml.max_bytes_billed: at least 10485760" in problems(repo)
+
+
+def test_promoted_by_retraining(repo):
+    assert resolve(bqml_repo(repo)).model["promotion"] == "retrain"
+    repo.usecase["spec"]["model"]["promotion"] = "model"
+    assert "model.promotion: a bqml model is promoted by retraining" in problems(repo)
+
+
+def test_a_bqml_versions_record_is_found_by_its_run(repo):
+    from pipewright.models.registry import record_location
+
+    uc = resolve(bqml_repo(repo))
+    records = "gs://acme-ml-dev-artifacts/pipeline-root/churn/churn/bqml/"
+    assert uc.ml["bqml"]["records"] == records
+    assert record_location(uc, None, {"pipewright-run": "r1f4"}) == f"{records}r1f4/"
+    assert record_location(uc, "gs://b/model/", {"pipewright-run": "r1"}) == "gs://b/model/"   # artifacts first
+    assert record_location(uc, None, {}) is None

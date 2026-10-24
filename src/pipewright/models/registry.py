@@ -43,17 +43,28 @@ def _registry(uc: ResolvedUseCase, env: Environment, creds):
     return ModelRegistry(model=_resource(uc, env, creds))
 
 
-def artifact_uri(resource: str, version: str) -> str | None:
+def artifact_uri(resource: str, version: str, uc: ResolvedUseCase | None = None) -> str | None:
     from google.cloud import aiplatform
 
-    return aiplatform.Model(model_name=f"{resource}@{version}").uri
+    model = aiplatform.Model(model_name=f"{resource}@{version}")
+    return record_location(uc, model.uri, getattr(model, "labels", None))
+
+
+def record_location(uc: ResolvedUseCase | None, uri: str | None, labels: dict | None) -> str | None:
+    """Where a version's evaluation record is: next to its artifacts, or, for a BigQuery ML version (no artifacts:
+    the model stays in BigQuery), in the run's folder of the use case's bqml records, named by its run label."""
+    if uri:
+        return uri
+    run = (labels or {}).get("pipewright-run")
+    records = ((uc.ml if uc else {}) or {}).get("bqml", {}).get("records")
+    return f"{records}{run}/" if run and records else None
 
 
 def gate_problems(uc: ResolvedUseCase, creds, resource: str, version, earlier_versions: bool) -> list[str]:
     """earlier_versions: a version older than this one exists, so a champion comparison must be recorded."""
     from pipewright.gcp import Gcp
 
-    return gates.verify(Gcp(creds), artifact_uri(resource, str(version)), uc.ml["evaluation"], earlier_versions)
+    return gates.verify(Gcp(creds), artifact_uri(resource, str(version), uc), uc.ml["evaluation"], earlier_versions)
 
 
 def _number(version_id) -> int:

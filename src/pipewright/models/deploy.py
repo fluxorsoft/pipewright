@@ -71,7 +71,10 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     from pipewright.models import gates
 
     earlier = str(default.version_id).isdigit() and int(default.version_id) > 1
-    problems = gates.verify(Gcp(creds), default.uri, uc.ml["evaluation"], earlier)
+    from pipewright.models.registry import record_location
+
+    record = record_location(uc, default.uri, getattr(default, "labels", None))
+    problems = gates.verify(Gcp(creds), record, uc.ml["evaluation"], earlier)
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
                       serving["replicas"], bool(current),
                       [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems)

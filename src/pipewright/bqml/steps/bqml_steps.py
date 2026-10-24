@@ -1,0 +1,320 @@
+"""The steps of the BigQuery ML pipelines (KFP components on the use case's BQML image). Each step submits BigQuery
+jobs and records what it did; the data and the model stay in BigQuery.
+
+    training: rows -> validate -> train -> evaluate (gate 1) -> [approve] register
+    scoring:  champion, rows -> validate -> score -> monitor
+"""
+
+import os
+from typing import NamedTuple
+
+from kfp import dsl
+
+# Pinned by digest at release time.
+COMPONENT_IMAGE = os.environ.get("COMPONENT_IMAGE", "pipewright-bqml:dev")
+BASE_IMAGE = "python:3.11-slim"
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: dict) -> NamedTuple(
+        "Rows", [("rows_table", str), ("rows", int), ("test_rows", int)]):
+    """The run's rows in a table: the source (the entity table, its features at each row's cut-off, the label
+    window in training), the team's prepare.sql, and the held-out test flag (training)."""
+    from collections import namedtuple
+
+    import bqml_runtime as rt
+    from pipewright_runtime import (
+        _check_feature_datasets,
+        _labelled_entities,
+        bigquery_client,
+        bq_table,
+        emit_event,
+        features_query,
+        labels,
+        resolve_feature_groups,
+    )
+
+    if not source_uri.startswith("bq://"):
+        raise ValueError(f"{source_uri!r}: a bqml use case reads a bq:// table or view")
+    data = ml_config["data"]
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-rows"}))
+    ref = bq_table(source_uri, project)
+    if mode == "training" and data.get("label_source"):
+        ref = _labelled_entities(bigquery_client(project, ml_config), ref, project, data["label_source"], data,
+                                 ml_config, run_id)
+    source = f"SELECT * FROM `{ref}`"
+    features_from = data.get("features_from")
+    if features_from:
+        features_from = resolve_feature_groups(features_from, project, ml_config["platform"].get("region"))
+        _check_feature_datasets(features_from, project, ml_config)
+        entity_columns = [f.name for f in jobs.client.get_table(ref).schema]
+        staged = rt.table_ref(project, ml_config, run_id, "source" if mode == "training" else "score_source")
+        jobs.run(f"CREATE TABLE `{staged}` OPTIONS (expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), "
+                 f"INTERVAL 1 DAY)) AS\n{features_query(ref, entity_columns, features_from, project)}",
+                 "features at each row's cut-off")
+        hits = ", ".join(f"COUNTIF(__pw_hit_{i}) AS hit_{i}" for i in range(len(features_from["sources"])))
+        counted = jobs.run(f"SELECT COUNT(*) AS n, {hits} FROM `{staged}`", "feature matches")[0]
+        tc = features_from["entity"]["time_column"]
+        emit_event("data.features.resolved", ml_config, run_id, entity_table=ref,
+                   cutoff=tc if tc in entity_columns else "query time", table=staged, sources=[
+                       {"table": bq_table(s["table"], project),
+                        "time_column": s.get("time_column", "feature_timestamp"),
+                        "features": [s.get("prefix", "") + c for c in s["features"]],
+                        **({"feature_group": s["feature_group"]} if s.get("feature_group") else {}),
+                        "rows_matched": int(counted[f"hit_{i}"]), "rows": int(counted["n"])}
+                       for i, s in enumerate(features_from["sources"])])
+        drop = ", ".join(f"__pw_hit_{i}" for i in range(len(features_from["sources"])))
+        source = f"SELECT * EXCEPT ({drop}) FROM `{staged}`"
+
+    rows_table = rt.table_ref(project, ml_config, run_id, "rows" if mode == "training" else "score")
+    test_flag = rt.split_flag(ml_config, rt.split_keys(ml_config)) if mode == "training" else "FALSE"
+    jobs.run(rt.render("rows.sql", rows_table=rows_table, labels=rt.label_pairs(jobs.labels), run_id=run_id,
+                       prepared=rt.prepared_sql(ml_config, source), test_flag=test_flag), "the run's rows")
+    counts = jobs.run(f"SELECT COUNT(*) AS n, COUNTIF(_pw_test) AS test FROM `{rows_table}`", "row counts")[0]
+    columns = [f.name for f in jobs.client.get_table(rows_table).schema]
+    label = data["label"]["column"]
+    if mode == "training" and label not in columns:
+        raise ValueError(f"the run's rows have no label column {label!r}: bqml.prepare must keep it")
+    emit_event("data.snapshot.written", ml_config, run_id, table=rows_table, rows=int(counts["n"]),
+               test_rows=int(counts["test"]), source_uri=source_uri, mode=mode,
+               **({"prepare_sha256": ml_config["bqml"]["prepare"]["sha256"]} if ml_config["bqml"].get("prepare")
+                  else {}))
+    return namedtuple("Rows", ["rows_table", "rows", "test_rows"])(rows_table, int(counts["n"]), int(counts["test"]))
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_validate(project: str, rows_table: str, run_id: str, mode: str, ml_config: dict) -> str:
+    """The data contract, checked in BigQuery as the container path checks it. Fails the run on any error."""
+    import json
+
+    import bqml_runtime as rt
+    from pipewright_runtime import labels
+
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-validate"}))
+    columns = {f.name for f in jobs.client.get_table(rows_table).schema}
+    checks, rules = rt.contract_checks(ml_config, columns, mode)
+    row = jobs.run(rt.render("contract.sql", checks=checks, rows_table=rows_table), "data contract")[0]
+    errors = rt.contract_errors(row, rules, ml_config["data"].get("contract") or {}, mode)
+    if errors:
+        raise ValueError("data contract failed:\n  " + "\n  ".join(errors))
+    return json.dumps({"rows": int(row["_rows"]), "errors": [], "passed": True})
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_train(project: str, rows_table: str, run_id: str, ml_config: dict) -> str:
+    """CREATE MODEL on the training rows. Returns the model (project.dataset.model)."""
+    import bqml_runtime as rt
+    from pipewright_runtime import labels
+
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-train"}))
+    model = rt.model_ref(project, ml_config, run_id)
+    columns = [f.name for f in jobs.client.get_table(rows_table).schema]
+    jobs.run(rt.create_model_sql(ml_config, model, rows_table, columns), f"CREATE MODEL {model}")
+    return model
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id: str, ml_config: dict) -> NamedTuple(
+        "Evaluation", [("decision", str), ("reasons", list), ("record", str), ("primary_value", float)]):
+    """The model and the champion on the same test rows, Pipewright's metrics in SQL, slices, gate 1 by the same
+    check `pipewright model approve` makes, the PSI baselines and the evaluation record."""
+    from collections import namedtuple
+
+    import bqml_runtime as rt
+    import pipewright_gates
+    from pipewright_runtime import emit_event, labels
+
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-evaluate"}))
+    evaluation, section = ml_config["evaluation"], ml_config["bqml"]
+    task = ml_config["data"]["label"].get("task", "binary")
+    predictions = rt.table_ref(project, ml_config, run_id, "test")
+    jobs.run(rt.predict_sql(ml_config, model, rows_table, predictions, "_pw_test", jobs.labels, True),
+             "test predictions")
+    result = rt.evaluate_rows(jobs, ml_config, predictions)
+    record = {"metrics": result["metrics"], "slices": result["slices"], "rows": {"test": result["rows"]},
+              "task": task, "engine": "bqml",
+              "model": {"bigquery_model": model, "model_type": section["model_type"], "options": section["options"]},
+              "sql": {k: section[k]["sha256"] for k in ("transform", "prepare") if section.get(k)},
+              **({"per_class": result["per_class"]} if "per_class" in result else {}),
+              **({"confusion": result["_confusion"]} if "_confusion" in result else {})}
+
+    champion = rt.default_version(project, region, section["registry_id"])
+    champion_model = ((champion or {}).get("labels") or {}).get("pipewright-bq-model")
+    if champion_model:
+        dataset = ml_config["platform"]["bigquery_dataset"]
+        champion_ref = f"{project}.{dataset}.{champion_model}"
+        champion_predictions = rt.table_ref(project, ml_config, run_id, "champion")
+        jobs.run(rt.predict_sql(ml_config, champion_ref, rows_table, champion_predictions, "_pw_test", jobs.labels,
+                                True), "champion predictions")
+        record["champion"] = {**rt.evaluate_rows(jobs, ml_config, champion_predictions)["metrics"],
+                              "_version": champion.get("versionId"), "_model": champion_ref}
+
+    # PSI baselines for scoring: the drift features on the training rows, the predictions on the test rows.
+    columns = {f.name for f in jobs.client.get_table(rows_table).schema}
+    drift = [c for c in ml_config["monitoring"]["drift"]["features"] or [] if c in columns]
+    stats = {"drift_baseline": {c: rt.column_baseline(jobs, rows_table, c, "NOT _pw_test") for c in drift}}
+    if task == "multiclass":
+        stats["prediction_baseline"] = {"classes": rt.class_shares(jobs, predictions)}
+    else:
+        stats["prediction_baseline"] = rt.column_baseline(
+            jobs, predictions, "_pw_prediction" if task == "regression" else "_pw_score", "TRUE")
+    stats["rows"] = int(jobs.run(f"SELECT COUNTIF(NOT _pw_test) AS n FROM `{rows_table}`", "training rows")[0]["n"])
+    record["training_stats"] = stats
+    if section.get("explain"):
+        top = jobs.run(rt.render("explain.sql", model=model), "global explanations")
+        k = int(ml_config["explainability"].get("top_k") or 10)
+        record["explanations"] = sorted(({"feature": r["feature"], "attribution": float(r["attribution"])}
+                                         for r in top), key=lambda r: -abs(r["attribution"]))[:k]
+
+    problems = pipewright_gates.check(record, evaluation, champion_expected=bool(champion_model))
+    decision = "reject" if problems else "approve"
+    primary = evaluation["primary_metric"]
+    reasons = list(problems)
+    if record.get("champion") and not problems:
+        reasons.append(f"champion: {primary} {record['metrics'].get(primary)} vs {record['champion'].get(primary)} "
+                       f"(champion version {record['champion']['_version']})")
+    record.update({"decision": decision, "reasons": reasons, "run_id": run_id, "bytes_billed": jobs.billed})
+    uri = rt.write_record(project, rt.record_uri(ml_config, run_id), record)
+    emit_event("training.evaluated", ml_config, run_id, decision=decision, reasons=reasons, primary_metric=primary,
+               primary_value=record["metrics"].get(primary), record=uri,
+               champion_value=(record.get("champion") or {}).get(primary),
+               champion_version=(record.get("champion") or {}).get("_version"))
+    value = record["metrics"].get(primary)
+    return namedtuple("Evaluation", ["decision", "reasons", "record", "primary_value"])(
+        decision, reasons, uri, float(value) if value is not None else float("nan"))
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_register(project: str, region: str, model: str, run_id: str, primary_value: float, ml_config: dict) -> str:
+    """After gate 1 only: registers the model as a new version of the use case's model (ALTER MODEL), labels it
+    with the run and the BigQuery model, and makes it the default when registry.set_default is on_approval."""
+    import bqml_runtime as rt
+    from pipewright_runtime import emit_event, labels
+
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-register"}))
+    registry_id = ml_config["bqml"]["registry_id"]
+    jobs.run(rt.render("register.sql", model=model, registry_id=registry_id), "registration")
+    version = rt.registered_version(jobs, model)
+    rt.label_version(project, region, registry_id, version, {
+        "pipewright-usecase": rt.base_name(ml_config["usecase"]).replace("_", "-"),
+        "pipewright-run": rt.run_part(run_id), "pipewright-bq-model": model.rsplit(".", 1)[1],
+        "pipewright-engine": "bqml", "status": "candidate"})
+    default = ml_config["registry"].get("set_default") == "on_approval"
+    if default:
+        rt.make_default(project, region, registry_id, version)
+    primary = ml_config["evaluation"]["primary_metric"]
+    emit_event("model.registered", ml_config, run_id, model=registry_id, version=version, default=default,
+               primary_metric=primary, primary_value=primary_value, bigquery_model=model)
+    return version
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_champion(project: str, region: str, ml_config: dict) -> NamedTuple(
+        "Champion", [("model", str), ("version", str), ("record", str)]):
+    """The default version of the use case's model: the BigQuery model it names and its evaluation record."""
+    from collections import namedtuple
+
+    import bqml_runtime as rt
+
+    section = ml_config["bqml"]
+    version = rt.default_version(project, region, section["registry_id"])
+    labels = (version or {}).get("labels") or {}
+    if not labels.get("pipewright-bq-model"):
+        raise ValueError(f"{section['registry_id']} has no default version from a bqml training run: train and "
+                         "approve one first (`pipewright model approve`)")
+    model = f"{project}.{ml_config['platform']['bigquery_dataset']}.{labels['pipewright-bq-model']}"
+    record = f"{section['records']}{labels.get('pipewright-run', '')}/"
+    return namedtuple("Champion", ["model", "version", "record"])(model, str(version["versionId"]), record)
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_score(project: str, rows_table: str, model: str, model_version: str, run_id: str,
+               ml_config: dict) -> NamedTuple("Scores", [("scored_table", str), ("rows", int)]):
+    """ML.PREDICT with the champion on the run's rows, into inference.output_table."""
+    from collections import namedtuple
+
+    import bqml_runtime as rt
+    from pipewright_runtime import labels
+
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-score"}))
+    scored = rt.table_ref(project, ml_config, run_id, "scored")
+    jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False), "predictions")
+    output = ml_config["inference"]["output_table"]
+    target = f"{project}.{ml_config['platform']['bigquery_dataset']}.{output}"
+    table_columns = [f.name for f in jobs.client.get_table(target).schema]
+    have = {f.name for f in jobs.client.get_table(scored).schema}
+    fixed = {"run_id": rt.string(run_id), "model_version_id": rt.string(model_version),
+             "scored_at": "CURRENT_TIMESTAMP()", "predicted_label": "_pw_label", "score": "_pw_score",
+             "prediction": "_pw_prediction"}
+    chosen = [(c, fixed[c]) for c in table_columns
+              if c in fixed and (not fixed[c].startswith("_pw") or fixed[c] in have)]
+    chosen += [(c, rt.q(c)) for c in table_columns if c not in fixed and c in have]
+    jobs.run(rt.render("score.sql", output_table=target, columns=", ".join(rt.q(c) for c, _ in chosen),
+                       values=", ".join(v for _, v in chosen), scored_table=scored), f"scores into {output}")
+    n = int(jobs.run(f"SELECT COUNT(*) AS n FROM `{scored}`", "scored rows")[0]["n"])
+    return namedtuple("Scores", ["scored_table", "rows"])(scored, n)
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_monitor(project: str, rows_table: str, scored_table: str, rows: int, model_version: str, record: str,
+                 run_id: str, source_uri: str, ml_config: dict) -> NamedTuple(
+        "Monitoring", [("alert", str), ("triggers", list), ("summary", str)]):
+    """Feature drift and prediction drift (PSI against the champion's training baselines), the monitoring table and
+    the monitoring events, as the container path records them."""
+    import json
+    from collections import namedtuple
+    from datetime import datetime, timezone
+
+    import bqml_runtime as rt
+    from pipewright_runtime import emit_event, labels
+
+    jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-monitor"}))
+    mon = ml_config["monitoring"]
+    stats = (rt.read_record(project, record) or {}).get("training_stats")
+    result = {"rows": rows, "model_version": model_version, "notes": []}
+    triggers = []
+    if (mon["drift"]["enabled"] or mon["prediction_drift"]["enabled"]) and not stats:
+        result["notes"].append(f"no training baselines in {record}evaluation.json: drift not checked")
+    if mon["drift"]["enabled"] and stats:
+        feature_psi = {c: round(rt.psi(b["fractions"], rt.column_fractions(jobs, rows_table, c, "TRUE", b["edges"])), 4)
+                       for c, b in stats["drift_baseline"].items() if c in mon["drift"]["features"]}
+        drifted = sorted(c for c, v in feature_psi.items() if v > mon["drift"]["threshold"])
+        result.update({"feature_psi": feature_psi, "drifted_features": drifted})
+        if drifted:
+            triggers.append("drift")
+    if mon["prediction_drift"]["enabled"] and stats:
+        base = stats["prediction_baseline"]
+        if "classes" in base:
+            value = rt.class_psi(base["classes"], rt.class_shares(jobs, scored_table))
+        else:
+            column = "_pw_prediction" if ml_config["data"]["label"].get("task") == "regression" else "_pw_score"
+            value = rt.psi(base["fractions"], rt.column_fractions(jobs, scored_table, column, "TRUE", base["edges"]))
+        result["prediction_psi"] = round(value, 4)
+        if value > mon["prediction_drift"]["threshold"]:
+            triggers.append("drift")
+    if mon["performance"]["enabled"]:
+        result["notes"].append("monitoring.performance: not checked by bqml scoring yet")
+    triggers = sorted(set(triggers))
+    result["triggers"] = triggers
+    alert = bool(triggers)
+    summary = json.dumps(result, default=str)
+    row = {"run_id": run_id, "source_uri": source_uri, "model_name": ml_config["model_name"],
+           "model_version_id": model_version, "rows_scored": rows,
+           "max_feature_psi": max((result.get("feature_psi") or {}).values(), default=None),
+           "drifted_features": ",".join(result.get("drifted_features", [])) or None,
+           "prediction_psi": result.get("prediction_psi"), "alert": alert, "triggers": ",".join(triggers) or None,
+           "retrain_status": "not requested by bqml scoring yet", "details_json": summary,
+           "monitored_at": datetime.now(timezone.utc).isoformat()}
+    if mon["output_table"]:
+        target = f"{project}.{ml_config['platform']['bigquery_dataset']}.{mon['output_table']}"
+        kinds = {f.name: f.field_type for f in jobs.client.get_table(target).schema}
+        cells = [(c, v) for c, v in row.items() if c in kinds and v is not None]
+        values = [(f"TIMESTAMP {rt.string(v)}" if kinds[c] == "TIMESTAMP" else rt.literal(v)) for c, v in cells]
+        jobs.run(rt.render("monitoring.sql", table=target, columns=", ".join(rt.q(c) for c, _ in cells),
+                           values=", ".join(values)), "monitoring row")
+    event = {k: row[k] for k in ("model_version_id", "rows_scored", "max_feature_psi", "drifted_features",
+                                 "prediction_psi", "triggers", "retrain_status")}
+    emit_event("monitoring.recorded", ml_config, run_id, alert=alert, **event)
+    if alert:
+        emit_event("monitoring.alert", ml_config, run_id, **event)
+    return namedtuple("Monitoring", ["alert", "triggers", "summary"])("yes" if alert else "no", triggers, summary)
