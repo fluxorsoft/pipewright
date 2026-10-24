@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pipewright.errors import ConfigError
-from pipewright.release.contract import LAUNCHER_PARAMETERS, PipelineTarget, ReleaseContract
+from pipewright.release.contract import LAUNCHER_PARAMETERS, RUN_OVERRIDES, PipelineTarget, ReleaseContract
 from pipewright.runs import sources
 
 
@@ -105,20 +105,55 @@ def minute_key(now: datetime | None = None) -> str:
     return (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M")
 
 
-def parameters_for(contract: ReleaseContract, target: PipelineTarget, source_uri: str, rid: str) -> dict:
+# RUN_OVERRIDES (release.contract): champion_version (what production serves, for a training run to compare with)
+# and model_version (a candidate a scoring run validates). A request for a pipeline that does not declare one is
+# refused, so an older template never ignores it silently.
+_VERSION = re.compile(r"^[0-9]{1,9}$")
+_LOOP = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def overrides(target: PipelineTarget, body: dict) -> dict:
+    out = {}
+    for key in RUN_OVERRIDES:
+        value = body.get(key)
+        if value in (None, ""):
+            continue
+        if not _VERSION.match(str(value)):
+            raise BadRequest(f"{key} {value!r} is not a model version number")
+        if key not in target.parameters:
+            raise BadRequest(f"the {target.name} pipeline of this release takes no {key} parameter (Pipewright's "
+                             "BigQuery ML pipelines and the 1.1 example declare it; add it to the pipeline)")
+        out[key] = str(value)
+    return out
+
+
+def loop_case(body: dict) -> str | None:
+    """The production case a run belongs to, when it is a step of a closed retrain loop."""
+    value = body.get("loop")
+    if value in (None, ""):
+        return None
+    if not _LOOP.match(str(value)):
+        raise BadRequest(f"loop {value!r} is not a case ID")
+    return str(value)
+
+
+def parameters_for(contract: ReleaseContract, target: PipelineTarget, source_uri: str, rid: str,
+                   extra: dict | None = None) -> dict:
     params = dict(target.static_parameters)
     params.update({"project": contract.project, "region": contract.region, "source_uri": source_uri, "run_id": rid})
+    params.update(extra or {})
     assert set(LAUNCHER_PARAMETERS) <= set(params)
     return params
 
 
-def labels_for(contract: ReleaseContract, trigger: str, rid: str, pipeline: str = "training") -> dict:
+def labels_for(contract: ReleaseContract, trigger: str, rid: str, pipeline: str = "training",
+               loop: str | None = None) -> dict:
     def clean(v: str) -> str:
         return re.sub(r"[^a-z0-9_-]", "-", v.lower())[:63]
 
     return {"pipewright-usecase": clean(contract.usecase), "pipewright-release": clean(contract.release_id),
             "pipewright-tenant": clean(contract.tenant), "pipewright-pipeline": clean(pipeline),
-            "trigger": clean(trigger), "run-id": clean(rid)}
+            "trigger": clean(trigger), "run-id": clean(rid), **({"pipewright-loop": clean(loop)} if loop else {})}
 
 
 def target_for(contract: ReleaseContract, pipeline: str) -> PipelineTarget:
@@ -138,6 +173,8 @@ class Run:
     source_uri: str
     run_id: str
     trigger: str
+    overrides: tuple = ()             # (name, value) pairs from RUN_OVERRIDES
+    loop: str | None = None
 
 
 def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = None) -> Run:
@@ -156,14 +193,17 @@ def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = No
         if sources.problem(source):
             raise BadRequest(sources.problem(source))
         key = body.get("run_key") or minute_key(now)
-        return Run(pipeline, source, run_id(contract.usecase, "schedule", schedule, key), "schedule")
+        extra = tuple(overrides(target_for(contract, pipeline), body).items())
+        return Run(pipeline, source, run_id(contract.usecase, "schedule", schedule, key), "schedule", extra,
+                   loop_case(body))
     if not contract.triggers.get("api"):
         raise BadRequest(f"{contract.usecase} does not accept API runs (triggers.api is false)")
     source = body.get("source_uri")
     if sources.problem(source):
         raise BadRequest(sources.problem(source))
     pipeline = body.get("pipeline") or "training"
-    target_for(contract, pipeline)
+    extra = tuple(overrides(target_for(contract, pipeline), body).items())
     key = body.get("run_key") or minute_key(now)
     parts = ["api", source, key] if pipeline == "training" else ["api", pipeline, source, key]
-    return Run(pipeline, source, run_id(contract.usecase, *parts), "api")
+    loop = loop_case(body)
+    return Run(pipeline, source, run_id(contract.usecase, *parts), "loop" if loop else "api", extra, loop)

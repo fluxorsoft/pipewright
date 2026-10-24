@@ -36,6 +36,7 @@ def bqml_training_pipeline(
     source_uri: str,
     run_id: str,
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
+    champion_version: str = "",    # a closed retrain loop compares with what production serves
 ):
     rows = bqml_rows(project=project, source_uri=source_uri, run_id=run_id, mode="training", ml_config=ml_config)
     rows.set_display_name("rows").set_caching_options(False)
@@ -46,7 +47,8 @@ def bqml_training_pipeline(
                        ml_config=ml_config).after(validate)
     train.set_display_name("train-model").set_caching_options(False)
     evaluate = bqml_evaluate(project=project, region=region, rows_table=rows.outputs["rows_table"],
-                             model=train.output, run_id=run_id, ml_config=ml_config)
+                             model=train.output, run_id=run_id, ml_config=ml_config,
+                             champion_version=champion_version)
     evaluate.set_display_name("evaluate-model").set_caching_options(False)
     with dsl.If(evaluate.outputs["decision"] == "approve", name="model-approved"):
         register = bqml_register(project=project, region=region, model=train.output, run_id=run_id,
@@ -61,8 +63,9 @@ def bqml_scoring_pipeline(
     source_uri: str,
     run_id: str,
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
+    model_version: str = "",       # a closed retrain loop validates its candidate before it is the default
 ):
-    champion = bqml_champion(project=project, region=region, ml_config=ml_config)
+    champion = bqml_champion(project=project, region=region, ml_config=ml_config, model_version=model_version)
     champion.set_display_name("load-champion").set_caching_options(False)
     rows = bqml_rows(project=project, source_uri=source_uri, run_id=run_id, mode="inference", ml_config=ml_config)
     rows.set_display_name("rows").set_caching_options(False)

@@ -116,7 +116,8 @@ def bqml_train(project: str, rows_table: str, run_id: str, ml_config: dict) -> s
 
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
-def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id: str, ml_config: dict) -> NamedTuple(
+def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id: str, ml_config: dict,
+                  champion_version: str = "") -> NamedTuple(
         "Evaluation", [("decision", str), ("reasons", list), ("record", str), ("primary_value", float)]):
     """The model and the champion on the same test rows, Pipewright's metrics in SQL, slices, gate 1 by the same
     check `pipewright model approve` makes, the PSI baselines and the evaluation record."""
@@ -140,7 +141,10 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
               **({"per_class": result["per_class"]} if "per_class" in result else {}),
               **({"confusion": result["_confusion"]} if "_confusion" in result else {})}
 
-    champion = rt.default_version(project, region, section["registry_id"])
+    # The champion: the default version, or the one a closed retrain loop names (what production serves).
+    champion = rt.default_version(project, region, section["registry_id"], version=champion_version)
+    if champion_version and champion is None:
+        raise ValueError(f"champion_version {champion_version}: {section['registry_id']} has no such version")
     champion_model = ((champion or {}).get("labels") or {}).get("pipewright-bq-model")
     if champion_model:
         dataset = ml_config["platform"]["bigquery_dataset"]
@@ -211,19 +215,21 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
 
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
-def bqml_champion(project: str, region: str, ml_config: dict) -> NamedTuple(
+def bqml_champion(project: str, region: str, ml_config: dict, model_version: str = "") -> NamedTuple(
         "Champion", [("model", str), ("version", str), ("record", str)]):
-    """The default version of the use case's model: the BigQuery model it names and its evaluation record."""
+    """The default version of the use case's model, or the one a closed retrain loop validates (model_version):
+    the BigQuery model it names and its evaluation record."""
     from collections import namedtuple
 
     import bqml_runtime as rt
 
     section = ml_config["bqml"]
-    version = rt.default_version(project, region, section["registry_id"])
+    version = rt.default_version(project, region, section["registry_id"], version=model_version)
     labels = (version or {}).get("labels") or {}
     if not labels.get("pipewright-bq-model"):
-        raise ValueError(f"{section['registry_id']} has no default version from a bqml training run: train and "
-                         "approve one first (`pipewright model approve`)")
+        which = f"version {model_version}" if model_version else "default version"
+        raise ValueError(f"{section['registry_id']} has no {which} from a bqml training run: train and approve one "
+                         "first (`pipewright model approve`)")
     model = f"{project}.{ml_config['platform']['bigquery_dataset']}.{labels['pipewright-bq-model']}"
     record = f"{section['records']}{labels.get('pipewright-run', '')}/"
     return namedtuple("Champion", ["model", "version", "record"])(model, str(version["versionId"]), record)

@@ -44,6 +44,7 @@ def churn_training_pipeline(
     metrics_table: str = "model_metrics",
     model_display_name: str = "churn-classifier",
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
+    champion_version: str = "",    # a closed retrain loop compares with what production serves
 ):
     ingest = ingest_data(project=project, source_uri=source_uri, bq_dataset=bq_dataset, run_id=run_id,
                         raw_table=raw_table, ml_config=ml_config).set_display_name("ingest-data")
@@ -70,7 +71,8 @@ def churn_training_pipeline(
                         prep=prepare.outputs["prep"], hyperparameters=hyperparameters, ml_config=ml_config)
     train.set_display_name("train-model")
 
-    champion = load_model(project=project, region=region, model_display_name=model_display_name, required=False)
+    champion = load_model(project=project, region=region, model_display_name=model_display_name, required=False,
+                          version=champion_version)
     champion.set_display_name("load-champion").set_caching_options(False)     # the registry changes
 
     evaluate = evaluate_model(model=train.outputs["model"], champion=champion.outputs["model"],

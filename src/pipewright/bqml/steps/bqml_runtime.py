@@ -395,10 +395,11 @@ def registry_url(project: str, region: str, registry_id: str) -> str:
     return f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/models/{registry_id}"
 
 
-def default_version(project: str, region: str, registry_id: str, session=None) -> dict | None:
-    """The `default` version of the use case's model (its labels name the BigQuery model), or None."""
+def default_version(project: str, region: str, registry_id: str, session=None, version: str = "") -> dict | None:
+    """The `default` version of the use case's model, or the given one (its labels name the BigQuery model), or
+    None. A closed retrain loop names the version: what production serves, or the candidate it validates."""
     session = session or _session()
-    r = session.get(registry_url(project, region, registry_id) + "@default", timeout=60)
+    r = session.get(registry_url(project, region, registry_id) + f"@{version or 'default'}", timeout=60)
     if r.status_code == 404:
         return None
     if r.status_code >= 300:

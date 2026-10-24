@@ -399,7 +399,8 @@ def cmd_run(args) -> int:
         if not source_uri:
             raise ConfigError(f"{args.usecase} has no synthetic pipeline in {env.name} (synthetic.enabled)")
     result = launch.run(env, launch.body(args.usecase, args.pipeline, source_uri, args.schedule, args.run_key,
-                                         replay=bool(replay)))
+                                         replay=bool(replay), champion_version=args.champion_version,
+                                         model_version=args.model_version))
     if result.get("status") == "requested":
         print(f"requested: {result['usecase']} {result['pipeline']} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")
@@ -750,6 +751,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--replay", metavar="RUN_ID",
                     help="train on exactly the rows an earlier run read (its snapshot in data.snapshot_table)")
     sp.add_argument("--run-key", help="idempotency key: the same key never starts a second run")
+    sp.add_argument("--champion-version", help="training: compare with this model version instead of the default "
+                                                "(the pipeline must declare champion_version)")
+    sp.add_argument("--model-version", help="inference: score with this model version instead of the default "
+                                             "(the pipeline must declare model_version)")
     sp.add_argument("--print-launcher-url", action="store_true", help="print the launcher URL and exit")
     sp.set_defaults(func=cmd_run)
 

@@ -26,6 +26,9 @@ from pipewright.errors import ConfigError
 CONTRACT_VERSION = "3"
 SUPPORTED_VERSIONS = ("2", "3")
 LAUNCHER_PARAMETERS = ("project", "region", "source_uri", "run_id")
+# Optional pipeline parameters a run request may set, run by run (the closed retrain loop, FR-48): the version a
+# training run compares with and the one a scoring run uses. Passed only to a pipeline that declares them.
+RUN_OVERRIDES = ("champion_version", "model_version")
 CONTRACTS_PREFIX = "contracts"
 POINTER_HISTORY = 20
 

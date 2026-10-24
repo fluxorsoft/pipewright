@@ -1,4 +1,4 @@
-"""Load the registry's default model version (the champion) into a Model artifact."""
+"""Load the registry's default model version (the champion), or a named one, into a Model artifact."""
 
 import os
 from typing import NamedTuple
@@ -16,8 +16,10 @@ def load_model(
     model_display_name: str,
     required: bool,
     model: dsl.Output[dsl.Model],
+    version: str = "",
 ) -> NamedTuple("Champion", [("found", str), ("version", str), ("resource_name", str)]):
-    """found is "yes" or "no". With required=True (inference) a missing model fails the run."""
+    """found is "yes" or "no". With required=True (inference) a missing model fails the run. version: a named
+    version instead of the default (a closed retrain loop: what production serves, or a candidate it validates)."""
     import logging
     import os
     from collections import namedtuple
@@ -34,7 +36,8 @@ def load_model(
             raise RuntimeError(f"no model {model_display_name!r} in the registry: run the training pipeline first")
         logging.info("no champion yet for %s", model_display_name)
         return out("no", "", "")
-    default = aiplatform.Model(model_name=existing[0].resource_name)    # resolves to the default version
+    name = existing[0].resource_name + (f"@{version}" if version else "")
+    default = aiplatform.Model(model_name=name)                          # without a version: the default
     bucket_name, _, prefix = default.uri.removeprefix("gs://").partition("/")
     client = storage.Client(project=project)
     copied = []

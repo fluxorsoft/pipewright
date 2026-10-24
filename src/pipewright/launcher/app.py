@@ -76,17 +76,17 @@ def create_app(registry: Registry | None = None) -> Flask:
                     region=contract.region, attributes=attributes)
 
     def start(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str,
-              hint: str = "") -> dict:
+              hint: str = "", extra: dict | None = None, loop: str | None = None) -> dict:
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
         try:
-            name = adapters.submit(contract, target, parameters_for(contract, target, source_uri, rid), jid,
-                                   labels_for(contract, trigger, rid, pipeline), reg().manifest.get("security"),
+            name = adapters.submit(contract, target, parameters_for(contract, target, source_uri, rid, extra), jid,
+                                   labels_for(contract, trigger, rid, pipeline, loop), reg().manifest.get("security"),
                                    manifest=reg().manifest, gcp=getattr(reg(), "gcp", None))
             log.info("submitted %s (%s %s, release %s) for %s", name, contract.usecase, pipeline,
                      contract.release_id, source_uri)
             _event("run.submitted", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid,
-                   source_uri=source_uri, job=name)
+                   source_uri=source_uri, job=name, **(extra or {}), **({"loop": loop} if loop else {}))
             return {"usecase": contract.usecase, "pipeline": pipeline, "status": "submitted", "job_id": jid,
                     "release": contract.release_id}
         except AlreadySubmitted:
@@ -261,7 +261,8 @@ def create_app(registry: Registry | None = None) -> Flask:
         except BadRequest as e:
             return jsonify(status="error", reason=str(e)), 400
         try:
-            result = start(contract, r.pipeline, r.source_uri, r.run_id, r.trigger, body.get("schedule") or "")
+            result = start(contract, r.pipeline, r.source_uri, r.run_id, r.trigger, body.get("schedule") or "",
+                           dict(r.overrides), r.loop)
         except Exception as e:  # noqa: BLE001
             log.exception("failed to submit %s", usecase)
             return jsonify(status="error", reason=str(e)), 500
