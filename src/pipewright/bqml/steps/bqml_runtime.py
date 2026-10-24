@@ -267,8 +267,43 @@ def feature_columns(ml_config: dict, columns: list[str]) -> list[str]:
     return [c for c in columns if c not in skip]
 
 
+def model_parts(jobs, model: str) -> dict | None:
+    """An imported model (promotion by files): {"transform": its transform model or None}; None for a model
+    BigQuery ML trained here. The transform model, when TRANSFORM was used, is <model>_transform."""
+    if str(jobs.client.get_model(model).model_type or "").upper() != "TENSORFLOW":
+        return None
+    try:
+        jobs.client.get_model(f"{model}_transform")
+        return {"transform": f"{model}_transform"}
+    except Exception:  # noqa: BLE001 - no TRANSFORM in the source model
+        return {"transform": None}
+
+
+def imported_outputs(ml_config: dict, evaluation: bool = False) -> str:
+    """The _pw_* outputs from an imported model's columns ({label}_probs as numbers, {label}_values as classes)."""
+    data = ml_config["data"]
+    label, task = ident(data["label"]["column"]), data["label"].get("task", "binary")
+    outputs = render(f"outputs_imported_{task}.sql", label=label, positive=str(data["label"].get("positive", 1)),
+                     threshold=float(ml_config["inference"].get("decision_threshold") or 0.5))
+    if task == "multiclass" and evaluation:
+        outputs += ",\n" + render("outputs_imported_multiclass_true.sql", label=label)
+    return outputs
+
+
+def imported_inner(rows_sql: str, transform: str | None) -> str:
+    """The rows an imported model scores: each row also as one STRUCT (_pw_raw), through the transform model first."""
+    rows = f"SELECT r AS _pw_raw, r.* FROM ({rows_sql}) AS r"
+    return f"SELECT * FROM ML.PREDICT(MODEL `{transform}`, ({rows}))" if transform else rows
+
+
 def predict_sql(ml_config: dict, model: str, rows_table: str, out_table: str, where: str, labels: dict,
-                evaluation: bool) -> str:
+                evaluation: bool, parts: dict | None = None) -> str:
+    """parts: model_parts() of an imported model (promotion by files); None for a model trained here."""
+    if parts is not None:
+        rows = f"SELECT * EXCEPT (_pw_test) FROM `{rows_table}` WHERE {where}"
+        return render("predict_imported.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
+                      outputs=imported_outputs(ml_config, evaluation), model=model,
+                      inner=imported_inner(rows, parts.get("transform")))
     data = ml_config["data"]
     label, task = data["label"]["column"], data["label"].get("task", "binary")
     positive = str(data["label"].get("positive", 1))

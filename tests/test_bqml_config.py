@@ -157,7 +157,14 @@ def test_byte_limit_default_and_platform_policy(repo):
 def test_promoted_by_retraining(repo):
     assert resolve(bqml_repo(repo)).model["promotion"] == "retrain"
     repo.usecase["spec"]["model"]["promotion"] = "model"
-    assert "model.promotion: a bqml model is promoted by retraining" in problems(repo)
+    assert "a bqml boosted_tree_classifier is promoted by retraining" in problems(repo)   # trees: retrain
+
+
+def test_linear_models_may_be_promoted_by_files(repo):
+    """BigQuery ML phase 2: linear_reg and logistic_reg export as TensorFlow and are promoted by their files."""
+    bqml_repo(repo, model_type="logistic_reg")
+    repo.usecase["spec"]["model"]["promotion"] = "model"
+    assert resolve(repo).model["promotion"] == "model"
 
 
 def test_a_bqml_versions_record_is_found_by_its_run(repo):

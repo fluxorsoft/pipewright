@@ -130,11 +130,16 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     # Model, serving, approvals, policies.
     model = {"promotion": "model", **eff["model"]}
-    if bqml_spec:          # the model stays in BigQuery: the next environment trains its own from the release
+    if bqml_spec:          # promoted by retraining, or (1.1) by its exported files for the types that allow it
         if eff["model"].get("promotion") == "model":
-            problems.append("model.promotion: a bqml model is promoted by retraining in the next environment; set "
-                            "promotion: retrain (or leave it out)")
-        model["promotion"] = "retrain"
+            from pipewright.bqml.promotion import EXPORTABLE
+
+            if str(bqml_spec.get("model_type", "")).lower() not in EXPORTABLE:
+                problems.append(f"model.promotion model: a bqml {bqml_spec.get('model_type')} is promoted by "
+                                f"retraining (promotion by files supports {', '.join(EXPORTABLE)}, which export as "
+                                "TensorFlow and score identically when imported); set promotion: retrain")
+        else:
+            model["promotion"] = "retrain"
     model["serving"] = deep_merge(_SERVING_DEFAULTS, eff["model"].get("serving", {}))
     serving = model["serving"]
     if serving["replicas"]["min"] > serving["replicas"]["max"]:

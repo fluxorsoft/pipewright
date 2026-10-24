@@ -153,7 +153,7 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
         champion_ref = f"{project}.{dataset}.{champion_model}"
         champion_predictions = rt.table_ref(project, ml_config, run_id, "champion")
         jobs.run(rt.predict_sql(ml_config, champion_ref, rows_table, champion_predictions, "_pw_test", jobs.labels,
-                                True), "champion predictions")
+                                True, parts=rt.model_parts(jobs, champion_ref)), "champion predictions")
         record["champion"] = {**rt.evaluate_rows(jobs, ml_config, champion_predictions)["metrics"],
                               "_version": champion.get("versionId"), "_model": champion_ref}
 
@@ -254,7 +254,8 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-score"}))
     scored = rt.table_ref(project, ml_config, run_id, "scored")
-    jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False), "predictions")
+    jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False,
+                            parts=rt.model_parts(jobs, model)), "predictions")
     output = ml_config["inference"]["output_table"]
     target = f"{project}.{ml_config['platform']['bigquery_dataset']}.{output}"
     table_columns = [f.name for f in jobs.client.get_table(target).schema]

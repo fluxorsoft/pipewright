@@ -347,12 +347,25 @@ def _promote_loop_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc
         if labels.get("promoted-from") == src_env.name[:63] and labels.get("source-version") == str(version):
             log(f"model: v{version} ({src_env.name}) was promoted already as v{v['versionId']} ({dst_env.name})")
             return Promotion(live, uri, live.release_id, live.promoted_from, str(v["versionId"]), unchanged=True)
-    model = promote_model(gcp, src_env, dst_env, uc_dst, live.release_id, version, log, loop_case=loop_case)
+    model = _promote_model_files(gcp, src_env, dst_env, uc_dst, live.release_id, version, log, loop_case=loop_case)
     events.emit(events.event("model.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, live.release_id, None,
                              by=who, source_environment=src_env.name, loop=loop_case,
                              model={k: model[k] for k in ("name", "source_version", "version")}),
                 dst_env.observability.get("events_topic"), gcp, stream=_quiet(), region=dst_env.region)
     return Promotion(live, uri, live.release_id, {**(live.promoted_from or {}), "model": model}, model["version"])
+
+
+def _promote_model_files(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
+                         release_id: str, version: str | None, log=print, loop_case: str | None = None) -> dict:
+    """The model's files to the destination: a container model's artifacts, or a BigQuery ML model exported,
+    imported and parity checked (bqml/promotion.py, Pipewright 1.1)."""
+    if (uc_dst.ml or {}).get("bqml"):
+        from pipewright.bqml.promotion import promote_bqml_model
+
+        uc_src = resolve_usecase(Path(uc_dst.source), src_env)
+        return promote_bqml_model(gcp, src_env, dst_env, uc_src, uc_dst, release_id, version, log,
+                                  loop_case=loop_case)
+    return promote_model(gcp, src_env, dst_env, uc_dst, release_id, version, log, loop_case=loop_case)
 
 
 # --------------------------------------------------------------- promotion --
@@ -491,7 +504,7 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     # 6. The model, unchanged.
     model = None
     if mode == "model":
-        model = promote_model(gcp, src_env, dst_env, uc_dst, rid, model_version, log, loop_case=loop_case)
+        model = _promote_model_files(gcp, src_env, dst_env, uc_dst, rid, model_version, log, loop_case=loop_case)
         if loop_case:
             policy.append(f"closed retrain loop {loop_case}: v{model_version} validated in {src_env.name}, approved "
                           f"for {dst_env.name} by {who}")
