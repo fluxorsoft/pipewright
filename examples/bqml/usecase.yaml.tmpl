@@ -1,0 +1,45 @@
+# {{usecase}}: created from the Pipewright BigQuery ML example (pipewright new-usecase --from bqml).
+# The model is trained and scored in BigQuery. There is no pipeline code: Pipewright provides the training and scoring
+# pipelines for a use case with a bqml section, and runs them on your environment's orchestrator like any other.
+# Your part is the data (config/data.yaml) and, when you need them, two SQL files (sql/). data/load_tables.sh loads
+# the sample tables; `pipewright resolve --env <env>` shows everything Pipewright fills in.
+apiVersion: pipewright/v1
+kind: UseCase
+metadata:
+  name: {{usecase}}
+  owner: {{owner}}
+
+spec:
+  tenant: {{tenant}}                      # given to you by the platform team
+  include: [config/*.yaml]               # config/data.yaml: the contract, label, split and the feature tables
+
+  bqml:
+    model_type: logistic_reg             # or boosted_tree_classifier, random_forest_classifier (slower, more bytes)
+    options: { l2_reg: 0.1, max_iterations: 20 }    # CREATE MODEL options; Pipewright sets the label and split
+    prepare: sql/prepare.sql             # SQL over the run's rows, written into them before training and scoring
+    transform: sql/transform.sql         # TRANSFORM expressions: applied by ML.PREDICT and at a registry endpoint
+    explain: true                        # global explanations in the evaluation record
+
+  model:
+    name: {{model_name}}                 # its Model Registry ID: every approved training run is a new version
+
+  triggers:
+    api: true                            # `pipewright run --source-uri bq://<dataset>.{{table_prefix}}entities`
+
+  evaluation:
+    gates:
+      - { metric: auc, min: 0.7 }        # a model below this is not registered
+
+  inference:
+    output_table: {{table_prefix}}scores
+
+  monitoring:                            # drift of the features and the scores, against training
+    drift: { enabled: true }
+    prediction_drift: { enabled: true }
+    output_table: {{table_prefix}}model_monitoring
+
+  outputs:                               # tables the pipelines write, created by `pipewright tables sync`
+    bigquery:
+      tables:
+        {{table_prefix}}scores:           { schema: schemas/scores.json, partition: { field: scored_at, type: DAY } }
+        {{table_prefix}}model_monitoring: { schema: schemas/model_monitoring.json, partition: { field: monitored_at, type: DAY } }

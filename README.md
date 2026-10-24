@@ -338,6 +338,48 @@ drift works for both: `psi_baseline` bins a regression model's predictions like 
 records a multi-class model's share of each predicted class, which `psi` compares (a class training never predicted
 counts as drift).
 
+## BigQuery ML
+
+A use case can train and score in BigQuery instead of in containers (new in 1.1). It has a `bqml` section and no
+pipeline code: Pipewright provides the training and scoring pipelines, and runs them on your environment's
+orchestrator (Agent Platform Pipelines or Kubeflow Pipelines on GKE) like any other. Their steps submit BigQuery
+jobs, so the data and the model stay in BigQuery. `pipewright new-usecase --from bqml` starts one.
+
+```yaml
+spec:
+  bqml:
+    model_type: logistic_reg            # boosted_tree_classifier, random_forest_classifier; for regression
+                                        # linear_reg, boosted_tree_regressor, random_forest_regressor
+    options: { l2_reg: 0.1 }            # CREATE MODEL options (Pipewright sets the label, split, key, registry)
+    prepare: sql/prepare.sql            # optional: SQL over {rows}, the run's rows
+    transform: sql/transform.sql        # optional: the TRANSFORM clause's expressions
+  inference:
+    output_table: scores                # run_id, model_version_id, scored_at, predicted_label and score
+                                        # (classification) or prediction (regression), and any input column
+```
+
+- **Training:** the run's rows (the entity table with its features at each row's cut-off, the label window when
+  `data.label_source` is set, then `prepare.sql`) are written to a table with a held-out test flag, from
+  `data.split`. The data contract is checked in SQL. `CREATE MODEL` sees the training rows only.
+- **Evaluation:** the new model and the champion score the same test rows, and Pipewright computes its own metrics
+  in SQL, defined as in the container path (`data.label.task`: binary, multiclass, regression), per slice too.
+  Gate 1 is the same check `pipewright model approve` makes; the evaluation record goes to the use case's pipeline
+  root.
+- **Registry:** only a model that passes gate 1 is registered (`ALTER MODEL ... SET OPTIONS (vertex_ai_model_id)`),
+  as a new version of `model.name`; approval and `deploy-model` work as for any model. Each run trains a new
+  BigQuery model, so versions never overwrite each other. A BigQuery ML model is promoted by retraining in the next
+  environment (`model.promotion: retrain`).
+- **Scoring:** `ML.PREDICT` with the default version into `inference.output_table`, then feature and prediction
+  drift (PSI against the training baselines in the record) into `monitoring.output_table`, with the same events.
+- **Preparation:** TRANSFORM is applied by `ML.PREDICT` and by a Model Registry endpoint, so callers send raw
+  values; use it for preparation the model needs when served. `prepare.sql` is pinned by the release, written into
+  the run's rows and run again when scoring; an endpoint runs no SQL, so online callers send its columns themselves.
+- **Cost:** every job has a byte limit (`bqml.max_bytes_billed`, default 100 GiB, or the platform's
+  `policies.bqml.max_bytes_billed`). Tree models bill far more bytes than linear ones and take minutes even on
+  small data; BigQuery's pricing lists them at a lower rate per TiB.
+- **Not yet:** hyperparameter tuning, performance monitoring against labels and retrain proposals from scoring,
+  k-means, PCA, imported models and forecasting.
+
 ## Synthetic data
 
 Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,

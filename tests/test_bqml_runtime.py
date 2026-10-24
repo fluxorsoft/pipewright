@@ -36,7 +36,7 @@ def test_create_model_on_the_training_rows_only(cfg):
     columns = ["customer_id", "snapshot_date", "tenure_months", "monthly_charges", "contract_length_months",
                "churned", "_pw_test"]
     sql = rt.create_model_sql(cfg, "p.d.m", "p.d.rows", columns)
-    assert "CREATE MODEL `p.d.m`" in sql and "WHERE NOT _pw_test" in sql
+    assert "CREATE OR REPLACE MODEL `p.d.m`" in sql and "WHERE NOT _pw_test" in sql
     assert ("OPTIONS (model_type = 'boosted_tree_classifier', input_label_cols = ['churned'], "
             "data_split_method = 'NO_SPLIT', enable_global_explain = TRUE, max_iterations = 30)") in sql
     # the features (customer_id is personal data, snapshot_date the split's time column) and the label

@@ -1,0 +1,6 @@
+# The BigQuery ML example: the feature tables example's data, trained and scored in BigQuery. No pipeline code:
+# Pipewright provides the pipelines for a use case with a bqml section. `pipewright new-usecase --from bqml`
+# copies these paths from the feature tables example, then this folder's files.
+code_from: features
+code:
+  - data/

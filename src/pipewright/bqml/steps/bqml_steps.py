@@ -49,7 +49,7 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
         _check_feature_datasets(features_from, project, ml_config)
         entity_columns = [f.name for f in jobs.client.get_table(ref).schema]
         staged = rt.table_ref(project, ml_config, run_id, "source" if mode == "training" else "score_source")
-        jobs.run(f"CREATE TABLE `{staged}` OPTIONS (expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), "
+        jobs.run(f"CREATE OR REPLACE TABLE `{staged}` OPTIONS (expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), "
                  f"INTERVAL 1 DAY)) AS\n{features_query(ref, entity_columns, features_from, project)}",
                  "features at each row's cut-off")
         hits = ", ".join(f"COUNTIF(__pw_hit_{i}) AS hit_{i}" for i in range(len(features_from["sources"])))

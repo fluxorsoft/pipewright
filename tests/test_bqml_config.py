@@ -1,4 +1,5 @@
 """BigQuery ML use cases (spec.bqml, Enterprise docs/BQML.md decisions 1 to 8): the configuration."""
+import importlib.util
 import json
 
 import pytest
@@ -168,3 +169,21 @@ def test_a_bqml_versions_record_is_found_by_its_run(repo):
     assert record_location(uc, None, {"pipewright-run": "r1f4"}) == f"{records}r1f4/"
     assert record_location(uc, "gs://b/model/", {"pipewright-run": "r1"}) == "gs://b/model/"   # artifacts first
     assert record_location(uc, None, {}) is None
+
+
+def test_new_usecase_from_the_bqml_example(repo, tmp_path):
+    from pipewright.scaffold.new_usecase import new_usecase
+
+    repo.write()
+    dest = new_usecase(repo.root, "churn-bq", "churn", "team-bq", example="bqml")
+    uc = resolve_usecase(dest / "usecase.yaml", load_environment(repo.root, "dev"))
+    section = uc.ml["bqml"]
+    assert section["model_type"] == "logistic_reg" and section["options"] == {"l2_reg": 0.1, "max_iterations": 20}
+    assert "FROM {rows}" in section["prepare"]["sql"] and "ML.STANDARD_SCALER" in section["transform"]["sql"]
+    assert uc.ml["inference"]["output_table"] == "churn_bq_scores" and uc.model["promotion"] == "retrain"
+    assert (dest / "data" / "load_tables.sh").is_file() and not (dest / "components").exists()
+    if importlib.util.find_spec("kfp"):
+        from pipewright.build.compile import check_parameters, compile_all
+
+        infos = compile_all(uc, "europe-west2-docker.pkg.dev/acme/img/churn-bq@sha256:" + "0" * 64, tmp_path)
+        assert check_parameters(uc, infos) == ([], [])

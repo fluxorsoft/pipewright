@@ -8,7 +8,9 @@ WITH t AS (
 ),
 ranked AS (
   SELECT g, y, p,
-    RANK() OVER (PARTITION BY g ORDER BY p) + (COUNT(*) OVER (PARTITION BY g, p) - 1) / 2 AS avg_rank,
+    -- tied scores share the mean of their ranks: halfway between the lowest and the highest rank of the tie
+    (RANK() OVER (PARTITION BY g ORDER BY p)
+     + COUNT(*) OVER (PARTITION BY g) - RANK() OVER (PARTITION BY g ORDER BY p DESC) + 1) / 2 AS avg_rank,
     ROW_NUMBER() OVER (PARTITION BY g ORDER BY p DESC, y) AS k,
     SUM(y) OVER (PARTITION BY g ORDER BY p DESC, y ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS tp_at_k
   FROM t
