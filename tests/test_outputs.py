@@ -130,7 +130,8 @@ def test_cli_events_publish_with_attributes():
     assert regional.calls[0][0] == "https://europe-west2-pubsub.googleapis.com/v1/projects/p/topics/pipewright-events:publish"
     assert body["messages"][0]["attributes"] == {"event_type": "model.approved", "usecase": "churn",
                                                  "environment": "prod", "tenant": "churn"}
-    assert json.loads(out.getvalue())["pipewright_event"]["data"] == {"version": "4"}
+    data = json.loads(out.getvalue())["pipewright_event"]["data"]
+    assert data["version"] == "4" and data["approval"]["via"] in ("outside-ci", "github")   # a decision (FR-56)
     assert events.emit(e, None, fake, stream=io.StringIO()) is False and len(fake.calls) == 1
 
 

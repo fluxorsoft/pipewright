@@ -23,8 +23,33 @@ from datetime import datetime, timezone
 log = logging.getLogger("pipewright.events")
 
 
+# Human decisions (FR-56, D-121, D-122): each records how it was approved next to the identity that acted.
+DECISIONS = ("model.approved", "model.deployed", "release.promoted", "release.rolled_back", "retrain.approval",
+             "retrain.approved", "retrain.declined", "retrain.snoozed")
+
+
+def approval() -> dict:
+    """How the decision being made now was approved. A gate job of the generated workflows sets
+    PIPEWRIGHT_APPROVAL from GitHub's record of its environment approval (the reviewers, their comment, the run);
+    any other GitHub Actions job is recorded with its run and actor; anything else as approved outside CI."""
+    given = os.environ.get("PIPEWRIGHT_APPROVAL")
+    if given:
+        try:
+            record = json.loads(given)
+        except ValueError:
+            record = {"note": "PIPEWRIGHT_APPROVAL is not JSON"}
+        return {"via": "github", **(record if isinstance(record, dict) else {})}
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        run = (f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{os.environ.get('GITHUB_REPOSITORY', '')}"
+               f"/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}")
+        return {"via": "github", "run_url": run, "actor": os.environ.get("GITHUB_ACTOR"), "reviewers": []}
+    return {"via": "outside-ci"}
+
+
 def event(event_type: str, usecase: str | None, environment: str | None, tenant: str | None = None,
           release: str | None = None, run_id: str | None = None, **data) -> dict:
+    if (event_type in DECISIONS or event_type.startswith("loop.")) and "approval" not in data:
+        data["approval"] = approval()
     return {"event_type": event_type, "time": datetime.now(timezone.utc).isoformat(), "usecase": usecase,
             "environment": environment, "tenant": tenant, "release": release, "run_id": run_id, "data": data}
 

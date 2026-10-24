@@ -133,7 +133,9 @@ class Decisions:
             try:
                 held["out"] = rc.decide(case, message.get("action", ""), by, group, s, now,
                                         reason=message.get("reason") or "", because=message.get("because"),
-                                        days=message.get("days"), source_uri=message.get("source_uri"), via=via)
+                                        days=message.get("days"), source_uri=message.get("source_uri"), via=via,
+                                        approval=message.get("approval") if isinstance(message.get("approval"), dict)
+                                        else None)
                 return held["out"].case
             except rc.DecisionRefused as e:
                 held["refused"] = str(e)

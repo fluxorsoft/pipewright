@@ -99,8 +99,10 @@ def message(env: Environment, case: dict, action: str, reason: str, because: str
 
         if sources.problem(source_uri):
             raise ConfigError(sources.problem(source_uri))
+    from pipewright.observability.events import approval
+
     out = {"kind": "retrain.decision", "usecase": case["usecase"], "case_id": case["case_id"], "action": action,
-           "reason": reason.strip()}
+           "reason": reason.strip(), "approval": approval()}       # the GitHub reviewer, or outside CI (D-121)
     for key, value in (("because", because), ("days", days), ("source_uri", source_uri)):
         if value is not None:
             out[key] = value

@@ -177,9 +177,18 @@ def quorum(case: dict) -> bool:
     return set(required) <= set(approved_groups(case))
 
 
+def _who(by: str, group: str | None, entry: dict) -> dict:
+    return {"by": by, "group": group, "reason": entry["reason"], "approval": approved_how(entry)}
+
+
+def approved_how(entry: dict) -> dict:
+    """How a decision was approved, as its client recorded it (FR-56); a client older than 1.1 sends nothing."""
+    return entry.get("approval") or {"via": "not recorded by the client"}
+
+
 def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now: datetime, reason: str = "",
            because: str | None = None, days: int | None = None, source_uri: str | None = None,
-           via: str = "") -> Outcome:
+           via: str = "", approval: dict | None = None) -> Outcome:
     """A person's decision. group: the approver group whose topic carried it (None: a direct call). Raises
     DecisionRefused with the reason it cannot be recorded."""
     if action not in ACTIONS:
@@ -200,7 +209,8 @@ def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now
     if s.separate_from_requester and by == case.get("requested_by"):
         raise DecisionRefused(f"{by} proposed this case and cannot decide it (approvals.separate_from_requester)")
     cid = case["case_id"]
-    entry = {"by": by, "group": group, "reason": reason.strip(), "via": via}
+    entry = {"by": by, "group": group, "reason": reason.strip(), "via": via,
+             **({"approval": approval} if approval else {})}
 
     if action == "approve":
         for a in case.get("approvals") or []:
@@ -215,12 +225,12 @@ def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now
         _log(case, now, "approve", **entry, source_uri=source_uri)
         if not quorum(case):
             waiting = sorted(set(required) - set(approved_groups(case)))
-            return Outcome(case, [("retrain.approval", {"by": by, "group": group, "reason": entry["reason"],
+            return Outcome(case, [("retrain.approval", {**_who(by, group, entry),
                                                         "waiting_for": waiting})],
                            status=f"case {cid}: approval recorded; waiting for {', '.join(waiting)}")
         case["state"] = "approved"
         case["approved_at"] = iso(now)
-        data = {"by": by, "group": group, "reason": entry["reason"], "approvers": [a["by"] for a in case["approvals"]]}
+        data = {**_who(by, group, entry), "approvers": [a["by"] for a in case["approvals"]]}
         if case.get("mode") == "candidate":
             return Outcome(case, [("retrain.approved", {**data, "next": "promote the candidate with "
                                                                         "`pipewright model approve`"})],
@@ -257,7 +267,7 @@ def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now
                 baseline={k: latest.get(k) for k in ("max_feature_psi", "prediction_psi", "drifted_features",
                                                      "triggers")})
     _log(case, now, action, **entry, because=because, days=days, until=until)
-    return Outcome(case, [(f"retrain.{state}", {"by": by, "group": group, "reason": entry["reason"],
+    return Outcome(case, [(f"retrain.{state}", {**_who(by, group, entry),
                                                 "because": because, "until": until})],
                    status=f"case {cid} {state} until {until}")
 

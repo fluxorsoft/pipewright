@@ -193,3 +193,27 @@ def test_one_loop_at_a_time_per_use_case():
         loop(b).start()
     b.others[0]["loop"]["state"] = "rejected"
     assert loop(b).start()["state"] == "training"
+
+
+def test_decisions_record_how_they_were_approved(monkeypatch):
+    from pipewright.observability import events
+
+    for var in ("PIPEWRIGHT_APPROVAL", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(var, raising=False)
+    assert events.event("model.approved", "churn", "prod")["data"]["approval"] == {"via": "outside-ci"}
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/churn-ml")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    run_url = events.event("loop.closed", "churn", "prod")["data"]["approval"]["run_url"]
+    assert run_url.endswith("acme/churn-ml/actions/runs/42")
+    monkeypatch.setenv("PIPEWRIGHT_APPROVAL", '{"reviewers": ["amy"], "comment": "ok", "environment": "prod"}')
+    record = events.event("release.promoted", "churn", "prod")["data"]["approval"]
+    assert record == {"via": "github", "reviewers": ["amy"], "comment": "ok", "environment": "prod"}
+    assert "approval" not in events.event("run.submitted", "churn", "prod")["data"]         # not a decision
+
+
+def test_launcher_decision_events_carry_the_clients_record():
+    from pipewright.retraining import cases as rc
+
+    assert rc.approved_how({"approval": {"via": "github", "reviewers": ["amy"]}})["reviewers"] == ["amy"]
+    assert rc.approved_how({}) == {"via": "not recorded by the client"}                  # a 1.0 CLI
