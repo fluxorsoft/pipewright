@@ -223,7 +223,8 @@ def test_pending_decisions_name_their_gate_and_command():
     from pipewright.decisions import pending_for
     from pipewright.models.registry import Version
 
-    versions = [Version("5", False, [], "", "", {}, gates="pass"), Version("4", False, [], "", "", {}, gates="FAIL: x"),
+    versions = [Version("6", False, [], "", "", {}, gates="pass"), Version("5", False, [], "", "", {}, gates="pass"),
+                Version("4", False, [], "", "", {}, gates="FAIL: x"),
                 Version("3", True, [], "", "", {}), Version("2", False, [], "", "", {}, gates="pass")]
     cases = [
         {"case_id": "rc-a", "state": "open", "required": ["ml-leads", "model-risk"],
@@ -235,7 +236,7 @@ def test_pending_decisions_name_their_gate_and_command():
     ]
     items = {i.id: i for i in pending_for("churn", "prod", versions, cases,
                                           {"production": "https://prod.example", "test": "https://test.example"})}
-    assert set(items) == {"prod/churn/model-approve/v5", "prod/churn/retrain-approve/rc-a-model-risk",
+    assert set(items) == {"prod/churn/model-approve/v6", "prod/churn/retrain-approve/rc-a-model-risk",
                           "prod/churn/retrain-approve/rc-b", "prod/churn/loop-approve/rc-c",
                           "prod/churn/loop-advance/rc-d"}
     assert items["prod/churn/retrain-approve/rc-a-model-risk"].gate == "prod-model-risk"        # D-120
@@ -243,8 +244,8 @@ def test_pending_decisions_name_their_gate_and_command():
     assert items["prod/churn/retrain-approve/rc-b"].gate == "prod"
     assert items["prod/churn/loop-approve/rc-c"].command[-1] == "--approve"
     assert items["prod/churn/loop-advance/rc-d"].gate is None                                  # no person needed
-    assert items["prod/churn/model-approve/v5"].command == [
-        "model", "approve", "--env", "prod", "--usecase", "churn", "--version", "5", "--approve"]
+    assert items["prod/churn/model-approve/v6"].command == [
+        "model", "approve", "--env", "prod", "--usecase", "churn", "--version", "6", "--approve"]
     assert items["prod/churn/loop-advance/rc-d"].launchers == ["https://prod.example", "https://test.example"]
     assert items["prod/churn/retrain-approve/rc-b"].launchers == ["https://prod.example"]
-    assert items["prod/churn/model-approve/v5"].launchers == []
+    assert items["prod/churn/model-approve/v6"].launchers == []

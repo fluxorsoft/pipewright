@@ -45,12 +45,14 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
     out: list[Item] = []
     default = next((v for v in versions if v.default), None)
     number = int(default.version_id) if default and str(default.version_id).isdigit() else 0
-    for v in versions:
-        if not v.default and str(v.version_id).isdigit() and int(v.version_id) > number and v.gates == "pass":
-            out.append(Item("model-approve", usecase, env, env, f"v{v.version_id}",
-                            ["model", "approve", "--env", env, "--usecase", usecase, "--version", str(v.version_id),
-                             "--approve"], f"v{v.version_id} passes the gates; the default is "
-                                           f"v{default.version_id if default else 'none'}"))
+    # Only the newest version that passes the gates: approving an older one once a newer exists is never the ask.
+    newer = [v for v in versions if not v.default and str(v.version_id).isdigit() and int(v.version_id) > number
+             and v.gates == "pass"]
+    for v in sorted(newer, key=lambda v: int(v.version_id))[-1:]:
+        out.append(Item("model-approve", usecase, env, env, f"v{v.version_id}",
+                        ["model", "approve", "--env", env, "--usecase", usecase, "--version", str(v.version_id),
+                         "--approve"], f"v{v.version_id} passes the gates; the default is "
+                                       f"v{default.version_id if default else 'none'}"))
     for c in cases:
         loop = c.get("loop") or {}
         state = loop.get("state")
