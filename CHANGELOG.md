@@ -32,6 +32,13 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   (`bqml.max_bytes_billed`, manifest `policies.bqml`); `examples/bqml` (`pipewright new-usecase --from bqml`).
   `spec.components` is required only without `bqml`.
 
+### Fixed
+
+- **Retrain decisions in private environments** without a required approver group: the CLI sent them to the
+  launcher directly, which a private launcher refuses. They now go over the run requests topic (`kind:
+  retrain.decision`, with the person's ID token, verified as for a direct call); the launcher accepts them on
+  `/pubsub/run`. A launcher older than 1.1 drops them, which the CLI says when nothing is recorded.
+
 ## [1.0.0] - 2026-10-18
 
 First release, on GitHub and on PyPI (`pipewright-mlops`). First published on GitHub on 2026-10-17 and re-cut to

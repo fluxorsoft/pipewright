@@ -342,3 +342,61 @@ def test_decision_alert_policies(repo):
     body = policy_body(uc, "retrain.proposed", ["c1"], "WARNING")
     assert "```\n${log.extracted_label.summary}\n```" in body["documentation"]["content"]
     assert body["documentation"]["subject"].endswith("(${log.extracted_label.case_id})")
+
+
+def test_a_decision_without_groups_over_the_run_requests_topic(gcs, monkeypatch):
+    """A private launcher accepts no direct calls: a decision no approver group has to make comes over /pubsub/run
+    as kind retrain.decision, with the person's ID token. A required group still decides over its own topic."""
+    pytest.importorskip("flask")
+    from pipewright import adapters
+    from pipewright.launcher.app import create_app
+    from tests.test_launcher import FakeRegistry
+
+    monkeypatch.setattr(adapters, "submit", lambda *a, **k: "projects/p/locations/r/pipelineJobs/j")
+    monkeypatch.setattr(identity, "verify", lambda token, audiences: {"tok-amy": "amy@x"}.get(token) or "")
+    ml = {**ML, "retraining": {**ML["retraining"], "approvals": {"required": []}}}
+    ungrouped = replace(V3, pipelines={**V3.pipelines,
+                                       "inference": {**INFERENCE, "static_parameters": {"ml_config": ml}}})
+
+    def launcher(contract):
+        reg = FakeRegistry([contract])
+        reg.gcp, reg.bucket = None, "b"
+        reg.manifest.update(launcher={"url": "https://l", "service_account": "launcher@p"})
+        app = create_app(reg).test_client()
+
+        def pubsub(body):
+            data = base64.b64encode(json.dumps(body).encode()).decode()
+            return app.post("/pubsub/run", json={"message": {"data": data}})
+        return pubsub
+
+    decision = {"kind": "retrain.decision", "usecase": "churn", "action": "snooze", "because": "seasonal",
+                "days": 3, "reason": "known dip"}
+    for contract, run in ((CONTRACT, "r1"), (ungrouped, "r2")):
+        gcs.clear()                                   # each launcher starts with no cases
+        pubsub = launcher(contract)
+        proposal = {"kind": "retrain.proposal", "usecase": "churn", "run_id": run, "observation": DRIFT}
+        decision["case_id"] = pubsub(proposal).json["case_id"]
+        if contract is CONTRACT:
+            r = pubsub({**decision, "id_token": "tok-amy"})
+            assert r.status_code == 200 and r.json["status"] == "refused"
+            assert "required approver group" in r.json["reason"]
+            continue
+        r = pubsub({**decision, "id_token": "forged"})
+        assert r.status_code == 200 and r.json["status"] == "refused"     # recorded and acknowledged, not retried
+        r = pubsub({**decision, "id_token": "tok-amy"})
+        assert r.status_code == 200 and r.json["status"] == "recorded" and r.json["by"] == "amy@x"
+        assert r.json["state"] == "snoozed"
+        assert pubsub({**decision, "usecase": "nope", "id_token": "tok-amy"}).status_code == 503
+
+
+def test_the_cli_sends_ungrouped_decisions_over_the_run_requests_topic(monkeypatch):
+    from types import SimpleNamespace
+
+    from pipewright.retraining import client
+
+    private = SimpleNamespace(launcher={"url": "https://l", "run_requests_topic": "projects/p/topics/runs"})
+    assert client.run_requests_topic(private, None) == "projects/p/topics/runs"
+    assert client.run_requests_topic(private, "ml-leads") is None           # a group decides over its own topic
+    assert client.run_requests_topic(SimpleNamespace(launcher={"url": "https://l"}), None) is None
+    monkeypatch.setenv("PIPEWRIGHT_RUN_VIA", "http")
+    assert client.run_requests_topic(private, None) is None

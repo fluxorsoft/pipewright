@@ -13,7 +13,9 @@ Routes:
                      inference run opens or updates a retrain decision case (also as kind retrain.proposal on
                      /pubsub/run)
   POST /retraining/decide    a person's decision: a Pub/Sub push from an approver group's subscription (the message
-                     carries the person's ID token), or a direct call by the deciding identity
+                     carries the person's ID token), or a direct call by the deciding identity (also as kind
+                     retrain.decision on /pubsub/run, with the person's "id_token": a private launcher accepts no
+                     direct calls, so a decision no approver group has to make arrives there)
   POST /retraining/tick      {"digest"?}: snooze and decline expiry, escalation, the weekly digest (Cloud Scheduler);
                      also removes Ray clusters whose run ended or whose deadline passed
   POST /ray/clusters {"action": "create" | "delete", "usecase", "run_id", "step"}: a Ray step's cluster, from the use
@@ -279,6 +281,20 @@ def create_app(registry: Registry | None = None) -> Flask:
         if body.get("kind") == "retrain.proposal":
             response, code = _propose(body)
             return response, (503 if code == 404 else code)
+        if body.get("kind") == "retrain.decision":
+            # A decision no approver group has to make, from outside a private perimeter. Pub/Sub does not say who
+            # published: the message carries the person's ID token, verified as for a direct call.
+            contract = reg().get(body.get("usecase") or "")
+            if contract is None:
+                return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 503
+            try:
+                result = decisions().decide(contract, body, None, "run-requests")
+            except Exception as e:  # noqa: BLE001 - Pub/Sub redelivers
+                log.exception("decision on %s failed", body.get("case_id"))
+                return jsonify(status="error", reason=str(e)[:300]), 500
+            log.info("retrain decision for %s: %s", contract.usecase,
+                     {k: v for k, v in result.items() if k != "training"})
+            return jsonify(result), 200            # a refusal is recorded on the case: acknowledged
         if body.get("kind") == "ray.cluster":
             # Pub/Sub does not say who published: the message carries the runner's ID token.
             try:

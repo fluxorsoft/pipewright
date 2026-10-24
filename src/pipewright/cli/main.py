@@ -347,14 +347,18 @@ def cmd_retrain_decide(args) -> int:
                           getattr(args, "days", None), getattr(args, "source_uri", None))
     group = client.choose_group(env, case, action, args.group, gcp)
     since = client.now_iso()
+    queued = bool(group or client.run_requests_topic(env, group))      # sent over a topic: the launcher records
     how = client.send(env, case, body, group, gcp)
     print(f"{action} for case {case['case_id']} {how}")
-    if group is None or args.no_wait:
+    if not queued or args.no_wait:
         return 0
     print("waiting for the launcher to record it ...")
     answer = client.wait_for(env, case, since, gcp)
     if answer is None:
-        print(f"not recorded yet: check later with `pipewright retrain show --case {case['case_id']}`")
+        older = "" if group else (" A launcher older than Pipewright 1.1 drops decisions sent over the run requests "
+                                  "topic: ask the platform team which launcher runs, or decide as a required "
+                                  "approver group.")
+        print(f"not recorded yet: check later with `pipewright retrain show --case {case['case_id']}`.{older}")
         return 0
     entry, latest = answer["entry"], answer["case"]
     if entry["action"] == "refused":

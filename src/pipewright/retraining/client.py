@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import time
 from datetime import datetime, timezone
 
@@ -106,11 +107,31 @@ def message(env: Environment, case: dict, action: str, reason: str, because: str
     return out
 
 
+def run_requests_topic(env: Environment, group: str | None) -> str | None:
+    """The topic a decision no approver group has to make goes over: a private launcher's run requests topic (it
+    accepts no direct calls). PIPEWRIGHT_RUN_VIA=http calls the launcher directly (from inside the network)."""
+    topic = (env.launcher or {}).get("run_requests_topic")
+    if group is None and topic and os.environ.get("PIPEWRIGHT_RUN_VIA", "").lower() != "http":
+        return topic
+    return None
+
+
 def send(env: Environment, case: dict, body: dict, group: str | None, gcp: Gcp) -> str:
     """Sends the decision; returns how (for the user)."""
+    from pipewright.observability.events import publish_url
     from pipewright.runs import launch
 
     url = launch.launcher_url(env)
+    topic = run_requests_topic(env, group)
+    if topic:
+        payload = {**body, "kind": "retrain.decision", "id_token": launch.id_token(url)}
+        r = gcp.post(publish_url(topic, env.region), {"messages": [{
+            "data": base64.b64encode(json.dumps(payload).encode()).decode(),
+            "attributes": {"usecase": case["usecase"], "case_id": case["case_id"], "action": body["action"]}}]})
+        if not r.ok:
+            hint = " (publishing needs roles/pubsub.publisher on it: ask the platform team)" if r.status == 403 else ""
+            raise ConfigError(f"decision not sent to {topic}: {error_text(r)}{hint}")
+        return f"sent over the run requests topic (message {r.body['messageIds'][0]})"
     if group is None:
         result = launch.call(env, body, path="/retraining/decide")
         if result.get("status") != "recorded":
@@ -118,8 +139,6 @@ def send(env: Environment, case: dict, body: dict, group: str | None, gcp: Gcp) 
         return "sent to the launcher"
     payload = {**body, "id_token": launch.id_token(url)}
     topic = env.approver_groups[group]["topic"]
-    from pipewright.observability.events import publish_url
-
     r = gcp.post(publish_url(topic, env.region), {"messages": [{
         "data": base64.b64encode(json.dumps(payload).encode()).decode(),
         "attributes": {"usecase": case["usecase"], "case_id": case["case_id"], "action": body["action"]}}]})
