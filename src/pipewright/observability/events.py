@@ -24,8 +24,8 @@ log = logging.getLogger("pipewright.events")
 
 
 # Human decisions (FR-56, D-121, D-122): each records how it was approved next to the identity that acted.
-DECISIONS = ("model.approved", "model.deployed", "release.promoted", "release.rolled_back", "retrain.approval",
-             "retrain.approved", "retrain.declined", "retrain.snoozed")
+DECISIONS = ("model.approved", "model.deployed", "model.promoted", "release.promoted", "release.rolled_back",
+             "retrain.approval", "retrain.approved", "retrain.declined", "retrain.snoozed")
 
 
 def approval() -> dict:

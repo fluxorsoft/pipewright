@@ -78,7 +78,7 @@ class GcpBackend:
         from pipewright.release import promote
 
         result = promote.promote(self.path, self.test, self.production, gcp=self.gcp, model_version=version,
-                                 approve=True)
+                                 approve=True, loop_case=self.case_id)
         promoted = result.model_version
         if promoted is None:          # promoted already (the step is repeated): the version that came from it
             promoted = next((v["version"] for v in self.versions(self.production.name)

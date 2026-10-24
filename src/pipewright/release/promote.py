@@ -288,8 +288,10 @@ def _wait(gcp: Gcp, env: Environment, operation: dict, what: str) -> dict:
 
 
 def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
-                  release_id: str, version: str | None, log=print) -> dict:
-    """The source's approved version, as a new candidate version in the destination's Model Registry."""
+                  release_id: str, version: str | None, log=print, loop_case: str | None = None) -> dict:
+    """The source's approved version, as a new candidate version in the destination's Model Registry.
+    loop_case: a closed retrain loop's candidate (FR-48), validated in the source and approved for the destination
+    by the loop's production approval; it need not be the source's default."""
     name = uc_dst.model["name"]
     src_model = _find_model(gcp, src_env, name)
     if src_model is None:
@@ -300,7 +302,7 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     chosen = versions.get(str(version))
     if chosen is None:
         raise ConfigError(f"{name} has no version {version} in {src_env.name} (versions: {', '.join(versions)})")
-    if "default" not in chosen.get("versionAliases", []):
+    if "default" not in chosen.get("versionAliases", []) and not loop_case:
         raise ConfigError(f"v{version} of {name} is not the default (approved) version in {src_env.name}: approve it "
                           "there first (`pipewright model approve`), so production gets only what was approved")
     trained_by = (chosen.get("labels") or {}).get("release")
@@ -317,7 +319,8 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
         "versionAliases": [f"promoted-{src_env.name}-v{version}"[:128]],
         "versionDescription": f"promoted from {src_env.name} v{version} (release {release_id})",
         "labels": {"usecase": uc_dst.name[:63], "status": "candidate", "release": publish._tag(release_id)[:63],
-                   "promoted-from": src_env.name[:63], "source-version": str(version)},
+                   "promoted-from": src_env.name[:63], "source-version": str(version),
+                   **({"pipewright-loop": publish._tag(loop_case)[:63]} if loop_case else {})},
         **({"encryptionSpec": {"kmsKeyName": dst_env.security["kms_key"]}} if dst_env.security.get("kms_key") else {}),
     }}
     if dst_model:
@@ -330,6 +333,26 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     log(f"model: {name} v{version} ({src_env.name}) -> v{dst_version} ({dst_env.name}), a candidate")
     return {"name": name, "source_version": str(version), "source_artifact_uri": chosen["artifactUri"],
             "artifact_uri": dest_uri, "version": dst_version, "files": files}
+
+
+def _promote_loop_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
+                        live: ReleaseContract, name: str, version: str, loop_case: str, who: str,
+                        log=print) -> Promotion:
+    """The release is live in the destination already (the loop's candidate was trained by it): only the model is
+    promoted. Repeating it finds the version promoted before."""
+    uri = f"gs://{dst_env.artifacts_bucket}/{name}"
+    dst_model = _find_model(gcp, dst_env, uc_dst.model["name"])
+    for v in _versions(gcp, dst_env, dst_model) if dst_model else []:
+        labels = v.get("labels") or {}
+        if labels.get("promoted-from") == src_env.name[:63] and labels.get("source-version") == str(version):
+            log(f"model: v{version} ({src_env.name}) was promoted already as v{v['versionId']} ({dst_env.name})")
+            return Promotion(live, uri, live.release_id, live.promoted_from, str(v["versionId"]), unchanged=True)
+    model = promote_model(gcp, src_env, dst_env, uc_dst, live.release_id, version, log, loop_case=loop_case)
+    events.emit(events.event("model.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, live.release_id, None,
+                             by=who, source_environment=src_env.name, loop=loop_case,
+                             model={k: model[k] for k in ("name", "source_version", "version")}),
+                dst_env.observability.get("events_topic"), gcp, stream=_quiet(), region=dst_env.region)
+    return Promotion(live, uri, live.release_id, {**(live.promoted_from or {}), "model": model}, model["version"])
 
 
 # --------------------------------------------------------------- promotion --
@@ -359,7 +382,10 @@ def _check_checkout(uc: ResolvedUseCase, commit: str | None) -> None:
 
 def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp: Gcp | None = None,
             release_id: str | None = None, model_version: str | None = None, accept_template_change: bool = False,
-            skip_tables: bool = False, approve: bool = False, build_dir: Path | None = None, log=print) -> Promotion:
+            skip_tables: bool = False, approve: bool = False, build_dir: Path | None = None, log=print,
+            loop_case: str | None = None) -> Promotion:
+    """loop_case: the closed retrain loop promotes its validated candidate (model_version), which need not be the
+    source's default; with the release live already, only the model is promoted."""
     gcp = gcp or Gcp()
     who = gcp.identity()
 
@@ -392,9 +418,12 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
             raise ConfigError(f"{dst_env.name} already has a different release {rid} of {uc_dst.name}: refusing to "
                               "replace it (contracts are write-once)")
         if pointer and pointer.release_id == rid:
-            log(f"{uc_dst.name} release {rid} is already live in {dst_env.name}: nothing to do")
-            return Promotion(existing, f"gs://{dst_env.artifacts_bucket}/{name}", pointer.release_id,
-                             existing.promoted_from, unchanged=True)
+            if not (loop_case and model_version and mode == "model"):
+                log(f"{uc_dst.name} release {rid} is already live in {dst_env.name}: nothing to do")
+                return Promotion(existing, f"gs://{dst_env.artifacts_bucket}/{name}", pointer.release_id,
+                                 existing.promoted_from, unchanged=True)
+            return _promote_loop_model(gcp, src_env, dst_env, uc_dst, existing, name, model_version, loop_case,
+                                       who, log)
 
     # 4. Templates: compiled for the destination (at the destination's image addresses), compared with the
     # source's, before anything is copied.
@@ -462,7 +491,10 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     # 6. The model, unchanged.
     model = None
     if mode == "model":
-        model = promote_model(gcp, src_env, dst_env, uc_dst, rid, model_version, log)
+        model = promote_model(gcp, src_env, dst_env, uc_dst, rid, model_version, log, loop_case=loop_case)
+        if loop_case:
+            policy.append(f"closed retrain loop {loop_case}: v{model_version} validated in {src_env.name}, approved "
+                          f"for {dst_env.name} by {who}")
 
     # 7. Templates uploaded, the contract written once.
     uploaded = {p: publish.upload_template(info, dst_env.artifact_registry["kfp"], uc_dst, rid, gcp.session.credentials)

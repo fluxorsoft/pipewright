@@ -57,8 +57,8 @@ def setup(repo, monkeypatch, tmp_path):
         return {"training": SimpleNamespace(name="churn-training", spec_path=path, pipeline="training",
                                             parameters={"project", "region", "source_uri", "run_id"})}
 
-    def promote_model(gcp, src_env, dst_env, uc, rid, version, log=print):
-        state.calls.append("copy model")
+    def promote_model(gcp, src_env, dst_env, uc, rid, version, log=print, loop_case=None):
+        state.calls.append("copy model" + (f" for {loop_case}" if loop_case else ""))
         if state.model_error:
             raise ConfigError(state.model_error)
         return {"name": "churn-classifier", "source_version": "3", "version": "1", "files": []}
@@ -108,6 +108,38 @@ def test_a_promotion_copies_verifies_records_and_moves_the_pointer_last(setup):
     assert rec["templates"]["training"]["differences"] == [] and rec["model"]["source_version"] == "3"
     assert any("templates equal to the source's" in p for p in rec["policy"])
     assert prod_pointer(setup)["release_id"] == "abc123" and result.model_version == "1"
+
+
+# The closed retrain loop (FR-48): its candidate was trained by the release live in production, so only the model is
+# promoted; repeating the step finds the version promoted before.
+def test_the_loop_promotes_its_candidate_when_the_release_is_live(setup, monkeypatch):
+    setup.run()
+    setup.calls.clear()
+    assert setup.run(model_version="4").unchanged and setup.calls == []          # by hand: nothing to do, as in 1.0
+    monkeypatch.setattr(promote, "_versions", lambda gcp, env, model: [])
+    result = setup.run(model_version="4", loop_case="rc-1")
+    assert setup.calls == ["copy model for rc-1", "event model.promoted"]       # no contract, no pointer moved
+    assert result.model_version == "1" and not result.unchanged
+    setup.calls.clear()
+    monkeypatch.setattr(promote, "_versions", lambda gcp, env, model: [
+        {"versionId": "7", "labels": {"promoted-from": "dev", "source-version": "4"}}])
+    again = setup.run(model_version="4", loop_case="rc-1")
+    assert again.unchanged and again.model_version == "7" and setup.calls == []
+
+
+def test_a_loop_candidate_need_not_be_the_source_default(repo, monkeypatch):
+    repo.add_env("prod", project="acme-ml-prod")
+    repo.environments["prod"]["promotion"] = {"from": "dev"}
+    path = repo.write()
+    src, dst = load_environment(repo.root, "dev"), load_environment(repo.root, "prod")
+    from pipewright.config import resolve_usecase
+
+    uc = resolve_usecase(path, dst)
+    versions = [{"versionId": "2", "versionAliases": ["run-x"], "labels": {"release": "other"}}]
+    monkeypatch.setattr(promote, "_find_model", lambda gcp, env, name: {"name": "m", "displayName": name})
+    monkeypatch.setattr(promote, "_versions", lambda gcp, env, model: versions)
+    with pytest.raises(ConfigError, match="was trained by release other"):      # past the default check
+        promote.promote_model(None, src, dst, uc, "abc123", "2", log=lambda m: None, loop_case="rc-1")
 
 
 # 4: retraining promotes the release only; production trains its own candidate.
