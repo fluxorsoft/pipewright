@@ -388,6 +388,21 @@ def cmd_loop(args) -> int:
     return 1 if record.get("state") in ("failed", "validation-failed", "verification-failed") else 0
 
 
+def cmd_decisions(args) -> int:
+    from pipewright import decisions
+
+    items = decisions.pending(args.root, args.env, args.usecase or None)
+    if args.json:
+        print(json.dumps([i.to_dict() for i in items], indent=2))
+        return 0
+    if not items:
+        print(f"{args.env}: nothing waits for a decision")
+    for i in items:
+        gate = f"gate {i.gate}" if i.gate else "no person needed"
+        print(f"{i.kind:<16} {i.usecase:<20} {i.key:<24} {gate:<28} {i.summary}")
+    return 0
+
+
 def cmd_retrain_decide(args) -> int:
     from pipewright.gcp import Gcp
     from pipewright.retraining import client
@@ -768,6 +783,15 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--manifest", help="or the environment manifest, gs://... (approvers without the repo)")
         sp.add_argument("--usecase", required=True)
         sp.add_argument("--case", required=case_required, help="case ID (default: the open case)")
+
+    sp = sub.add_parser("decisions", help="what waits for a person: model approvals, retrain cases, loops")
+    dsub = sp.add_subparsers(dest="decisions_command", required=True)
+    sp = dsub.add_parser("pending", help="pending decisions, with the GitHub environment that gates each (FR-56)")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--env", required=True)
+    sp.add_argument("--usecase", action="append", help="only these use cases (repeatable)")
+    sp.add_argument("--json", action="store_true", help="for the generated workflows")
+    sp.set_defaults(func=cmd_decisions)
 
     sp = sub.add_parser("loop", help="the closed retrain loop: a production case trained in test, validated, "
                                      "promoted, approved and verified in production")

@@ -217,3 +217,30 @@ def test_launcher_decision_events_carry_the_clients_record():
 
     assert rc.approved_how({"approval": {"via": "github", "reviewers": ["amy"]}})["reviewers"] == ["amy"]
     assert rc.approved_how({}) == {"via": "not recorded by the client"}                  # a 1.0 CLI
+
+
+def test_pending_decisions_name_their_gate_and_command():
+    from pipewright.decisions import pending_for
+    from pipewright.models.registry import Version
+
+    versions = [Version("5", False, [], "", "", {}, gates="pass"), Version("4", False, [], "", "", {}, gates="FAIL: x"),
+                Version("3", True, [], "", "", {}), Version("2", False, [], "", "", {}, gates="pass")]
+    cases = [
+        {"case_id": "rc-a", "state": "open", "required": ["ml-leads", "model-risk"],
+         "approvals": [{"group": "ml-leads"}], "triggers": ["drift"]},
+        {"case_id": "rc-b", "state": "open", "required": [], "approvals": [], "triggers": ["performance"]},
+        {"case_id": "rc-c", "state": "approved", "loop": {"state": "validated"}},
+        {"case_id": "rc-d", "state": "approved", "loop": {"state": "training"}},
+        {"case_id": "rc-e", "state": "approved", "loop": {"state": "closed"}},
+    ]
+    items = {i.id: i for i in pending_for("churn", "prod", versions, cases)}
+    assert set(items) == {"prod/churn/model-approve/v5", "prod/churn/retrain-approve/rc-a-model-risk",
+                          "prod/churn/retrain-approve/rc-b", "prod/churn/loop-approve/rc-c",
+                          "prod/churn/loop-advance/rc-d"}
+    assert items["prod/churn/retrain-approve/rc-a-model-risk"].gate == "prod-model-risk"        # D-120
+    assert "--group" in items["prod/churn/retrain-approve/rc-a-model-risk"].command
+    assert items["prod/churn/retrain-approve/rc-b"].gate == "prod"
+    assert items["prod/churn/loop-approve/rc-c"].command[-1] == "--approve"
+    assert items["prod/churn/loop-advance/rc-d"].gate is None                                  # no person needed
+    assert items["prod/churn/model-approve/v5"].command == [
+        "model", "approve", "--env", "prod", "--usecase", "churn", "--version", "5", "--approve"]
