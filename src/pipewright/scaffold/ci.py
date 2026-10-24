@@ -4,11 +4,17 @@
     .github/workflows/pipewright-pr.yml           pull requests: validate, test, doctor, dry runs
     .github/workflows/pipewright-release.yml      merge to main: release changed use cases, env by env
     .github/workflows/pipewright-operate.yml      by hand: run, status, rollback, approve, deploy, canary
+    .github/workflows/pipewright-decisions.yml    every 15 minutes: pending decisions; advances retrain loops
+    .github/workflows/pipewright-gate.yml         one decision, approved by its GitHub environment's reviewers
 
 Each environment is a GitHub environment with the variables PIPEWRIGHT_PIP_SPEC and, with Workload Identity
 Federation, GCP_WIF_PROVIDER and PIPEWRIGHT_SERVICE_ACCOUNT (optional: PIPEWRIGHT_PIP_INDEX,
 PIPEWRIGHT_SETUP_TOOLS=off, PIPEWRIGHT_SCHEDULES=off). Required reviewers on a GitHub environment are the approval
 gate for releases and operations there.
+
+Decisions (FR-56): pipewright-decisions runs in <environment>-decisions (the same variables, no reviewers) and
+dispatches a pipewright-gate run per pending decision. A gate runs in <environment>, or <environment>-<group> for
+a retrain case's approver group; its required reviewers decide, and the decision's event records them.
 
 Self-hosted runners: `--runs-on self-hosted,linux,mlops` puts those labels on every job. On a GCE or GKE runner
 with a service account attached, leave GCP_WIF_PROVIDER empty and the runner's own identity is used.
@@ -28,6 +34,8 @@ FILES = {
     "pipewright-pr.yml": ".github/workflows/pipewright-pr.yml",
     "pipewright-release.yml": ".github/workflows/pipewright-release.yml",
     "pipewright-operate.yml": ".github/workflows/pipewright-operate.yml",
+    "pipewright-decisions.yml": ".github/workflows/pipewright-decisions.yml",
+    "pipewright-gate.yml": ".github/workflows/pipewright-gate.yml",
 }
 
 RELEASE_JOB = """  release-@@ENV@@:

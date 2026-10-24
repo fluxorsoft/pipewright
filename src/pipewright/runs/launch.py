@@ -1,6 +1,8 @@
 """pipewright run: start a pipeline through the shared launcher's /run, as a person or from CI.
 
 The launcher needs an ID token for its URL. In order:
+  PIPEWRIGHT_ID_TOKENS     set by CI for a job that calls several launchers (the closed retrain loop): a JSON
+                           object of launcher URL to ID token
   PIPEWRIGHT_ID_TOKEN      set by CI (google-github-actions/auth with token_format: id_token)
   GCLOUD_CONFIG            `gcloud auth print-identity-token` for that configuration (people)
   service account / ADC    google.oauth2.id_token.fetch_id_token (Cloud Build, GCE, Cloud Run)
@@ -8,6 +10,7 @@ The launcher needs an ID token for its URL. In order:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -24,6 +27,15 @@ def launcher_url(env: Environment) -> str:
 
 
 def id_token(audience: str) -> str:
+    try:
+        tokens = json.loads(os.environ.get("PIPEWRIGHT_ID_TOKENS") or "{}")
+    except ValueError:
+        tokens = None
+    if not isinstance(tokens, dict):
+        raise ConfigError("PIPEWRIGHT_ID_TOKENS is not a JSON object of launcher URL to ID token")
+    token = {str(k).rstrip("/"): v for k, v in tokens.items() if v}.get(audience.rstrip("/"))
+    if token:
+        return str(token).strip()
     token = os.environ.get("PIPEWRIGHT_ID_TOKEN")
     if token:
         return token.strip()

@@ -34,9 +34,42 @@ def test_a_failing_command_fails_its_step_even_when_piped():
     # GitHub runs `run:` steps as `bash -e` unless the shell is named; only `shell: bash` adds -o pipefail, without
     # which `pipewright release ... | tee` passes when the release fails (found by the first CI run, R-01).
     files = ci.render(["dev"])
-    for name in ("pipewright-pr.yml", "pipewright-release.yml", "pipewright-operate.yml"):
+    for name in ("pipewright-pr.yml", "pipewright-release.yml", "pipewright-operate.yml",
+                 "pipewright-decisions.yml", "pipewright-gate.yml"):
         doc = yaml.safe_load(files[f".github/workflows/{name}"])
         assert doc["defaults"]["run"]["shell"] == "bash", name
+
+
+def test_decision_workflows_gate_by_github_environment():
+    # FR-56: the listing job needs no reviewer; a gate job waits for its environment's reviewers and runs the
+    # command of the decision it re-reads, never one from its inputs.
+    files = ci.render(["test", "prod"])
+    decisions = yaml.safe_load(files[".github/workflows/pipewright-decisions.yml"])
+    job = decisions["jobs"]["decisions"]
+    assert job["strategy"]["matrix"]["environment"] == ["test", "prod"]
+    assert job["environment"] == "${{ matrix.environment }}-decisions"
+    assert decisions["permissions"]["actions"] == "write"                 # dispatches the gate runs
+    assert "gh workflow run pipewright-gate.yml" in job["steps"][-1]["run"]
+    gate = yaml.safe_load(files[".github/workflows/pipewright-gate.yml"])
+    assert gate["run-name"] == "gate ${{ inputs.id }}"                   # how pipewright-decisions finds open gates
+    assert set(gate[True]["workflow_dispatch"]["inputs"]) == {"environment", "gate", "id"}
+    decide = gate["jobs"]["decide"]
+    assert decide["environment"] == "${{ inputs.gate }}"
+    steps = {s.get("name"): s for s in decide["steps"]}
+    assert "actions/runs/$GITHUB_RUN_ID/approvals" in steps["Approval record"]["run"]
+    assert "PIPEWRIGHT_APPROVAL=" in steps["Approval record"]["run"]
+    assert "item.json" in steps["Decide"]["run"] and "inputs" not in steps["Decide"]["run"]
+
+
+def test_id_tokens_for_several_launchers(monkeypatch):
+    monkeypatch.setenv("PIPEWRIGHT_ID_TOKENS", '{"https://a.example/": "ta", "https://b.example": "tb"}')
+    monkeypatch.setenv("PIPEWRIGHT_ID_TOKEN", "single")
+    assert launch.id_token("https://a.example") == "ta"
+    assert launch.id_token("https://b.example/") == "tb"
+    assert launch.id_token("https://c.example") == "single"              # not in the map: the single token
+    monkeypatch.setenv("PIPEWRIGHT_ID_TOKENS", "nope")
+    with pytest.raises(ConfigError, match="JSON object"):
+        launch.id_token("https://a.example")
 
 
 def test_render_rejects_bad_environments():

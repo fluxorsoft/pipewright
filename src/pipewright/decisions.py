@@ -11,7 +11,7 @@ approver group) and the pipewright command a gate job runs once that environment
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 ACTIVE_LOOP = ("approved", "training", "candidate", "validating", "verifying")
 
@@ -25,6 +25,7 @@ class Item:
     key: str                  # the version, case or group it is about
     command: list[str]
     summary: str
+    launchers: list[str] = field(default_factory=list)   # the launcher URLs the command calls (ID tokens for each)
 
     @property
     def id(self) -> str:      # stable: the workflow dispatches one gate run per id
@@ -34,8 +35,13 @@ class Item:
         return {"id": self.id, **asdict(self)}
 
 
-def pending_for(usecase: str, env: str, versions: list, cases: list[dict]) -> list[Item]:
-    """The pending decisions of one use case, from its registry versions (models.registry.Version) and its cases."""
+def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
+                launchers: dict[str, str] | None = None) -> list[Item]:
+    """The pending decisions of one use case, from its registry versions (models.registry.Version) and its cases.
+    `launchers`: {"production": url, "test": url} where known; a loop calls both, a retrain decision production's."""
+    launchers = launchers or {}
+    own = [u for u in (launchers.get("production"),) if u]
+    both = [u for u in (launchers.get("production"), launchers.get("test")) if u]
     out: list[Item] = []
     default = next((v for v in versions if v.default), None)
     number = int(default.version_id) if default and str(default.version_id).isdigit() else 0
@@ -51,11 +57,11 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict]) -> li
         if state == "validated":
             out.append(Item("loop-approve", usecase, env, env, c["case_id"],
                             ["loop", "advance", "--env", env, "--usecase", usecase, "--case", c["case_id"],
-                             "--approve"], f"case {c['case_id']}: candidate validated in test, ready to promote"))
+                             "--approve"], f"case {c['case_id']}: candidate validated in test, ready to promote", both))
         elif state in ACTIVE_LOOP:
             out.append(Item("loop-advance", usecase, env, None, c["case_id"],
                             ["loop", "advance", "--env", env, "--usecase", usecase, "--case", c["case_id"],
-                             "--steps", "5"], f"case {c['case_id']}: loop {state}"))
+                             "--steps", "5"], f"case {c['case_id']}: loop {state}", both))
         if c.get("state") != "open":
             continue
         approved = {a.get("group") for a in c.get("approvals") or []}
@@ -66,7 +72,7 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict]) -> li
                             ["retrain", "approve", "--env", env, "--usecase", usecase, "--case", c["case_id"],
                              *(["--group", g] if g else []), "--reason", "approved in GitHub (see the run)"],
                             f"case {c['case_id']} ({', '.join(c.get('triggers') or [])})"
-                            + (f": approval of {g}" if g else "")))
+                            + (f": approval of {g}" if g else ""), own))
     return out
 
 
@@ -95,5 +101,20 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
             versions = registry.versions(uc, env, gcp.session.credentials)
         except Exception:  # noqa: BLE001 - no model yet: nothing to approve
             versions = []
-        out += pending_for(name, env.name, versions, store.list(name))
+        out += pending_for(name, env.name, versions, store.list(name), _launchers(root, env))
     return out
+
+
+def _launchers(root, env) -> dict[str, str]:
+    from pathlib import Path
+
+    from pipewright.config import load_environment
+
+    out = {"production": (env.launcher or {}).get("url")}
+    source = env.promotion_from
+    if source:
+        try:
+            out["test"] = (load_environment(Path(root), source).launcher or {}).get("url")
+        except Exception:  # noqa: BLE001 - no such environment here: the loop cannot run either
+            pass
+    return {k: v.rstrip("/") for k, v in out.items() if v}

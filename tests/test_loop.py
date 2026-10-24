@@ -233,7 +233,8 @@ def test_pending_decisions_name_their_gate_and_command():
         {"case_id": "rc-d", "state": "approved", "loop": {"state": "training"}},
         {"case_id": "rc-e", "state": "approved", "loop": {"state": "closed"}},
     ]
-    items = {i.id: i for i in pending_for("churn", "prod", versions, cases)}
+    items = {i.id: i for i in pending_for("churn", "prod", versions, cases,
+                                          {"production": "https://prod.example", "test": "https://test.example"})}
     assert set(items) == {"prod/churn/model-approve/v5", "prod/churn/retrain-approve/rc-a-model-risk",
                           "prod/churn/retrain-approve/rc-b", "prod/churn/loop-approve/rc-c",
                           "prod/churn/loop-advance/rc-d"}
@@ -244,3 +245,6 @@ def test_pending_decisions_name_their_gate_and_command():
     assert items["prod/churn/loop-advance/rc-d"].gate is None                                  # no person needed
     assert items["prod/churn/model-approve/v5"].command == [
         "model", "approve", "--env", "prod", "--usecase", "churn", "--version", "5", "--approve"]
+    assert items["prod/churn/loop-advance/rc-d"].launchers == ["https://prod.example", "https://test.example"]
+    assert items["prod/churn/retrain-approve/rc-b"].launchers == ["https://prod.example"]
+    assert items["prod/churn/model-approve/v5"].launchers == []
