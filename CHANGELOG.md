@@ -27,7 +27,8 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   `prepare.sql`) with a held-out test set; the data contract in SQL; `CREATE MODEL` on the training rows (with the
   team's TRANSFORM); the model and the champion evaluated on the same test rows with Pipewright's metrics in SQL;
   gate 1; registration in Model Registry only after it (`ALTER MODEL`); scoring into `inference.output_table`;
-  drift into `monitoring.output_table`. Binary, multi-class and regression model types; byte limits per job
+  drift and performance against observed outcomes into `monitoring.output_table`; retrain proposals to the launcher
+  when `retraining.when` matches. Binary, multi-class and regression model types; byte limits per job
   (`bqml.max_bytes_billed`, manifest `policies.bqml`); `examples/bqml` (`pipewright new-usecase --from bqml`).
   `spec.components` is required only without `bqml`.
 

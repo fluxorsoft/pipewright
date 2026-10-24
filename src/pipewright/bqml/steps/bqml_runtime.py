@@ -19,6 +19,9 @@ _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")
 EPS = 1e-4                                   # as the container path's PSI (mlkit)
 KEEP_DAYS = 30                               # test predictions kept for a look; the run's rows are kept
+# As config.ml.LOWER_IS_BETTER (a test keeps them in step).
+LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error"}
+MIN_LABELLED = 50                            # performance needs this many labelled predictions, as the container path
 
 
 # ------------------------------------------------------------------- SQL text --
@@ -448,3 +451,62 @@ def read_record(project: str, uri: str) -> dict | None:
     bucket, _, prefix = uri.removeprefix("gs://").partition("/")
     blob = storage.Client(project=project).bucket(bucket).blob(f"{prefix.rstrip('/')}/evaluation.json")
     return json.loads(blob.download_as_text()) if blob.exists() else None
+
+
+# ------------------------------------------------------------- performance --
+
+PERFORMANCE_OUTPUTS = {
+    "binary": "pr.predicted_label AS _pw_label, pr.score AS _pw_score",
+    "multiclass": "pr.predicted_label AS _pw_label, pr.score AS _pw_score, CAST(NULL AS FLOAT64) AS _pw_true_prob",
+    "regression": "pr.prediction AS _pw_prediction",
+}
+
+
+def performance_sql(ml_config: dict, project: str, model_version: str, out_table: str, labels: dict) -> str:
+    """The scored rows of this model version that have an observed outcome, shaped for the metrics templates."""
+    data, perf = ml_config["data"], ml_config["monitoring"]["performance"]
+    task = data["label"].get("task", "binary")
+    dataset = ml_config["platform"]["bigquery_dataset"]
+    source = perf["labels"]
+    return render("performance.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
+                  outcome=ident(source["label"]), label=ident(data["label"]["column"]),
+                  outputs=PERFORMANCE_OUTPUTS[task], key=ident(source["key"]),
+                  output_table=f"{project}.{dataset}.{ml_config['inference']['output_table']}",
+                  labels_table=f"{project}.{dataset}.{source['table']}", model_version=str(int(model_version)))
+
+
+def performance_trigger(value: float | None, metric: str, minimum: float | None) -> bool:
+    """Whether the value is worse than the limit (monitoring.performance.min: a minimum, or a maximum for errors)."""
+    if value is None or minimum is None:
+        return False
+    return value > minimum if metric in LOWER_IS_BETTER else value < minimum
+
+
+# --------------------------------------------------------- retrain proposals --
+
+def publish(topic: str, region: str, body: dict, attributes: dict, session=None) -> str:
+    """One message on a Pub/Sub topic (regional endpoint: private topics keep messages in the region)."""
+    import base64
+
+    session = session or _session()
+    message = {"data": base64.b64encode(json.dumps(body, default=str).encode()).decode(), "attributes": attributes}
+    r = session.post(f"https://{region}-pubsub.googleapis.com/v1/{topic}:publish", json={"messages": [message]},
+                     timeout=60)
+    if r.status_code >= 300:
+        raise RuntimeError(f"publish to {topic}: {r.status_code} {r.text[:300]}")
+    return r.json()["messageIds"][0]
+
+
+def proposal(ml_config: dict, run_id: str, fired: list[str], summary: dict, data_checks: dict | None,
+             model_version: str, resource: str, recent: list[dict]) -> dict:
+    """The retrain proposal the launcher opens or updates a decision case with, as the container path sends it."""
+    feature_psi = summary.get("feature_psi") or {}
+    observation = {
+        "triggers": fired, "rows": summary.get("rows"), "model_version": model_version,
+        "feature_psi": feature_psi, "drifted_features": summary.get("drifted_features") or [],
+        "max_feature_psi": max(feature_psi.values(), default=None), "prediction_psi": summary.get("prediction_psi"),
+        "performance": summary.get("performance"), "labelled_rows": summary.get("labelled_rows"),
+        "data_checks": data_checks, "recent": recent, "engine": "bqml",
+    }
+    return {"kind": "retrain.proposal", "usecase": ml_config["usecase"], "run_id": run_id,
+            "observation": observation, "champion": {"version": model_version, "resource_name": resource}}

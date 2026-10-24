@@ -2,7 +2,7 @@
 jobs and records what it did; the data and the model stay in BigQuery.
 
     training: rows -> validate -> train -> evaluate (gate 1) -> [approve] register
-    scoring:  champion, rows -> validate -> score -> monitor
+    scoring:  champion, rows -> validate -> score -> monitor -> [retrain proposal] -> record
 """
 
 import os
@@ -258,16 +258,15 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
 def bqml_monitor(project: str, rows_table: str, scored_table: str, rows: int, model_version: str, record: str,
-                 run_id: str, source_uri: str, ml_config: dict) -> NamedTuple(
+                 run_id: str, ml_config: dict) -> NamedTuple(
         "Monitoring", [("alert", str), ("triggers", list), ("summary", str)]):
-    """Feature drift and prediction drift (PSI against the champion's training baselines), the monitoring table and
-    the monitoring events, as the container path records them."""
+    """Feature drift and prediction drift (PSI against the champion's training baselines) and performance against
+    observed outcomes (monitoring.performance.labels), as the container path checks them."""
     import json
     from collections import namedtuple
-    from datetime import datetime, timezone
 
     import bqml_runtime as rt
-    from pipewright_runtime import emit_event, labels
+    from pipewright_runtime import labels
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-monitor"}))
     mon = ml_config["monitoring"]
@@ -277,8 +276,9 @@ def bqml_monitor(project: str, rows_table: str, scored_table: str, rows: int, mo
     if (mon["drift"]["enabled"] or mon["prediction_drift"]["enabled"]) and not stats:
         result["notes"].append(f"no training baselines in {record}evaluation.json: drift not checked")
     if mon["drift"]["enabled"] and stats:
-        feature_psi = {c: round(rt.psi(b["fractions"], rt.column_fractions(jobs, rows_table, c, "TRUE", b["edges"])), 4)
-                       for c, b in stats["drift_baseline"].items() if c in mon["drift"]["features"]}
+        feature_psi = {
+            c: round(rt.psi(b["fractions"], rt.column_fractions(jobs, rows_table, c, "TRUE", b["edges"])), 4)
+            for c, b in stats["drift_baseline"].items() if c in mon["drift"]["features"]}
         drifted = sorted(c for c, v in feature_psi.items() if v > mon["drift"]["threshold"])
         result.update({"feature_psi": feature_psi, "drifted_features": drifted})
         if drifted:
@@ -293,29 +293,117 @@ def bqml_monitor(project: str, rows_table: str, scored_table: str, rows: int, mo
         result["prediction_psi"] = round(value, 4)
         if value > mon["prediction_drift"]["threshold"]:
             triggers.append("drift")
-    if mon["performance"]["enabled"]:
-        result["notes"].append("monitoring.performance: not checked by bqml scoring yet")
+
+    perf = mon["performance"]
+    if perf["enabled"]:
+        # The latest prediction per key from this model version, with its observed outcome: Pipewright's metrics
+        # in SQL, the same definitions as evaluation.
+        labelled = rt.table_ref(project, ml_config, run_id, "performance")
+        jobs.run(rt.performance_sql(ml_config, project, model_version, labelled, jobs.labels), "labelled predictions")
+        row = (jobs.run(rt.metrics_sql(ml_config, labelled), "performance") or [{}])[0]
+        result["labelled_rows"] = int(row.get("row_count") or 0)
+        if result["labelled_rows"] >= rt.MIN_LABELLED:
+            value = rt.shape_metrics(row, [perf["metric"]])[perf["metric"]]
+            result["performance"] = {perf["metric"]: value}
+            if rt.performance_trigger(value, perf["metric"], perf.get("min")):
+                triggers.append("performance")
+        else:
+            result["notes"].append(f"{result['labelled_rows']} labelled predictions so far: performance needs "
+                                   f"{rt.MIN_LABELLED}")
     triggers = sorted(set(triggers))
     result["triggers"] = triggers
-    alert = bool(triggers)
-    summary = json.dumps(result, default=str)
+    return namedtuple("Monitoring", ["alert", "triggers", "summary"])(
+        "yes" if triggers else "no", triggers, json.dumps(result, default=str))
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_retrain(project: str, region: str, run_id: str, triggers: list, summary: str, data_checks: str,
+                 model_version: str, ml_config: dict) -> str:
+    """When retraining.when matches a trigger, sends what this run saw to the launcher, which opens or updates a
+    retrain decision case (retraining.mode propose or candidate). A person decides; nothing trains from here. Over
+    Pub/Sub when the environment has a run requests topic (private perimeters), else POST /retraining/propose.
+    Returns what happened; never fails the scoring run."""
+    import json
+
+    import bqml_runtime as rt
+    from pipewright_runtime import labels, log
+
+    policy, platform = ml_config["retraining"], ml_config["platform"]
+    mode = policy.get("mode") or ("propose" if policy.get("enabled") else "off")
+    fired = sorted(set(triggers) & set(policy["when"]))
+    if mode == "off":
+        return "no case: retraining.mode is off"
+    if not fired:
+        return "no case: nothing fired"
+    try:
+        recent = []
+        table = ml_config["monitoring"].get("output_table")
+        if table:
+            jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-retrain"}))
+            try:      # the trend for the decision pack: earlier runs of this use case
+                rows = jobs.run(rt.render("history.sql", table=f"{project}.{platform['bigquery_dataset']}.{table}"),
+                                "monitoring history")
+                recent = [{"at": str(r["monitored_at"]), "max_feature_psi": r["max_feature_psi"],
+                           "prediction_psi": r["prediction_psi"], "performance_value": r["performance_value"],
+                           "alert": r["alert"]} for r in rows][::-1]
+            except Exception as e:  # noqa: BLE001 - the pack is still useful without the trend
+                log(f"no monitoring history for the decision pack: {e}", ml_config, "WARNING", run_id)
+        resource = f"projects/{project}/locations/{region}/models/{ml_config['bqml']['registry_id']}"
+        body = rt.proposal(ml_config, run_id, fired, json.loads(summary),
+                           json.loads(data_checks) if data_checks else None, model_version, resource, recent)
+        if platform.get("run_requests_topic"):
+            message = rt.publish(platform["run_requests_topic"], platform["region"], body,
+                                 {"usecase": ml_config["usecase"]})
+            return f"proposed ({', '.join(fired)}): message {message}"
+        import requests
+        from pipewright_runtime import id_token
+
+        url = platform["launcher_url"].rstrip("/")
+        r = requests.post(f"{url}/retraining/propose", data=json.dumps(body, default=str),
+                          headers={"Authorization": f"Bearer {id_token(url)}", "Content-Type": "application/json"},
+                          timeout=120)
+        if r.status_code != 200:
+            return f"failed: launcher returned {r.status_code}: {r.text[:300]}"
+        result = r.json()
+        return f"proposed ({', '.join(fired)}): {result.get('detail') or result.get('status')}"
+    except Exception as e:  # noqa: BLE001 - reported in the monitoring table, not raised
+        log(f"retrain proposal failed: {type(e).__name__}: {e}", ml_config, "ERROR", run_id)
+        return f"failed: {type(e).__name__}: {e}"[:500]
+
+
+@dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
+def bqml_record(project: str, run_id: str, source_uri: str, model_version: str, summary: str, alert: str,
+                retrain_status: str, ml_config: dict):
+    """The monitoring row (monitoring.output_table) and the monitoring events, as the container path records them."""
+    import json
+    from datetime import datetime, timezone
+
+    import bqml_runtime as rt
+    from pipewright_runtime import emit_event, labels
+
+    s = json.loads(summary)
+    perf = s.get("performance") or {}
     row = {"run_id": run_id, "source_uri": source_uri, "model_name": ml_config["model_name"],
-           "model_version_id": model_version, "rows_scored": rows,
-           "max_feature_psi": max((result.get("feature_psi") or {}).values(), default=None),
-           "drifted_features": ",".join(result.get("drifted_features", [])) or None,
-           "prediction_psi": result.get("prediction_psi"), "alert": alert, "triggers": ",".join(triggers) or None,
-           "retrain_status": "not requested by bqml scoring yet", "details_json": summary,
+           "model_version_id": model_version, "rows_scored": s["rows"],
+           "max_feature_psi": max((s.get("feature_psi") or {}).values(), default=None),
+           "drifted_features": ",".join(s.get("drifted_features", [])) or None,
+           "prediction_psi": s.get("prediction_psi"),
+           "performance_metric": next(iter(perf), None), "performance_value": next(iter(perf.values()), None),
+           "labelled_rows": s.get("labelled_rows"), "alert": alert == "yes",
+           "triggers": ",".join(s["triggers"]) or None, "retrain_status": retrain_status, "details_json": summary,
            "monitored_at": datetime.now(timezone.utc).isoformat()}
-    if mon["output_table"]:
-        target = f"{project}.{ml_config['platform']['bigquery_dataset']}.{mon['output_table']}"
+    table = ml_config["monitoring"]["output_table"]
+    if table:              # monitoring off: no table, the event still records the run
+        jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-record"}))
+        target = f"{project}.{ml_config['platform']['bigquery_dataset']}.{table}"
         kinds = {f.name: f.field_type for f in jobs.client.get_table(target).schema}
         cells = [(c, v) for c, v in row.items() if c in kinds and v is not None]
         values = [(f"TIMESTAMP {rt.string(v)}" if kinds[c] == "TIMESTAMP" else rt.literal(v)) for c, v in cells]
         jobs.run(rt.render("monitoring.sql", table=target, columns=", ".join(rt.q(c) for c, _ in cells),
                            values=", ".join(values)), "monitoring row")
     event = {k: row[k] for k in ("model_version_id", "rows_scored", "max_feature_psi", "drifted_features",
-                                 "prediction_psi", "triggers", "retrain_status")}
-    emit_event("monitoring.recorded", ml_config, run_id, alert=alert, **event)
-    if alert:
+                                 "prediction_psi", "performance_metric", "performance_value", "triggers",
+                                 "retrain_status")}
+    emit_event("monitoring.recorded", ml_config, run_id, alert=row["alert"], **event)
+    if row["alert"]:
         emit_event("monitoring.alert", ml_config, run_id, **event)
-    return namedtuple("Monitoring", ["alert", "triggers", "summary"])("yes" if alert else "no", triggers, summary)

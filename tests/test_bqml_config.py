@@ -187,3 +187,13 @@ def test_new_usecase_from_the_bqml_example(repo, tmp_path):
 
         infos = compile_all(uc, "europe-west2-docker.pkg.dev/acme/img/churn-bq@sha256:" + "0" * 64, tmp_path)
         assert check_parameters(uc, infos) == ([], [])
+
+
+def test_performance_key_must_be_in_the_scores(repo):
+    bqml_repo(repo)
+    repo.usecase["spec"]["monitoring"] = {"output_table": "model_metrics", "performance": {
+        "enabled": True, "labels": {"table": "outcomes", "key": "account_id", "label": "churned"}}}
+    assert "monitoring.performance.labels.key 'account_id' is not a column of inference.output_table" in \
+        problems(repo)
+    repo.usecase["spec"]["monitoring"]["performance"]["labels"]["key"] = "customer_id"
+    assert resolve(repo).ml["monitoring"]["performance"]["enabled"]

@@ -95,6 +95,12 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
         problems.append("inference.output_table: bqml scoring writes its predictions there")
     if output and output in tables:
         _output_problems(tables[output], task, problems)
+        # Performance joins the latest score of each key with its observed outcome.
+        perf = ml["monitoring"]["performance"]
+        key = (perf.get("labels") or {}).get("key")
+        if perf["enabled"] and key and key not in {f["name"] for f in tables[output].fields}:
+            problems.append(f"monitoring.performance.labels.key {key!r} is not a column of inference.output_table "
+                            f"{output}: bqml scoring keeps the input columns the table has")
     return resolved
 
 

@@ -3,7 +3,7 @@ orchestrator (Agent Platform Pipelines or Kubeflow Pipelines on GKE) like the us
 submit BigQuery jobs.
 
     training: rows -> validate -> train -> evaluate (gate 1) -> [approve] register
-    scoring:  champion, rows -> validate -> score -> monitor
+    scoring:  champion, rows -> validate -> score -> monitor -> [retrain proposal] -> record
 
 Behaviour comes from ml_config (the bqml section and the ML sections); the release pins it.
 """
@@ -17,7 +17,9 @@ from bqml_steps import (  # noqa: E402
     bqml_champion,
     bqml_evaluate,
     bqml_monitor,
+    bqml_record,
     bqml_register,
+    bqml_retrain,
     bqml_rows,
     bqml_score,
     bqml_train,
@@ -73,5 +75,13 @@ def bqml_scoring_pipeline(
     monitor = bqml_monitor(project=project, rows_table=rows.outputs["rows_table"],
                            scored_table=score.outputs["scored_table"], rows=score.outputs["rows"],
                            model_version=champion.outputs["version"], record=champion.outputs["record"],
-                           run_id=run_id, source_uri=source_uri, ml_config=ml_config)
-    monitor.set_display_name("check-drift").set_caching_options(False)
+                           run_id=run_id, ml_config=ml_config)
+    monitor.set_display_name("check-drift-and-performance").set_caching_options(False)
+    retrain = bqml_retrain(project=project, region=region, run_id=run_id, triggers=monitor.outputs["triggers"],
+                           summary=monitor.outputs["summary"], data_checks=validate.output,
+                           model_version=champion.outputs["version"], ml_config=ml_config)
+    retrain.set_display_name("propose-retraining").set_caching_options(False)
+    record = bqml_record(project=project, run_id=run_id, source_uri=source_uri,
+                         model_version=champion.outputs["version"], summary=monitor.outputs["summary"],
+                         alert=monitor.outputs["alert"], retrain_status=retrain.output, ml_config=ml_config)
+    record.set_display_name("record-monitoring").set_caching_options(False)

@@ -370,15 +370,17 @@ spec:
   BigQuery model, so versions never overwrite each other. A BigQuery ML model is promoted by retraining in the next
   environment (`model.promotion: retrain`).
 - **Scoring:** `ML.PREDICT` with the default version into `inference.output_table`, then feature and prediction
-  drift (PSI against the training baselines in the record) into `monitoring.output_table`, with the same events.
+  drift (PSI against the training baselines in the record) and performance against observed outcomes
+  (`monitoring.performance.labels`: the latest score of each key from this version, the same metrics SQL) into
+  `monitoring.output_table`, with the same events. What fires and matches `retraining.when` goes to the launcher
+  as a retrain proposal, which opens or updates a decision case (`pipewright retrain`), as for any use case.
 - **Preparation:** TRANSFORM is applied by `ML.PREDICT` and by a Model Registry endpoint, so callers send raw
   values; use it for preparation the model needs when served. `prepare.sql` is pinned by the release, written into
   the run's rows and run again when scoring; an endpoint runs no SQL, so online callers send its columns themselves.
 - **Cost:** every job has a byte limit (`bqml.max_bytes_billed`, default 100 GiB, or the platform's
   `policies.bqml.max_bytes_billed`). Tree models bill far more bytes than linear ones and take minutes even on
   small data; BigQuery's pricing lists them at a lower rate per TiB.
-- **Not yet:** hyperparameter tuning, performance monitoring against labels and retrain proposals from scoring,
-  k-means, PCA, imported models and forecasting.
+- **Not yet:** hyperparameter tuning, k-means, PCA, imported models and forecasting.
 
 ## Synthetic data
 

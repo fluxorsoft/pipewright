@@ -151,3 +151,43 @@ def test_both_pipelines_compile_on_one_image(repo, tmp_path):
     for info in infos.values():
         assert info.images == {image}
         assert set(info.parameters) == {"project", "region", "source_uri", "run_id", "ml_config"}
+
+
+def test_performance_joins_this_versions_latest_scores_with_outcomes(cfg):
+    cfg["monitoring"]["performance"] = {"enabled": True, "metric": "auc", "min": 0.75,
+                                        "labels": {"table": "outcomes", "key": "customer_id", "label": "churned_30d"}}
+    cfg["inference"]["output_table"] = "scores"
+    sql = rt.performance_sql(cfg, "p", "7", "p.churn.perf", {"run-id": "r1"})
+    assert "SELECT lb.`churned_30d` AS `churned`, pr.predicted_label AS _pw_label, pr.score AS _pw_score" in sql
+    assert "FROM `p.churn.scores` AS pr\nJOIN `p.churn.outcomes` AS lb USING (`customer_id`)" in sql
+    assert "WHERE pr.model_version_id = '7'" in sql and "ORDER BY pr.scored_at DESC) = 1" in sql
+    with pytest.raises(ValueError):
+        rt.performance_sql(cfg, "p", "7' OR '1'='1", "p.churn.perf", {})        # versions are numbers
+    assert rt.performance_trigger(0.70, "auc", 0.75) and not rt.performance_trigger(0.80, "auc", 0.75)
+    assert rt.performance_trigger(3.0, "rmse", 2.0) and not rt.performance_trigger(None, "auc", 0.75)
+
+
+def test_lower_is_better_matches_the_core():
+    from pipewright.config.ml import LOWER_IS_BETTER
+
+    assert rt.LOWER_IS_BETTER == LOWER_IS_BETTER
+
+
+def test_retrain_proposal_has_what_the_container_path_sends(cfg):
+    summary = {"rows": 10, "feature_psi": {"a": 0.3, "b": 0.1}, "drifted_features": ["a"], "prediction_psi": 0.05,
+               "performance": {"auc": 0.7}, "labelled_rows": 80}
+    body = rt.proposal(cfg, "r2", ["drift", "performance"], summary, {"rows": 10}, "3", "projects/p/models/m", [])
+    assert body["kind"] == "retrain.proposal" and body["usecase"] == "churn" and body["run_id"] == "r2"
+    obs = body["observation"]
+    assert obs["triggers"] == ["drift", "performance"] and obs["max_feature_psi"] == 0.3
+    assert obs["performance"] == {"auc": 0.7} and obs["engine"] == "bqml"
+    assert body["champion"] == {"version": "3", "resource_name": "projects/p/models/m"}
+
+
+def test_scoring_proposes_and_records(repo, tmp_path):
+    pytest.importorskip("kfp")
+    from pipewright.build.compile import compile_all
+
+    uc = resolve(bqml_repo(repo))
+    infos = compile_all(uc, "europe-west2-docker.pkg.dev/acme/img/churn@sha256:" + "0" * 64, tmp_path)
+    assert {"check-drift-and-performance", "propose-retraining", "record-monitoring"} <= set(infos["inference"].tasks)
