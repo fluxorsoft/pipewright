@@ -335,6 +335,59 @@ def cmd_retrain_show(args) -> int:
     return 0
 
 
+def _loop(args):
+    """The loop of a production case: the production environment (--env) and the one its releases come from."""
+    from pipewright.gcp import Gcp
+    from pipewright.loop.backend import GcpBackend
+    from pipewright.loop.driver import Loop
+
+    root = Path(args.root)
+    production = load_environment(root, args.env)
+    if not production.promotion_from:
+        raise ConfigError(f"{production.name} has no promotion.from: the closed retrain loop trains in the "
+                          "environment its releases come from (environments/<env>.yaml promotion.from)")
+    test = load_environment(root, production.promotion_from)
+    path = _selected(root, [args.usecase])[args.usecase]
+    gcp = Gcp()
+    backend = GcpBackend(path, args.case, test, production, gcp)
+    return Loop(args.usecase, args.case, test.name, production.name, backend, by=gcp.identity())
+
+
+def _render_loop(loop: dict) -> str:
+    lines = [f"state: {loop.get('state')}"]
+    for key in ("source_uri", "champion", "training", "candidate", "validation", "promotion", "verification",
+                "rolled_back_to"):
+        if loop.get(key) is not None:
+            lines.append(f"  {key}: {json.dumps(loop[key], default=str)}")
+    lines.append("history:")
+    lines += [f"  {h['at']}  {h['state']:<20} {h.get('by') or ''}  {h.get('note') or ''}".rstrip()
+              for h in loop.get("history") or []]
+    return "\n".join(lines)
+
+
+def cmd_loop(args) -> int:
+    from pipewright.loop import driver
+
+    loop = _loop(args)
+    if args.loop_command == "start":
+        record = loop.start(args.source_uri)
+    elif args.loop_command == "advance":
+        record = loop.record()
+        for _ in range(args.steps):          # --steps: as far as the loop can go now (CI runs it on a schedule)
+            before = record.get("state")
+            record = loop.advance(approve=args.approve)
+            if record.get("state") == before or driver.finished(record):
+                break
+    elif args.loop_command == "rollback":
+        record = loop.rollback(args.reason)
+    else:
+        record = loop.record()
+    for line in loop.log:
+        print(line)
+    print(_render_loop(record))
+    return 1 if record.get("state") in ("failed", "validation-failed", "verification-failed") else 0
+
+
 def cmd_retrain_decide(args) -> int:
     from pipewright.gcp import Gcp
     from pipewright.retraining import client
@@ -715,6 +768,28 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--manifest", help="or the environment manifest, gs://... (approvers without the repo)")
         sp.add_argument("--usecase", required=True)
         sp.add_argument("--case", required=case_required, help="case ID (default: the open case)")
+
+    sp = sub.add_parser("loop", help="the closed retrain loop: a production case trained in test, validated, "
+                                     "promoted, approved and verified in production")
+    lsub = sp.add_subparsers(dest="loop_command", required=True)
+    for action, text in (("start", "train in test the approved production case (production never trains)"),
+                         ("advance", "take the next step when the current one is done"),
+                         ("show", "the loop as one record"),
+                         ("rollback", "make production's earlier default the default again")):
+        sp = lsub.add_parser(action, help=text)
+        sp.add_argument("--root", default=".")
+        sp.add_argument("--env", required=True, help="the production environment (the case's)")
+        sp.add_argument("--usecase", required=True)
+        sp.add_argument("--case", required=True, help="the production case ID")
+        if action == "start":
+            sp.add_argument("--source-uri", help="the data to train on (default: the case's)")
+        if action == "advance":
+            sp.add_argument("--approve", action="store_true",
+                            help="the production approval: promote the validated candidate and make it the default")
+            sp.add_argument("--steps", type=int, default=1, help="steps to take at most (default 1)")
+        if action == "rollback":
+            sp.add_argument("--reason", required=True, help="recorded with your name")
+        sp.set_defaults(func=cmd_loop)
 
     sp = sub.add_parser("retrain", help="retrain decisions: drift opens a case, a person decides")
     rsub = sp.add_subparsers(dest="retrain_command", required=True)

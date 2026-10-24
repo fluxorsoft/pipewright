@@ -43,6 +43,7 @@ class Settings:
     escalate_notify: tuple = ()
     publish: bool = False
     digest: bool = True
+    loop: bool = False                      # retraining.loop.enabled: the closed retrain loop trains elsewhere
 
     @classmethod
     def from_config(cls, retraining: dict, policy: dict | None = None) -> Settings:
@@ -63,7 +64,7 @@ class Settings:
                    escalate_after_days=dec.get("escalate_after_days", 3), cooldown_days=r.get("cooldown_days", 7),
                    source_uri=r.get("source_uri"), notify=tuple(dec.get("notify") or ()),
                    escalate_notify=tuple(dec.get("escalate_notify") or ()), publish=bool(dec.get("publish")),
-                   digest=dec.get("digest", True))
+                   digest=dec.get("digest", True), loop=bool((r.get("loop") or {}).get("enabled")))
 
 
 @dataclass
@@ -229,6 +230,14 @@ def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now
         uri = chosen or case.get("source_uri") or s.source_uri
         if not uri:
             raise DecisionRefused("no training data: give --source-uri (retraining.source_uri is not set)")
+        if s.loop:
+            # The closed retrain loop (D-104): production never trains. The case waits for `pipewright loop start`,
+            # which trains in the environment this one's releases come from.
+            case["loop"] = {"state": "approved", "source_uri": uri, "history": [{"at": iso(now), "state": "approved",
+                                                                              "by": by}]}
+            return Outcome(case, [("retrain.approved", {**data, "source_uri": uri, "loop": True})], None,
+                           status=f"case {cid} approved: the closed retrain loop trains it where releases come from "
+                                  f"(`pipewright loop start --case {cid}`)")
         submit = {"kind": "retrain", "source_uri": uri, "run_key": cid}
         return Outcome(case, [("retrain.approved", {**data, "source_uri": uri})], submit,
                        status=f"case {cid} approved: training submitted on {uri}")

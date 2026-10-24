@@ -213,6 +213,8 @@ retraining.enabled: The older switch. true means mode propose, false means off.
 retraining.when: What may open a retrain case (schedule, drift, performance). The key is `when`, not `on`, because YAML reads on as true.
 retraining.cooldown_days: Days after an approved retrain during which new alerts are recorded but open no case.
 retraining.source_uri: The training data an approved retrain uses by default; an approver may choose another.
+retraining.loop: "The closed retrain loop: production never trains. An approved case here is trained in the environment this one's releases come from (environments/<env>.yaml promotion.from), on this environment's data through a read-only grant, compared with the model this environment serves, validated by a scoring run there, then promoted, approved and verified here. `pipewright loop` drives it."
+retraining.loop.enabled: Switch the closed retrain loop on, usually only in production (environments/<env> file). Off, an approved case trains in this environment, as in 1.0.
 retraining.decisions: How people hear about a retrain case and how long they have to decide.
 retraining.decisions.notify: Who is emailed a case's summary and ID. Email never approves anything.
 retraining.decisions.publish: Whether decision events also go to the tenant's decision feed (a subscription the platform provides).

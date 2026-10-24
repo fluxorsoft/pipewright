@@ -629,6 +629,12 @@
         "when": { "type": "array", "items": { "enum": ["schedule", "drift", "performance"] }, "description": "not `on`: YAML reads on as true" },
         "cooldown_days": { "type": "integer", "minimum": 0, "description": "after an approved retrain, new alerts are recorded but open no case" },
         "source_uri": { "type": "string", "description": "default training data for an approved retrain (an approver may choose another)" },
+        "loop": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "the closed retrain loop (FR-48): an approved case here trains in the environment releases come from (promotion.from), not here",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
         "decisions": {
           "type": "object",
           "additionalProperties": false,
@@ -812,6 +818,7 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "mode": { "enum": ["off", "propose", "candidate", false], "description": "YAML reads an unquoted off as false: both mean off" },
+            "loop": { "$ref": "#/$defs/retraining/properties/loop" },
             "decisions": { "$ref": "#/$defs/retraining/properties/decisions" },
             "approvals": { "$ref": "#/$defs/retraining/properties/approvals" },
             "snooze": { "$ref": "#/$defs/retraining/properties/snooze" }
