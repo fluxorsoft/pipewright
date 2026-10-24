@@ -99,3 +99,9 @@ def test_the_handler_builds_rows_in_feature_order_and_never_defaults():
     with pytest.raises(ValueError, match="an instance is an entity ID"):
         h.online_row([1, 2], ONLINE, ["s_tickets"], "t", fetcher)
     assert h._value({"int64Value": "7"}) == 7.0 and h._value({}) is None
+
+
+def test_a_bare_entity_id_is_not_json():
+    h = handler()
+    assert h._decode_id(b"C00001") == "C00001" and h._decode_id('{"customer_id": "C1"}') == {"customer_id": "C1"}
+    assert h._decode_id(b'"C00002"') == "C00002"

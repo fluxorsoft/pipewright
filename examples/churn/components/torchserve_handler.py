@@ -81,6 +81,14 @@ def _decode(value):
     return value
 
 
+def _decode_id(value):
+    """As _decode, but a bare entity ID ("C00001") is not JSON: it stays the ID."""
+    try:
+        return _decode(value)
+    except ValueError:
+        return value.decode("utf-8") if isinstance(value, (bytes, bytearray)) else value
+
+
 class TabularChurnHandler(BaseHandler):
     def initialize(self, context):
         super().initialize(context)
@@ -99,18 +107,25 @@ class TabularChurnHandler(BaseHandler):
         return self._preprocess_rows(data)
 
     def _preprocess_online(self, data):
-        self._layout, rows, token = [], [], _token()
+        # An entity that cannot be served gets {"error": ...} as its prediction; the others are still scored.
+        self._layout, rows, self._errors, token = [], [], {}, _token()
         for item in data:
-            item = _decode(item)
+            item = _decode_id(item)
             if isinstance(item, dict) and ("data" in item or "body" in item):
-                item = _decode(item.get("data", item.get("body")))
+                item = _decode_id(item.get("data", item.get("body")))
             if isinstance(item, dict) and "instances" in item:
                 item = item["instances"]
             entities = item if isinstance(item, list) else [item]
             self._layout.append((len(entities), not isinstance(item, list)))
-            rows.extend(online_row(e, self._online, self._features, token) for e in entities)
+            for e in entities:
+                try:
+                    rows.append(online_row(e, self._online, self._features, token))
+                except Exception as err:  # noqa: BLE001 - reported per entity, without its ID or values
+                    self._errors[len(rows)] = str(err)
+                    rows.append([0.0] * len(self._features))
         print(json.dumps({"severity": "INFO", "message": "online features",
-                          "views": [v["view"] for v in self._online["views"]], "entities": len(rows)}), flush=True)
+                          "views": [v["view"] for v in self._online["views"]], "entities": len(rows),
+                          "not_served": len(self._errors)}), flush=True)
         return torch.tensor(rows, dtype=torch.float32)
 
     def _preprocess_rows(self, data):
@@ -137,6 +152,8 @@ class TabularChurnHandler(BaseHandler):
 
     def postprocess(self, data):
         probabilities = data.reshape(-1).cpu().tolist()
+        for i, why in (getattr(self, "_errors", None) or {}).items():   # online features: entities not served
+            probabilities[i] = {"error": why}
         out, start = [], 0
         for size, single in self._layout:
             chunk = probabilities[start : start + size]
