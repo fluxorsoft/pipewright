@@ -56,11 +56,10 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
     if this is None:
         raise ConfigError(f"{uc.model['name']} has no version {version} in {env.name}")
     model = aiplatform.Model(model_name=f"{resource}@{version}")
-    folder = registry.record_location(uc, model.uri, this.labels)
+    labels = dict(getattr(model, "labels", None) or this.labels or {})      # the listing leaves labels out
+    folder = registry.record_location(uc, model.uri, labels)
     out: dict = {"usecase": uc.name, "environment": env.name, "model": uc.model["name"], "version": str(version),
-                 "default": this.default, "created": this.created, "labels": this.labels,
-                 "records": folder}
-    labels = this.labels or {}
+                 "default": this.default, "created": this.created, "labels": labels, "records": folder}
     if labels.get("promoted-from"):
         out["promoted_from"] = {"environment": labels["promoted-from"], "version": labels.get("source-version")}
     record = _read_gcs(gcp, f"{folder.rstrip('/')}/lineage.json") if folder else None
@@ -97,8 +96,8 @@ def render(info: dict) -> str:
              + (" (default)" if info.get("default") else "") + f", created {info.get('created') or '?'}"]
     if info.get("promoted_from"):
         p = info["promoted_from"]
-        lines.append(f"  promoted from {p['environment']} v{p.get('version')}: "
-                     f"`pipewright lineage --env {p['environment']} --version {p.get('version')}` goes on")
+        lines.append(f"  promoted from {p['environment']} v{p.get('version')}: `pipewright lineage --env "
+                     f"{p['environment']} --usecase {info.get('usecase')} --version {p.get('version')}` goes on")
     record = info.get("lineage")
     if not record:
         lines.append(f"  {info.get('note')}")
