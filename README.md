@@ -380,6 +380,9 @@ spec:
 - **Cost:** every job has a byte limit (`bqml.max_bytes_billed`, default 100 GiB, or the platform's
   `policies.bqml.max_bytes_billed`). Tree models bill far more bytes than linear ones and take minutes even on
   small data; BigQuery's pricing lists them at a lower rate per TiB.
+- **Removing models:** a registered BigQuery ML model is removed with `DROP MODEL`, which also removes its Model
+  Registry version. Model Registry refuses to delete it itself, and deleting the dataset that holds it leaves the
+  registry entry behind with no way to remove it: drop the models before deleting a dataset.
 - **Not yet:** hyperparameter tuning, k-means, PCA, imported models and forecasting.
 
 ## Synthetic data
