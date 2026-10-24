@@ -110,5 +110,11 @@ def register_model(
 
     emit_event("model.registered", ml_config, run_id, model=model_display_name, version=registered.version_id,
                default=make_default, primary_metric=primary, primary_value=value)
+    # Lineage (Pipewright 1.1): the release, config digest, rows, sources and evaluation, next to the model files.
+    from pipewright_runtime import lineage_record, write_lineage
+
+    write_lineage(ml_config, run_id, model.uri, lineage_record(
+        ml_config, run_id, source_uri, {"name": model_display_name, "version": str(registered.version_id)},
+        evaluation, f"gs://{bucket_name}/{prefix}/evaluation.json"))
     logging.info("registered %s version %s (%s)", registered.resource_name, registered.version_id,
                  "default" if make_default else "candidate: run `pipewright model approve` to make it the default")

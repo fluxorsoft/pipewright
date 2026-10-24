@@ -9,6 +9,7 @@ read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or 
               snapshot://<run_id> source replays the rows an earlier run read (data.snapshot_table)
 write_table   writes rows to the use case's store (outputs.store): BigQuery, Parquet on GCS, or both
 write_snapshot  writes the rows a run read to data.snapshot_table, tagged with the run, so the run can be replayed
+write_lineage writes lineage.json for a registered model version: release, config digest, rows, sources, evaluation
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
 ray_cluster   a Ray on Agent Platform cluster for this step of this run (steps.<step>.ray), deleted when the block ends
@@ -470,6 +471,83 @@ def _read_with_features(client, entity_ref: str, project: str, features_from: di
                 "before their cut-off; their features from it are empty", ml_config, "WARNING", run_id)
     emit_event("data.features.resolved", ml_config, run_id, **record)
     return df
+
+
+# ------------------------------------------------------------------ lineage --
+# A model version's lineage (FR-55): lineage.json next to its evaluation record holds what only the run knows: the
+# release it ran, a digest of its ml_config (and its SQL files), the exact rows it trained on (its snapshot, or
+# BigQuery ML's rows table), the sources those came from and its evaluation. `pipewright lineage` adds the release
+# contract, the snapshot's row count and read time and the registry's approvals.
+
+LINEAGE_SCHEMA = "pipewright.lineage/1"
+
+
+def lineage_record(ml_config: dict, run_id: str, source_uri: str, model: dict, evaluation: dict,
+                   evaluation_uri: str | None = None, rows_table: str | None = None) -> dict:
+    """model: {"name", "version"} as registered. No data values: names of tables, columns and windows only."""
+    import hashlib
+
+    data = ml_config.get("data") or {}
+    project = (ml_config.get("platform") or {}).get("project")
+    replay_of = source_uri.removeprefix(SNAPSHOT_SCHEME) if source_uri.startswith(SNAPSHOT_SCHEME) else None
+    rows: dict = {}
+    if data.get("snapshot_table"):
+        rows["snapshot"] = {"table": snapshot_table_ref(ml_config, project), "run_id": run_id,
+                            **({"replay_of": replay_of} if replay_of else {})}
+    if rows_table:
+        rows["table"] = rows_table
+    sources: dict = {}
+    if source_uri.startswith("bq://"):
+        sources["entity_table"] = bq_table(source_uri, project)
+    elif not replay_of:
+        sources["uri"] = source_uri
+    features_from = data.get("features_from") or {}
+    if features_from:
+        sources["features"] = {
+            "time_column": (features_from.get("entity") or {}).get("time_column"),
+            "sources": [{k: v for k, v in src.items() if k in ("table", "feature_group", "features", "time_column",
+                                                                 "prefix")}
+                        for src in features_from.get("sources") or []]}
+    if data.get("label_source"):
+        sources["labels"] = dict(data["label_source"])
+    primary = (ml_config.get("evaluation") or {}).get("primary_metric")
+    champion = evaluation.get("champion") or {}
+    bqml = ml_config.get("bqml") or {}
+    return {
+        "schema": LINEAGE_SCHEMA, "usecase": ml_config.get("usecase"),
+        "tenant": (ml_config.get("platform") or {}).get("tenant"), "project": project, "run_id": run_id,
+        "release": os.environ.get("PIPEWRIGHT_RELEASE"), "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "model": model,
+        "config": {"ml_config_sha256": hashlib.sha256(json.dumps(ml_config, sort_keys=True, default=str)
+                                                      .encode("utf-8")).hexdigest(),
+                   **({"sql": {k: bqml[k]["sha256"] for k in ("transform", "prepare") if bqml.get(k)}}
+                      if bqml else {})},
+        "data": {"source_uri": source_uri, **({"replay_of": replay_of} if replay_of else {}), "rows": rows,
+                 "sources": sources},
+        "evaluation": {"record": evaluation_uri, "decision": evaluation.get("decision"), "primary_metric": primary,
+                       "value": (evaluation.get("metrics") or {}).get(primary),
+                       **({"champion": {"version": champion.get("_version"), "value": champion.get(primary)}}
+                          if champion else {}),
+                       "reasons": evaluation.get("reasons") or []},
+    }
+
+
+def write_lineage(ml_config: dict, run_id: str, directory_uri: str, record: dict) -> str:
+    """Writes lineage.json into directory_uri (gs://, the folder of the evaluation record) and emits
+    `model.lineage.recorded`. Returns where, or "" (logged as an error) when it could not be written."""
+    from google.cloud import storage
+
+    bucket, _, prefix = directory_uri.removeprefix("gs://").partition("/")
+    uri = f"gs://{bucket}/{prefix.rstrip('/')}/lineage.json"
+    try:
+        blob = storage.Client(project=record.get("project")).bucket(bucket).blob(f"{prefix.rstrip('/')}/lineage.json")
+        blob.upload_from_string(json.dumps(record, indent=2, default=str), content_type="application/json")
+    except Exception as e:  # noqa: BLE001 - the version is registered already: say so, do not fail the run
+        log(f"lineage.json not written to {uri}: {type(e).__name__}: {value_free(str(e))[:300]}", ml_config,
+            "ERROR", run_id)
+        return ""
+    emit_event("model.lineage.recorded", ml_config, run_id, lineage=uri, model=record.get("model"))
+    return uri
 
 
 # ------------------------------------------------------------------- tables --

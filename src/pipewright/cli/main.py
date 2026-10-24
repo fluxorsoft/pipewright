@@ -272,6 +272,21 @@ def cmd_model_list(args) -> int:
     return 0
 
 
+def cmd_lineage(args) -> int:
+    import contextlib
+    import logging
+
+    from pipewright.gcp import Gcp
+    from pipewright.models import lineage
+
+    uc, env = _one(args)
+    logging.getLogger("google.cloud.aiplatform").setLevel(logging.WARNING)
+    with contextlib.redirect_stdout(sys.stderr):
+        info = lineage.lineage(uc, env, Gcp(), args.version)
+    print(json.dumps(info, indent=2, default=str) if args.json else lineage.render(info))
+    return 0
+
+
 def cmd_model_approve(args) -> int:
     from pipewright.gcp import Gcp
     from pipewright.models import registry
@@ -754,6 +769,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--env", required=True)
     sp.add_argument("--port", type=int, default=8080)
     sp.set_defaults(func=cmd_pipelines_ui)
+
+    sp = sub.add_parser("lineage", help="a model version back to its run, release, rows and sources (FR-55)")
+    one(sp)
+    sp.add_argument("--version", help="version id (default: the default version)")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_lineage)
 
     sp = sub.add_parser("model", help="Model Registry versions of a use case's model")
     msub = sp.add_subparsers(dest="model_command", required=True)

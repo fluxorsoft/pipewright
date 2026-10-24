@@ -191,11 +191,13 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
 
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
-def bqml_register(project: str, region: str, model: str, run_id: str, primary_value: float, ml_config: dict) -> str:
+def bqml_register(project: str, region: str, model: str, run_id: str, primary_value: float, ml_config: dict,
+                  source_uri: str = "", rows_table: str = "") -> str:
     """After gate 1 only: registers the model as a new version of the use case's model (ALTER MODEL), labels it
-    with the run and the BigQuery model, and makes it the default when registry.set_default is on_approval."""
+    with the run and the BigQuery model, makes it the default when registry.set_default is on_approval, and writes
+    its lineage next to the evaluation record."""
     import bqml_runtime as rt
-    from pipewright_runtime import emit_event, labels
+    from pipewright_runtime import emit_event, labels, lineage_record, write_lineage
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-register"}))
     registry_id = ml_config["bqml"]["registry_id"]
@@ -211,6 +213,10 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
     primary = ml_config["evaluation"]["primary_metric"]
     emit_event("model.registered", ml_config, run_id, model=registry_id, version=version, default=default,
                primary_metric=primary, primary_value=primary_value, bigquery_model=model)
+    folder = rt.record_uri(ml_config, run_id)
+    write_lineage(ml_config, run_id, folder, lineage_record(
+        ml_config, run_id, source_uri, {"name": registry_id, "version": str(version), "bigquery_model": model},
+        rt.read_record(project, folder) or {}, f"{folder}evaluation.json", rows_table or None))
     return version
 
 

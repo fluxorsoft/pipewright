@@ -52,7 +52,8 @@ def bqml_training_pipeline(
     evaluate.set_display_name("evaluate-model").set_caching_options(False)
     with dsl.If(evaluate.outputs["decision"] == "approve", name="model-approved"):
         register = bqml_register(project=project, region=region, model=train.output, run_id=run_id,
-                                 primary_value=evaluate.outputs["primary_value"], ml_config=ml_config)
+                                 primary_value=evaluate.outputs["primary_value"], ml_config=ml_config,
+                                 source_uri=source_uri, rows_table=rows.outputs["rows_table"])
         register.set_display_name("register-model").set_caching_options(False)
 
 
