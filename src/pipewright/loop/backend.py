@@ -117,6 +117,9 @@ class GcpBackend:
     def case(self) -> dict:
         return self.store.get(self.usecase, self.case_id) or {}
 
+    def other_cases(self) -> list[dict]:
+        return self.store.list(self.usecase)
+
     def save(self, change) -> dict:
         case = self.store.update_case(self.usecase, self.case_id, change)
         if case is None:

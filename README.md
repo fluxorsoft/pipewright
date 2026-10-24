@@ -385,6 +385,28 @@ spec:
   registry entry behind with no way to remove it: drop the models before deleting a dataset.
 - **Not yet:** hyperparameter tuning, k-means, PCA, imported models and forecasting.
 
+## The closed retrain loop
+
+Production detects, decides, approves and serves; it never trains (new in 1.1). With `retraining.loop.enabled` in
+the production environment, an approved retrain case is trained in the environment production's releases come from
+(its `promotion.from`, usually test), on production's data read in place, and compared with the model production
+serves. `pipewright loop` takes it the rest of the way:
+
+```bash
+pipewright loop start   --env prod --usecase churn --case rc-20261024-1a2b3c   # trains in test
+pipewright loop advance --env prod --usecase churn --case rc-20261024-1a2b3c   # next step when the last is done
+pipewright loop advance --env prod --usecase churn --case rc-20261024-1a2b3c --approve   # promote, approve, verify
+pipewright loop show    --env prod --usecase churn --case rc-20261024-1a2b3c   # the loop as one record
+pipewright loop rollback --env prod --usecase churn --case rc-20261024-1a2b3c --reason "complaints"
+```
+
+The steps: training in test (a candidate, or rejected by the gates with production untouched); a scoring run in
+test with the candidate on current data; the production approval, which promotes it and makes it the default; a
+scoring run in production to verify it. A failed validation or verification stops the loop; rollback restores the
+version it replaced. One loop runs at a time per use case, each step is recorded on the case and emitted as
+`loop.<state>`, and every run carries the case ID. The training and scoring pipelines take `champion_version` and
+`model_version` parameters for it (the example and the BigQuery ML pipelines declare them).
+
 ## Synthetic data
 
 Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,

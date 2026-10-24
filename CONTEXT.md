@@ -813,6 +813,34 @@ rollback. A person carries the case across.
 8. Label maturity window: an optional label source with a window, anchored on the newest label event (D-111).
    Raised with item 7.
 
+**Implementation (1.1.0, built on `phase-1` 2026-10-24):**
+
+- `retraining.loop.enabled` (usually in the production environment file): an approved case is handed to the loop;
+  production never submits training (D-104). Off, an approved case trains where it is, as in 1.0.
+- `pipewright loop start | advance [--approve] [--steps N] | show | rollback --env <production> --case <id>` drives
+  it from outside the perimeters (a private launcher reaches neither GitHub nor the other environment; D-123). Test
+  is the production environment's `promotion.from`.
+- start: training in test on the case's data, with the run key and `loop` set to the case ID, and
+  `champion_version` set to the test version production's default was promoted from (its `source-version` label):
+  the comparison is with what production serves (D-106).
+- advance, one step when the current one is done (each step is safe to repeat): training ended with no registered
+  version: rejected, production untouched; a registered version: candidate; a scoring run in test with
+  `model_version` set to it (D-107); that run's monitoring row without an alert: validated. With `--approve` (the
+  production approval, a CI gate under FR-56): `pipewright promote --model-version`, `model approve` in production,
+  then a scoring run there; its monitoring row without an alert: closed (D-108, batch). Otherwise
+  verification-failed, and `loop rollback` makes the version it replaced the default again.
+- One loop at a time per use case. Every step is recorded on the production case (`case.loop`, with its history) and
+  emitted as `loop.<state>`; the runs carry the case ID in their labels (`pipewright-loop`).
+- Run requests may name `champion_version` and `model_version`; a pipeline gets them only if it declares the
+  parameter (Pipewright's BigQuery ML pipelines and the 1.1 example do), and a request is refused otherwise.
+- Enterprise (D-105): production's platform file grants the test runners read-only access to the tenant's data
+  (`tenants.<t>.loop_readers`, with `approved_by`) and lets them in through its perimeter for BigQuery; test's
+  (`tenants.<t>.loop_production_project`) lets its runner out to production for BigQuery.
+- Not yet: BigQuery ML use cases (promoted by retraining, D-115, which would train in production: they join with
+  promotion by files); the online canary path with automatic rollback (D-108, unit-tested only: the test use cases
+  are batch); a loop's features and label window come from test's configuration (only the entity rows are read
+  from production).
+
 **Delivery, when started:** phase 1 a manually started loop end to end with rejection and rollback; phase 2
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
 approval for production; phase 4 monitoring-driven retraining with deduplication and safeguards.
@@ -1042,7 +1070,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
 | OpenTelemetry export from the launcher | Planned: phase 4, after 1.1.0 (user, 2026-10-24) |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
-| The closed retrain loop across environments (FR-48, section 8.13): after teams use retrain decisions and promotion | Planned: phase 1, alongside BigQuery ML; settle the open decisions in section 8.13 first (D-85, revised 2026-10-22) |
+| The closed retrain loop across environments (FR-48, section 8.13): phase 1 to 3 deliveries | Phase 1 (1.1.0): built on branch `phase-1` 2026-10-24 (`retraining.loop`, `pipewright loop`, run requests naming versions, one loop per use case; Enterprise read grant); live test in progress |
 | `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
 | `predict` in the generated operate workflow | Built 2026-10-17 |
 | Plain Kubernetes on premises (section 8.14) | On demand only (D-89) |

@@ -23,6 +23,7 @@ class Backend(Protocol):
     def promote(self, version: str) -> dict: ...                     # test -> production, approved; {version}
     def approve(self, env: str, version: str) -> None: ...           # make it production's default
     def case(self) -> dict: ...
+    def other_cases(self) -> list[dict]: ...                         # the use case's other cases in production
     def save(self, change) -> dict: ...                              # change(case) -> case, stored
     def emit(self, event_type: str, data: dict) -> None: ...
     def run_ids(self, pipeline: str, source_uri: str, run_key: str) -> tuple[str, str]: ...   # (run_id, job_id)
@@ -73,6 +74,13 @@ class Loop:
         loop = self.record()
         if loop.get("state") != "approved":
             return loop                                           # started already: nothing to do
+        # One loop at a time per use case: two candidates racing to production would judge each other's champion.
+        busy = [c["case_id"] for c in self.backend.other_cases()
+                if c.get("case_id") != self.case_id and (c.get("loop") or {}).get("state") not in (None, "approved")
+                and (c.get("loop") or {}).get("state") not in TERMINAL]
+        if busy:
+            raise ConfigError(f"case {busy[0]}'s loop is still running for {self.usecase}: finish or roll it back "
+                              f"first (`pipewright loop show --case {busy[0]}`)")
         uri = source_uri or loop.get("source_uri")
         if not uri:
             raise ConfigError(f"case {self.case_id} has no training data: give --source-uri")

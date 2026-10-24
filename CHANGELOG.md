@@ -22,6 +22,12 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
   split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
   `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
+- **The closed retrain loop** (FR-48, D-104 to D-109): with `retraining.loop.enabled` an approved production case
+  is trained in the environment releases come from, compared with the version production serves, validated by a
+  scoring run there, promoted, approved and verified in production; `pipewright loop start | advance | show |
+  rollback`. Run requests may name `champion_version` and `model_version` for pipelines that declare them
+  (`pipewright run --champion-version`, `--model-version`); the example's pipelines and the BigQuery ML pipelines
+  do.
 - **BigQuery ML** (`spec.bqml`): a use case trains and scores in BigQuery with pipelines Pipewright provides, on the
   environment's orchestrator. The run's rows (features at each cut-off, the label window, the team's
   `prepare.sql`) with a held-out test set; the data contract in SQL; `CREATE MODEL` on the training rows (with the

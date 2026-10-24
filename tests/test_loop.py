@@ -99,6 +99,9 @@ class FakeBackend:
     def case(self):
         return self.the_case
 
+    def other_cases(self):
+        return getattr(self, "others", [])
+
     def save(self, change):
         self.the_case = change(self.the_case)
         return self.the_case
@@ -181,3 +184,12 @@ def test_the_launcher_accepts_a_replay_for_training_only():
         routing.resolve_run(V3, {"source_uri": "snapshot://r54da1c8b2b67", "pipeline": "inference"})
     with pytest.raises(BadRequest):
         routing.resolve_run(V3, {"source_uri": "snapshot://bad id"})
+
+
+def test_one_loop_at_a_time_per_use_case():
+    b = FakeBackend()
+    b.others = [{"case_id": "rc-0", "loop": {"state": "validating"}}, {"case_id": "rc-9", "loop": {"state": "closed"}}]
+    with pytest.raises(Exception, match="case rc-0's loop is still running"):
+        loop(b).start()
+    b.others[0]["loop"]["state"] = "rejected"
+    assert loop(b).start()["state"] == "training"
