@@ -270,7 +270,7 @@ def feature_columns(ml_config: dict, columns: list[str]) -> list[str]:
 def model_parts(jobs, model: str) -> dict | None:
     """An imported model (promotion by files): {"transform": its transform model or None}; None for a model
     BigQuery ML trained here. The transform model, when TRANSFORM was used, is <model>_transform."""
-    if str(jobs.client.get_model(model).model_type or "").upper() != "TENSORFLOW":
+    if str(jobs.client.get_model(model).model_type or "").upper() not in ("TENSORFLOW", "ONNX"):
         return None
     try:
         jobs.client.get_model(f"{model}_transform")
@@ -283,8 +283,20 @@ def imported_outputs(ml_config: dict, evaluation: bool = False) -> str:
     """The _pw_* outputs from an imported model's columns ({label}_probs as numbers, {label}_values as classes)."""
     data = ml_config["data"]
     label, task = ident(data["label"]["column"]), data["label"].get("task", "binary")
-    outputs = render(f"outputs_imported_{task}.sql", label=label, positive=str(data["label"].get("positive", 1)),
-                     threshold=float(ml_config["inference"].get("decision_threshold") or 0.5))
+    positive = str(data["label"].get("positive", 1))
+    threshold = float(ml_config["inference"].get("decision_threshold") or 0.5)
+    mapped = ((ml_config.get("bqml") or {}).get("import") or {}).get("outputs")
+    if mapped:                              # bqml.import: the team names its model's output columns
+        values = [str(v) for v in data["label"].get("values") or []]
+        negative = next((v for v in values if v != positive), "0")
+        names = {k: ident(v) for k, v in mapped.items() if k in ("score", "label", "prediction")}
+        if "score" in names:                # a scalar column, or one element of an array (score_index)
+            index = mapped.get("score_index")
+            names["score"] = (f"CAST(p.`{names['score']}`" + (f"[OFFSET({int(index)})]" if index is not None else "")
+                              + " AS FLOAT64)")
+        return render(f"outputs_mapped_{task}.sql", **{**{k: "_" for k in ("score", "label", "prediction")}, **names},
+                      threshold=threshold, positive=positive, negative=negative)
+    outputs = render(f"outputs_imported_{task}.sql", label=label, positive=positive, threshold=threshold)
     if task == "multiclass" and evaluation:
         outputs += ",\n" + render("outputs_imported_multiclass_true.sql", label=label)
     return outputs

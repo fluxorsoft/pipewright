@@ -248,6 +248,14 @@ evaluation.fairness.gates: "A maximum per measure, for example {metric: demograp
 evaluation.fairness.gates.metric: "The fairness measure this gate limits."
 evaluation.fairness.gates.max: "The largest gap allowed between the attribute's groups, from 0 to 1."
 evaluation.fairness.min_rows: "Groups with fewer test rows are listed but not measured (default 30), so a tiny group cannot decide a gate."
+bqml.import: "A model trained elsewhere (TensorFlow SavedModel or ONNX), imported into BigQuery ML instead of trained there, then evaluated on the run's test rows, gated and registered like a trained one (Pipewright 1.1). Instead of bqml.model_type; no options, transform or explain."
+bqml.import.format: "tensorflow or onnx (XGBoost imports need input and output schemas: not supported yet)."
+bqml.import.path: "gs://.../* : the model's files, readable by the tenant's runner. Their checksums are recorded with the run."
+bqml.import.outputs: "Which output column of the model holds what: score (the positive class probability, binary), label (the predicted class, multi-class) or prediction (regression)."
+bqml.import.outputs.score: "The output column with the positive class probability (binary classification)."
+bqml.import.outputs.score_index: "When the score column is an array of class probabilities: the positive class's position in it (from 0)."
+bqml.import.outputs.label: "The output column with the predicted class (multi-class; optional for binary)."
+bqml.import.outputs.prediction: "The output column with the prediction (regression)."
 bqml.max_bytes_billed: "The most bytes one BigQuery ML job of this use case may bill. Left out, the platform's policies.bqml.max_bytes_billed, else 100 GiB. Tree models bill far more bytes than linear ones."
 synthetic: Synthetic data generation. Off unless enabled; with it off nothing is compiled, built or released for it.
 synthetic.enabled: Switches synthetic data on for this use case. May differ per environment (for example on in production-grade environments only).

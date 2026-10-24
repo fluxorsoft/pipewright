@@ -539,12 +539,31 @@
     "bqml": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model_type"],
-      "description": "BigQuery ML as the training engine: Pipewright provides the training and scoring pipelines",
+      "description": "BigQuery ML as the training engine: Pipewright provides the training and scoring pipelines (model_type, or import)",
       "properties": {
         "model_type": {
           "enum": ["logistic_reg", "boosted_tree_classifier", "random_forest_classifier", "linear_reg",
                    "boosted_tree_regressor", "random_forest_regressor"]
+        },
+        "import": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format", "path", "outputs"],
+          "description": "a model trained elsewhere, imported into BigQuery ML instead of trained there (Pipewright 1.1)",
+          "properties": {
+            "format": { "enum": ["tensorflow", "onnx"] },
+            "path": { "type": "string", "pattern": "^gs://.+/\\*$" },
+            "outputs": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "score": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+                "score_index": { "type": "integer", "minimum": 0 },
+                "label": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+                "prediction": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+              }
+            }
+          }
         },
         "options": { "type": "object" },
         "transform": { "type": "string", "pattern": "\\.sql$" },

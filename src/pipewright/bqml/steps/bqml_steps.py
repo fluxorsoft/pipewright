@@ -110,6 +110,11 @@ def bqml_train(project: str, rows_table: str, run_id: str, ml_config: dict) -> s
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-train"}))
     model = rt.model_ref(project, ml_config, run_id)
+    imported = ml_config["bqml"].get("import")
+    if imported:                               # bqml.import: a model trained elsewhere
+        jobs.run(rt.render("import_any_model.sql", model=model, format=imported["format"].upper(),
+                           path=imported["path"]), f"import {imported['path']}")
+        return model
     columns = [f.name for f in jobs.client.get_table(rows_table).schema]
     jobs.run(rt.create_model_sql(ml_config, model, rows_table, columns), f"CREATE MODEL {model}")
     return model
@@ -131,7 +136,8 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     evaluation, section = ml_config["evaluation"], ml_config["bqml"]
     task = ml_config["data"]["label"].get("task", "binary")
     predictions = rt.table_ref(project, ml_config, run_id, "test")
-    jobs.run(rt.predict_sql(ml_config, model, rows_table, predictions, "_pw_test", jobs.labels, True),
+    jobs.run(rt.predict_sql(ml_config, model, rows_table, predictions, "_pw_test", jobs.labels, True,
+                            parts=rt.model_parts(jobs, model) if ml_config["bqml"].get("import") else None),
              "test predictions")
     result = rt.evaluate_rows(jobs, ml_config, predictions)
     record = {"metrics": result["metrics"], "slices": result["slices"], "rows": {"test": result["rows"]},

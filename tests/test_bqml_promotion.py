@@ -64,3 +64,25 @@ def test_tree_models_are_not_promoted_by_files():
     tree = SimpleNamespace(ml={"bqml": {"model_type": "boosted_tree_classifier"}})
     assert "promoted by retraining" in promotion.check_exportable(tree)
     assert promotion.check_exportable(SimpleNamespace(ml={"bqml": {"model_type": "logistic_reg"}})) is None
+
+
+def test_an_imported_team_model_maps_its_output_columns(repo):
+    from tests.test_bqml_config import bqml_repo, problems, resolve
+
+    def imp(**outputs):
+        spec = bqml_repo(repo).usecase["spec"]["bqml"]
+        spec.pop("model_type")
+        spec["import"] = {"format": "onnx", "path": "gs://models/churn/v3/*", "outputs": outputs}
+        return repo
+
+    uc = resolve(imp(score="probabilities", score_index=1))
+    section = uc.ml["bqml"]
+    assert section["model_type"] == "imported" and section["import"]["format"] == "onnx" and not section["explain"]
+    assert uc.model["promotion"] == "retrain"                      # imported again in the next environment
+    ml = {**ML, "bqml": section, "data": {"label": {"column": "churned", "positive": 1, "values": [0, 1]}}}
+    out = rt.imported_outputs(ml)
+    assert "CAST(p.`probabilities`[OFFSET(1)] AS FLOAT64) AS _pw_score" in out and "'1', '0') AS _pw_label" in out
+    assert "outputs.score: name the model's output column" in problems(imp(label="cls"))
+    spec = repo.usecase["spec"]["bqml"]
+    spec["model_type"] = "logistic_reg"
+    assert "bqml.model_type: an imported model is not trained in BigQuery ML" in problems(repo)

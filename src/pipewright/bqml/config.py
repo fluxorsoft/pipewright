@@ -41,8 +41,13 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
     data = ml["data"]
     label = data.get("label") or {}
     task = label.get("task", "binary")
-    model_type = str(spec["model_type"]).lower()
-    if model_type not in MODEL_TYPES.get(task, ()):
+    imported = _imported(spec, task, problems)
+    model_type = "imported" if imported else str(spec.get("model_type") or "").lower()
+    if imported:
+        pass
+    elif not model_type:
+        problems.append(f"{where}: give model_type (BigQuery ML trains) or import (a model trained elsewhere)")
+    elif model_type not in MODEL_TYPES.get(task, ()):
         fits = ", ".join(MODEL_TYPES.get(task, ())) or "none"
         problems.append(f"{where}.model_type {model_type!r} does not fit data.label.task {task} (use: {fits})")
     allowed = policy.get("allowed_model_types")
@@ -83,8 +88,8 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
         problems.append(f"{where}.max_bytes_billed {limit} is above {env_name}'s limit {ceiling} (platform "
                         "policy policies.bqml.max_bytes_billed)")
 
-    resolved = {"model_type": model_type, "options": options,
-                "explain": bool(spec.get("explain", ml["explainability"]["enabled"])),
+    resolved = {"model_type": model_type, "options": options, **({"import": imported} if imported else {}),
+                "explain": False if imported else bool(spec.get("explain", ml["explainability"]["enabled"])),
                 "max_bytes_billed": int(limit),
                 "transform": _sql_file(spec.get("transform"), directory, f"{where}.transform", problems),
                 "prepare": _sql_file(spec.get("prepare"), directory, f"{where}.prepare", problems)}
@@ -106,6 +111,25 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
             problems.append(f"monitoring.performance.labels.key {key!r} is not a column of inference.output_table "
                             f"{output}: bqml scoring keeps the input columns the table has")
     return resolved
+
+
+IMPORT_OUTPUT = {"binary": "score", "multiclass": "label", "regression": "prediction"}
+
+
+def _imported(spec: dict, task: str, problems: list[str]) -> dict | None:
+    """bqml.import (phase 2): a TensorFlow or ONNX model trained elsewhere, imported, then evaluated and gated."""
+    imp = spec.get("import")
+    if not imp:
+        return None
+    for key in ("model_type", "options", "transform", "explain"):
+        if spec.get(key):
+            problems.append(f"bqml.{key}: an imported model is not trained in BigQuery ML; remove it next to "
+                            "bqml.import")
+    need = IMPORT_OUTPUT.get(task)
+    outputs = dict(imp.get("outputs") or {})
+    if need and not outputs.get(need):
+        problems.append(f"bqml.import.outputs.{need}: name the model's output column that holds it ({task})")
+    return {"format": str(imp.get("format", "")).lower(), "path": imp.get("path"), "outputs": outputs}
 
 
 def _sql_file(name: str | None, directory: Path, where: str, problems: list[str]) -> dict | None:
