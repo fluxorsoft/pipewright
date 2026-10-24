@@ -366,9 +366,10 @@ def forecast_steps(jobs: Jobs, ml_config: dict, rows_table: str) -> int:
     return steps
 
 
-def forecast_create_sql(ml_config: dict, model: str, rows_table: str, steps: int) -> str:
+def forecast_create_sql(ml_config: dict, model: str, rows_table: str, steps: int, refit: bool = False) -> str:
     """CREATE MODEL (ARIMA_PLUS) on the series up to the held-out period. Its horizon covers both that period
-    (evaluation) and bqml.forecast.horizon (scoring): ML.FORECAST forecasts no further than it."""
+    (evaluation) and bqml.forecast.horizon (scoring): ML.FORECAST forecasts no further than it. refit: the same
+    options on the whole series, after gate 1 (the model that is registered)."""
     section, data = ml_config["bqml"], ml_config["data"]
     settings, ids = section["forecast"], forecast_ids(ml_config)
     time_column, label = ident(data["split"]["time_column"]), ident(data["label"]["column"])
@@ -376,9 +377,12 @@ def forecast_create_sql(ml_config: dict, model: str, rows_table: str, steps: int
                "time_series_data_col": label,
                **({"time_series_id_col": ids if len(ids) > 1 else ids[0]} if ids else {}),
                "horizon": max(int(settings["horizon"]), steps), **section["options"]}
-    return render("create_model.sql", model=model, rows_table=rows_table, transform="",
-                  columns=", ".join(q(c) for c in [*ids, time_column, label]),
-                  options=", ".join(f"{k} = {literal(v)}" for k, v in options.items()))
+    columns = ", ".join(q(c) for c in [*ids, time_column, label])
+    options_sql = ", ".join(f"{k} = {literal(v)}" for k, v in options.items())
+    if refit:
+        return render("forecast_refit.sql", model=model, rows_table=rows_table, columns=columns, options=options_sql)
+    return render("create_model.sql", model=model, rows_table=rows_table, transform="", columns=columns,
+                  options=options_sql)
 
 
 def forecast_sql(ml_config: dict, settings: dict, model: str, rows_table: str, where: str, horizon: int) -> str:

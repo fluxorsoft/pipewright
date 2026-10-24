@@ -189,3 +189,10 @@ def test_a_forecast_has_no_features_to_take_from_feature_tables(repo, monkeypatc
     forecast_repo(repo)
     repo.manifests["dev"]["features"] = {"required": True}
     assert resolve(repo).ml["features"]["include"] == []
+
+
+def test_arima_plus_is_refit_on_the_whole_series_before_registration():
+    """Backtest, then refit: the registered model forecasts from the latest data, not from the held-out period."""
+    sql = rt.forecast_create_sql(ML, "p.d.m_refit", "p.d.rows", 14, refit=True)
+    assert sql.rstrip().endswith("SELECT `store`, `day`, `units`\nFROM `p.d.rows`") and "_pw_test" not in sql
+    assert "horizon = 14" in sql and "data_frequency = 'DAILY'" in sql

@@ -252,6 +252,13 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
             f"AI.FORECAST {forecast['model']}, horizon {forecast['horizon']} (no model files: the settings in its "
             "evaluation record are the version)", ml_config["platform"].get("kms_key"))
     else:
+        if forecast:     # ARIMA_PLUS: the measured options refit on the whole series, so it forecasts from today
+            measured, model = model, f"{model}_refit"
+            jobs.run(rt.forecast_create_sql(ml_config, model, rows_table, int(forecast["horizon"]), refit=True),
+                     f"CREATE MODEL {model} (refit on the whole series)")
+            record = rt.read_record(project, rt.record_uri(ml_config, run_id)) or {}
+            record["model"] = {**record.get("model", {}), "bigquery_model": model, "measured_model": measured}
+            rt.write_record(project, rt.record_uri(ml_config, run_id), record)
         jobs.run(rt.render("register.sql", model=model, registry_id=registry_id), "registration")
         version = rt.registered_version(jobs, model)
         rt.label_version(project, region, registry_id, version, {
