@@ -1090,8 +1090,8 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Regression and multi-class models (FR-52): metrics, gates, champion comparison and drift beyond binary classification | Phase 1: built on branch `phase-1` 2026-10-23 (`data.label.task`, per-task metrics and directions, example metric helpers, prediction drift on class shares); the BigQuery ML side comes with the BQML build (its SQL in `.sql` files under `examples/`) |
 | Fairness metrics and gates (FR-53) | Planned: phase 2 (user, 2026-10-22) |
 | Approved image allow-list (FR-54): base images and package indexes per environment, refused at validate and release | Planned: phase 2 (user, 2026-10-22) |
-| Lineage per run (FR-55): `lineage.json` per run and a lineage view in Fleet View | Planned: 1.1.0 (user, 2026-10-24) |
-| Approval gates in CI (FR-56, D-120 to D-123): gated jobs per decision, the scheduled decision poll, both identities recorded | Planned: 1.1.0 (user, 2026-10-24) |
+| Lineage per run (FR-55): `lineage.json` per run and a lineage view in Fleet View | OSS part built on branch `phase-1` 2026-10-24 (`write_lineage`, the example and BigQuery ML register steps, `pipewright lineage`, which follows promotions); the Fleet View section next |
+| Approval gates in CI (FR-56, D-120 to D-123): gated jobs per decision, the scheduled decision poll, both identities recorded | Built on branch `phase-1` 2026-10-24: the approval record on decision and loop events, `pipewright decisions pending`, the `pipewright-decisions` and `pipewright-gate` workflows from `pipewright ci init`, `PIPEWRIGHT_ID_TOKENS`; the e2e repository live test next |
 
 ---
 

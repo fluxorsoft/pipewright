@@ -407,6 +407,31 @@ version it replaced. One loop runs at a time per use case, each step is recorded
 `loop.<state>`, and every run carries the case ID. The training and scoring pipelines take `champion_version` and
 `model_version` parameters for it (the example and the BigQuery ML pipelines declare them).
 
+## Approvals in GitHub
+
+Every decision a person makes (a model approval, a retrain case, the closed loop's production approval) can wait in
+GitHub instead of on someone's laptop (new in 1.1). `pipewright decisions pending --env prod` lists what waits, with
+the GitHub environment that gates each item: the environment itself, or `<environment>-<group>` for each approver
+group of a retrain case. `pipewright ci init` writes two workflows for it:
+
+- `pipewright-decisions`, every 15 minutes: advances closed retrain loops (no person needed) and starts one
+  `pipewright-gate` run per pending decision, unless one is already waiting. It runs in the GitHub environment
+  `<environment>-decisions` (the same variables, no reviewers).
+- `pipewright-gate`: waits for the required reviewers of the decision's GitHub environment, then reads the pending
+  decisions again and runs that decision's own `pipewright` command. Turn on "Prevent self-review".
+
+The decision's event records the reviewers, their comment and the workflow run next to the CI identity that acted.
+Decisions made with the CLI by hand still work and are recorded as approved outside CI.
+
+## Lineage
+
+`pipewright lineage --env prod --usecase churn [--version 5]` leads a model version back to where it came from:
+the run, the release it ran (commit, template and image digests), a digest of its `ml_config` and SQL files, the
+exact rows it trained on (its snapshot or BigQuery ML rows table, with the row count and read time), the entity,
+feature and label sources, and its evaluation against the champion. A promoted version points to the version in
+the environment it came from. The register step writes `lineage.json` next to the evaluation record
+(`write_lineage()` in the component runtime; the example and the BigQuery ML pipelines call it), new in 1.1.
+
 ## Synthetic data
 
 Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,

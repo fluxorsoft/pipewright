@@ -22,6 +22,16 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
   split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
   `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
+- **Approvals in GitHub** (FR-56, D-120 to D-123): `pipewright decisions pending [--json]` lists model approvals,
+  retrain cases and closed loops waiting for a person, with the GitHub environment that gates each.
+  `pipewright ci init` adds `pipewright-decisions` (every 15 minutes: advances loops, starts gate runs) and
+  `pipewright-gate` (waits for the environment's reviewers, then runs the decision's own command). Decision events
+  and retrain decisions record how they were approved: the GitHub reviewers, comment and run
+  (`PIPEWRIGHT_APPROVAL`), or outside CI. `PIPEWRIGHT_ID_TOKENS` gives a job ID tokens for several launchers.
+- **Lineage per run** (FR-55): `write_lineage()` in the component runtime writes `lineage.json` next to the
+  evaluation record (release, `ml_config` and SQL digests, rows, sources, evaluation); the example's register step
+  and the BigQuery ML pipeline call it. `pipewright lineage` adds the release contract, the rows' count and read
+  time and the registry state, and follows a promoted version to its source.
 - **The closed retrain loop** (FR-48, D-104 to D-109): with `retraining.loop.enabled` an approved production case
   is trained in the environment releases come from, compared with the version production serves, validated by a
   scoring run there, promoted, approved and verified in production; `pipewright loop start | advance | show |
