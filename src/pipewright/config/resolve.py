@@ -124,6 +124,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     tenant = eff["tenant"]
     resources = _resources(tenant, eff.get("resources", {}), env, problems)
     pipelines = _pipelines(eff, directory, problems)
+    bqml_spec = _bqml_pipelines(eff, pipelines, problems)
     synthetic_requirements = _synthetic_pipeline(eff.get("synthetic") or {}, pipelines, directory, problems)
     triggers = _triggers(eff, resources, tenant, pipelines, problems)
 
@@ -144,7 +145,11 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         if key in _APPROVAL_DEFAULTS and minimum == "manual" and approvals.get(key) == "auto":
             problems.append(f"approvals.{key}: auto is not allowed in {env.name} (platform policy)")
 
-    # Components.
+    # Components. A bqml use case runs Pipewright's BigQuery ML steps.
+    if bqml_spec:
+        from pipewright import bqml
+
+        eff = {**eff, "components": {"dir": str(bqml.STEPS_DIR), "requirements": str(bqml.REQUIREMENTS)}}
     components_dir = (directory / eff["components"]["dir"]).resolve()
     if not components_dir.is_dir():
         problems.append(f"components.dir not found: {eff['components']['dir']}")
@@ -204,6 +209,8 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         for where, uri in [*named, ("retraining.source_uri", retrain_source)]:
             if uri and uri.startswith("gs://"):
                 problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
+    if bqml_spec:
+        _bqml_section(bqml_spec, ml, model, directory, env, tables, pipelines, triggers, steps_spec(eff), problems)
     if "synthetic" in ml:
         from pipewright.synthetic import config as synthetic_config
 
@@ -228,7 +235,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                         f"approvals.promote_model is {approvals.get('promote_model')} in {env.name}: remove "
                         "registry.set_default (it then follows the approval) or set promote_model: auto")
 
-    steps = deep_merge(eff.get("resources_per_step", {}), eff.get("steps", {}))
+    steps = steps_spec(eff)
     ray = _ray(steps, tenant, env, problems)
 
     # Where tables are written (section 7.4): BigQuery, Parquet on GCS, or both.
@@ -260,7 +267,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     return ResolvedUseCase(
         name=meta["name"], environment=env.name, owner=meta["owner"], tenant=tenant, resources=resources,
         directory=directory, pipelines=pipelines, components_dir=components_dir, requirements=requirements,
-        framework=eff.get("framework", "pytorch"), triggers=triggers, parameters=parameters, steps=steps,
+        framework="bqml" if bqml_spec else eff.get("framework", "pytorch"), triggers=triggers, parameters=parameters, steps=steps,
         tables=tables, retention_days=bq.get("retention_days"), model=model, approvals=approvals,
         labels=meta.get("labels", {}), contacts=meta.get("contacts", []), source=str(path),
         description=meta.get("description", ""), objective=meta.get("objective", ""), ml=ml,
@@ -280,6 +287,49 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                                   .get("datasets")) is not None else {})},
         outputs=outputs, ray_requirements=ray_requirements, synthetic_requirements=synthetic_requirements,
     )
+
+
+def steps_spec(eff: dict) -> dict:
+    return deep_merge(eff.get("resources_per_step", {}), eff.get("steps", {}))
+
+
+def _bqml_pipelines(eff: dict, pipelines: dict, problems: list[str]) -> dict | None:
+    """A `bqml` section gets the training and scoring pipelines Pipewright provides, on its BigQuery ML steps:
+    the team's own pipelines, components and framework are refused next to it."""
+    spec = eff.get("bqml")
+    if not spec:
+        return None
+    from pipewright import bqml
+
+    for key in ("pipeline", "pipelines", "components", "framework"):
+        if key in eff:
+            problems.append(f"{key}: Pipewright provides the pipelines and steps of a bqml use case; remove {key}")
+    pipelines.clear()
+    pipelines["training"] = PipelineRef("training", bqml.PIPELINES_FILE, bqml.TRAINING_FUNCTION)
+    pipelines["inference"] = PipelineRef("inference", bqml.PIPELINES_FILE, bqml.SCORING_FUNCTION)
+    return spec
+
+
+def _bqml_section(spec: dict, ml: dict, model: dict, directory: Path, env: Environment, tables: dict,
+                  pipelines: dict, triggers: dict, steps: dict, problems: list[str]) -> None:
+    """ml["bqml"], and what a BigQuery ML use case cannot use: gs:// sources (the data is in BigQuery), Ray steps,
+    KServe serving."""
+    from pipewright.bqml import config as bqml_config
+
+    ml["bqml"] = bqml_config.resolve(spec, ml, directory, env.policies.get("bqml") or {}, tables,
+                                     "inference" in pipelines, env.name, problems)
+    ml["bqml"]["registry_id"] = model["name"]
+    if triggers["landing"]:
+        problems.append("triggers.landing delivers gs:// files; a bqml use case reads bq:// tables or views: use a "
+                        "schedule or `pipewright run --source-uri bq://...`")
+    named = [(f"triggers.schedules[{s['name']}].source_uri", s.get("source_uri")) for s in triggers["schedules"]]
+    for where, uri in [*named, ("retraining.source_uri", ml["retraining"].get("source_uri"))]:
+        if uri and uri.startswith("gs://"):
+            problems.append(f"{where}: a bqml use case reads bq:// tables or views")
+    if any(isinstance(cfg, dict) and "ray" in cfg for cfg in steps.values()):
+        problems.append("steps: Ray steps are not part of a bqml use case (training runs in BigQuery)")
+    if model["serving"]["enabled"] and model["serving"]["target"] != "vertex":
+        problems.append("model.serving.target: a bqml model is served from Model Registry (target vertex)")
 
 
 def _synthetic_pipeline(spec: dict, pipelines: dict, directory: Path, problems: list[str]) -> Path | None:

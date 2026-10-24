@@ -68,6 +68,8 @@ def check(uc: ResolvedUseCase, compiler: str | None = None) -> KfpCheck:
     rel = path.name if path.parent == uc.components_dir else str(path)
     if compiler is None:
         return KfpCheck(True, "skipped: kfp is not installed here (install pipewright-mlops[gcp])", skipped=True)
+    if uc.framework == "bqml":
+        return KfpCheck(True, f"Pipewright's BigQuery ML steps install kfp=={compiler} (the compiler's version)")
     cv = Version(compiler)
     major, minor = cv.major, cv.minor
     want = f"kfp=={major}.{minor}.*"

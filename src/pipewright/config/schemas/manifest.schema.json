@@ -180,6 +180,25 @@
             }
           }
         },
+        "bqml": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "platform limits on BigQuery ML use cases in this environment (validate enforces them)",
+          "properties": {
+            "max_bytes_billed": {
+              "type": "integer",
+              "minimum": 10485760,
+              "description": "the most bytes one BigQuery ML job may bill; the default limit when a use case sets none"
+            },
+            "allowed_model_types": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
         "synthetic": {
           "type": "object",
           "additionalProperties": false,

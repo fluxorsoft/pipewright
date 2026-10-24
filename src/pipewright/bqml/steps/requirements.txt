@@ -1,0 +1,5 @@
+# The BigQuery ML steps image (Pipewright adds kfp at the compiler's version when it builds the image).
+google-cloud-bigquery==3.46.1
+google-cloud-storage==3.17.1
+google-auth==2.61.0
+requests==2.33.0

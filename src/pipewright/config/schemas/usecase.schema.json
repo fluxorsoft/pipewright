@@ -28,8 +28,10 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tenant", "components", "model"],
-      "anyOf": [{ "required": ["pipeline"] }, { "required": ["pipelines"] }],
+      "required": ["tenant", "model"],
+      "anyOf": [{ "required": ["pipeline"] }, { "required": ["pipelines"] }, { "required": ["bqml"] }],
+      "if": { "not": { "required": ["bqml"] } },
+      "then": { "required": ["components"] },
       "properties": {
         "tenant": { "$ref": "#/$defs/name" },
         "include": {
@@ -111,6 +113,7 @@
         "monitoring": { "$ref": "#/$defs/monitoring" },
         "retraining": { "$ref": "#/$defs/retraining" },
         "synthetic": { "$ref": "#/$defs/synthetic" },
+        "bqml": { "$ref": "#/$defs/bqml" },
         "data_protection": {
           "type": "object",
           "additionalProperties": false,
@@ -505,6 +508,23 @@
       "additionalProperties": false,
       "required": ["max"],
       "properties": { "max": { "type": "number" } }
+    },
+    "bqml": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_type"],
+      "description": "BigQuery ML as the training engine: Pipewright provides the training and scoring pipelines",
+      "properties": {
+        "model_type": {
+          "enum": ["logistic_reg", "boosted_tree_classifier", "random_forest_classifier", "linear_reg",
+                   "boosted_tree_regressor", "random_forest_regressor"]
+        },
+        "options": { "type": "object" },
+        "transform": { "type": "string", "pattern": "\\.sql$" },
+        "prepare": { "type": "string", "pattern": "\\.sql$" },
+        "explain": { "type": "boolean" },
+        "max_bytes_billed": { "type": "integer", "minimum": 1 }
+      }
     },
     "synthetic": {
       "type": "object",

@@ -66,6 +66,13 @@ def build_context(uc: ResolvedUseCase, dest: Path) -> Path:
     shutil.copytree(uc.components_dir, dest / "components",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "kfp_config.ini", "requirements*.txt"))
     shutil.copy(requirements, dest / "requirements.txt")
+    if uc.framework == "bqml":                     # Pipewright's own steps: kfp at the compiler's version
+        from pipewright.checks.kfp_version import compiler_version
+
+        if not compiler_version():
+            raise ConfigError("building the BigQuery ML steps image needs kfp installed (the GCP extra)")
+        with open(dest / "requirements.txt", "a", encoding="utf-8") as f:
+            f.write(f"kfp=={compiler_version()}\n")
     # Platform runtime helpers (write_table, log, emit_event): importable by every component.
     templates = resources.files("pipewright.build.templates")
     runtime = templates.joinpath("pipewright_runtime.py").read_text(encoding="utf-8")
