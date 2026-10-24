@@ -66,7 +66,14 @@ def evaluate_model(
         importance = dict(list(imp.items())[: ml_config["explainability"]["top_k"]])
 
     decision, reasons = decide(scores, slices, ev, champ)
+    # evaluation.fairness (Pipewright 1.1): bias measures per attribute, and their gates.
+    from pipewright_runtime import fairness_measures, fairness_problems
+
+    fairness = fairness_measures(df, label, "_p", threshold, ml_config)
+    if unfair := fairness_problems(fairness, ml_config):
+        decision, reasons = "reject", [*reasons, *unfair]
     full = {"metrics": scores, "confusion": confusion, "slices": slices,
+            **({"fairness": fairness} if fairness else {}),
             "calibration": {"ece": ece, "reliability": reliability}, "champion": champ,
             "feature_importance": importance, "decision": decision, "reasons": reasons, "test_rows": len(df),
             "threshold": threshold}

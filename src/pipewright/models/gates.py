@@ -26,7 +26,8 @@ RECORD = "evaluation.json"
 def needs_record(evaluation: dict) -> bool:
     """Whether the configuration has anything to check."""
     return bool(evaluation.get("gates") or evaluation.get("slice_gates")
-                or (evaluation.get("champion") or {}).get("enabled"))
+                or (evaluation.get("champion") or {}).get("enabled")
+                or ((evaluation.get("fairness") or {}).get("gates")))
 
 
 def _fmt(v) -> str:
@@ -68,6 +69,8 @@ def check(record: dict, evaluation: dict, champion_expected: bool = False) -> li
                 if gap > sg["max_gap"]:
                     problems.append(f"slice gate {m}: {column}={value} is {_fmt(gap)} worse than overall "
                                     f"(maximum gap {sg['max_gap']})")
+
+    problems += fairness_problems(record, evaluation)
 
     champ_cfg = evaluation.get("champion") or {}
     if champ_cfg.get("enabled"):
@@ -111,3 +114,21 @@ def verify(gcp, artifact_uri: str | None, evaluation: dict, champion_expected: b
         return [f"no evaluation record ({RECORD}) next to the model artifacts at {artifact_uri}: the training "
                 "pipeline must write one"]
     return check(record, evaluation, champion_expected)
+
+
+def fairness_problems(record: dict, evaluation: dict) -> list[str]:
+    """evaluation.fairness.gates against the record's fairness measures (FR-53). A measure that could not be taken
+    (fewer than two groups with min_rows test rows) fails its gate: a gate is never passed by default."""
+    fair = evaluation.get("fairness") or {}
+    measured = record.get("fairness") or {}
+    out = []
+    for gate in fair.get("gates") or []:
+        m = gate["metric"]
+        for attr in fair.get("attributes") or []:
+            value = (measured.get(attr) or {}).get(m)
+            if value is None:
+                out.append(f"fairness gate {m}: not measured for {attr} (fewer than two groups with "
+                           f"{fair.get('min_rows', 30)} test rows)")
+            elif value > gate["max"]:
+                out.append(f"fairness gate {m}: {attr} is {value:.4f}, above the maximum {gate['max']}")
+    return out

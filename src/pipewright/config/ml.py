@@ -30,6 +30,9 @@ TASK_DEFAULTS = {
     "regression": ("rmse", ["rmse", "mae", "r2"]),
 }
 LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error"}
+# evaluation.fairness (FR-53): the largest gap between groups of an attribute, binary classification. Not in
+# DEFAULTS, so a use case without it resolves (and releases) exactly as before.
+FAIRNESS_METRICS = ("demographic_parity_difference", "equal_opportunity_difference", "equalized_odds_difference")
 TIME_TYPES = {"date", "timestamp"}
 RETRAINING_MODES = ("off", "propose", "candidate")
 
@@ -192,6 +195,8 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         known(col, "evaluation.slices")
     if evaluation["slice_gates"] and not evaluation["slices"]:
         problems.append("evaluation.slice_gates: set evaluation.slices first")
+    if evaluation.get("fairness") is not None:
+        _fairness(evaluation, task, label, known, problems)
 
     # ---- inference, monitoring, retraining
     inference = ml["inference"]
@@ -248,6 +253,34 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         del ml["synthetic"]
 
     return copy.deepcopy(ml)
+
+
+def _fairness(evaluation: dict, task: str, label: str | None, known, problems: list[str]) -> None:
+    """evaluation.fairness: attributes from the data contract (they need not be features, and may be personal
+    data: they are measured, never trained on), the measures, their gates and the smallest group measured."""
+    fair = evaluation["fairness"]
+    if task != "binary":
+        problems.append(f"evaluation.fairness: measured for binary classification; this use case is {task}")
+    attributes = fair.get("attributes") or []
+    if not attributes:
+        problems.append("evaluation.fairness.attributes: name at least one column")
+    for col in attributes:
+        known(col, "evaluation.fairness.attributes")
+        if col == label:
+            problems.append(f"evaluation.fairness.attributes: {col!r} is the label")
+    fair["attributes"] = list(attributes)
+    fair["metrics"] = list(fair.get("metrics") or FAIRNESS_METRICS)
+    for m in fair["metrics"]:
+        if m not in FAIRNESS_METRICS:
+            problems.append(f"evaluation.fairness.metrics: {m!r} is not one of {', '.join(FAIRNESS_METRICS)}")
+    fair["gates"] = list(fair.get("gates") or [])
+    for g in fair["gates"]:
+        if g.get("metric") not in FAIRNESS_METRICS:
+            problems.append(f"evaluation.fairness.gates: {g.get('metric')!r} is not one of "
+                            f"{', '.join(FAIRNESS_METRICS)}")
+        elif g["metric"] not in fair["metrics"]:
+            fair["metrics"].append(g["metric"])               # a gated measure is always computed
+    fair["min_rows"] = int(fair.get("min_rows") or 30)
 
 
 def _task_defaults(task: str, spec: dict, data: dict, evaluation: dict) -> None:

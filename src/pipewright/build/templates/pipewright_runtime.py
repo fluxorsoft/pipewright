@@ -9,6 +9,7 @@ read_source   reads a run's source_uri: gs:// CSV or Parquet, or bq:// table or 
               snapshot://<run_id> source replays the rows an earlier run read (data.snapshot_table)
 write_table   writes rows to the use case's store (outputs.store): BigQuery, Parquet on GCS, or both
 write_snapshot  writes the rows a run read to data.snapshot_table, tagged with the run, so the run can be replayed
+fairness_measures  bias measures per attribute on the test set (evaluation.fairness); fairness_problems its gates
 write_lineage writes lineage.json for a registered model version: release, config digest, rows, sources, evaluation
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
@@ -471,6 +472,69 @@ def _read_with_features(client, entity_ref: str, project: str, features_from: di
                 "before their cut-off; their features from it are empty", ml_config, "WARNING", run_id)
     emit_event("data.features.resolved", ml_config, run_id, **record)
     return df
+
+
+# ----------------------------------------------------------------- fairness --
+# evaluation.fairness (FR-53): per attribute, each group's selection rate, true and false positive rates at the
+# decision threshold, and the largest gap between groups. Groups with fewer than min_rows test rows are listed
+# without rates and take no part in the gaps.
+
+
+def fairness_measures(df, label: str, score: str, threshold: float, ml_config: dict) -> dict:
+    """{attribute: {"groups": {value: {rows, selection_rate, tpr, fpr}}, "<measure>": gap or None}}; {} without
+    evaluation.fairness."""
+    fair = (ml_config.get("evaluation") or {}).get("fairness")
+    if not fair:
+        return {}
+    min_rows = int(fair.get("min_rows") or 30)
+    out = {}
+    for attr in fair["attributes"]:
+        if attr not in df.columns:
+            raise ValueError(f"evaluation.fairness: the test set has no column {attr!r} (keep it in the data, "
+                             "it need not be a feature)")
+        groups, rates = {}, []
+        for value, g in df.groupby(attr, dropna=False):
+            entry = {"rows": int(len(g))}
+            if len(g) >= min_rows:
+                y = g[label].astype(int)
+                hat = (g[score] >= threshold).astype(int)
+                pos, neg = hat[y == 1], hat[y == 0]
+                entry.update(selection_rate=float(hat.mean()), tpr=float(pos.mean()) if len(pos) else None,
+                             fpr=float(neg.mean()) if len(neg) else None)
+                rates.append(entry)
+            key = "(missing)" if value != value else (int(value) if isinstance(value, float) and value.is_integer()
+                                                       else value)
+            groups[str(key)] = entry
+        out[attr] = {"groups": groups, **fairness_gaps(rates, fair["metrics"])}
+    return out
+
+
+def fairness_gaps(rates: list[dict], metrics: list[str]) -> dict:
+    """The measures from groups' rates ({selection_rate, tpr, fpr}); None when fewer than two groups have one."""
+    def gap(key):
+        values = [r[key] for r in rates if r.get(key) is not None]
+        return max(values) - min(values) if len(values) >= 2 else None
+
+    dp, tpr, fpr = gap("selection_rate"), gap("tpr"), gap("fpr")
+    measures = {"demographic_parity_difference": dp, "equal_opportunity_difference": tpr,
+                "equalized_odds_difference": None if tpr is None or fpr is None else max(tpr, fpr)}
+    return {m: measures[m] for m in metrics}
+
+
+def fairness_problems(measured: dict, ml_config: dict) -> list[str]:
+    """The fairness gates a run's measures fail (the same check `pipewright model approve` makes)."""
+    fair = (ml_config.get("evaluation") or {}).get("fairness") or {}
+    out = []
+    for gate in fair.get("gates") or []:
+        m = gate["metric"]
+        for attr in fair.get("attributes") or []:
+            value = (measured.get(attr) or {}).get(m)
+            if value is None:
+                out.append(f"fairness gate {m}: not measured for {attr} (fewer than two groups with "
+                           f"{fair.get('min_rows', 30)} test rows)")
+            elif value > gate["max"]:
+                out.append(f"fairness gate {m}: {attr} is {value:.4f}, above the maximum {gate['max']}")
+    return out
 
 
 # ------------------------------------------------------------------ lineage --

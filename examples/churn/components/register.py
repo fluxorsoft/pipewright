@@ -40,6 +40,12 @@ def model_card(ml_config: dict, report: dict, run_id: str, source_uri: str) -> s
     lines += [f"| {k} | {v:.4f} |" for k, v in m.items() if v is not None]
     lines += ["", f"Decision threshold {report['threshold']}; calibration error {report['calibration']['ece']:.4f}.",
               "", "Decision: " + report["decision"] + ". " + "; ".join(report["reasons"]), ""]
+    if report.get("fairness"):
+        lines += ["## Fairness (test split)", "", "| attribute | measure | value |", "|---|---|---|"]
+        for attr, entry in report["fairness"].items():
+            lines += [f"| {attr} | {k} | {'not measured' if v is None else f'{v:.4f}'} |"
+                      for k, v in entry.items() if k != "groups"]
+        lines.append("")
     if report.get("feature_importance"):
         lines += ["## Feature importance (permutation)", "", "| feature | drop |", "|---|---|"]
         lines += [f"| {k} | {v:.4f} |" for k, v in report["feature_importance"].items()]

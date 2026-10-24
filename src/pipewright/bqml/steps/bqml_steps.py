@@ -140,6 +140,8 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
               "sql": {k: section[k]["sha256"] for k in ("transform", "prepare") if section.get(k)},
               **({"per_class": result["per_class"]} if "per_class" in result else {}),
               **({"confusion": result["_confusion"]} if "_confusion" in result else {})}
+    if ml_config["evaluation"].get("fairness"):            # FR-53: gated by pipewright_gates.check below
+        record["fairness"] = rt.fairness(jobs, ml_config, predictions)
 
     # The champion: the default version, or the one a closed retrain loop names (what production serves).
     champion = rt.default_version(project, region, section["registry_id"], version=champion_version)

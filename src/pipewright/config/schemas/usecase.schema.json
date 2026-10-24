@@ -476,6 +476,32 @@
               "min_rows": { "type": "integer", "minimum": 1 }
             }
           }
+        },
+        "fairness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attributes"],
+          "description": "bias measures per attribute on the test set, gated like other metrics (Pipewright 1.1)",
+          "properties": {
+            "attributes": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "metrics": {
+              "type": "array",
+              "items": { "enum": ["demographic_parity_difference", "equal_opportunity_difference", "equalized_odds_difference"] }
+            },
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["metric", "max"],
+                "properties": {
+                  "metric": { "enum": ["demographic_parity_difference", "equal_opportunity_difference", "equalized_odds_difference"] },
+                  "max": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            },
+            "min_rows": { "type": "integer", "minimum": 1 }
+          }
         }
       }
     },

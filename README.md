@@ -474,6 +474,27 @@ synthetic:
 Approval of a synthetic release by named approver groups, releasing it into other environments, evidence and
 per-environment privacy policy are in Pipewright Enterprise.
 
+## Fairness
+
+A binary classifier can be measured and gated per attribute (new in 1.1):
+
+```yaml
+evaluation:
+  fairness:
+    attributes: [gender, age_band]       # data contract columns; need not be features
+    gates:
+      - { metric: demographic_parity_difference, max: 0.1 }
+      - { metric: equalized_odds_difference, max: 0.15 }
+```
+
+On the test set, each group's selection rate and true and false positive rates are taken at the decision
+threshold; `demographic_parity_difference`, `equal_opportunity_difference` and `equalized_odds_difference` are the
+largest gaps between groups. Groups with fewer than `min_rows` test rows (default 30) are listed but not measured.
+The measures go into the evaluation record and the model card; a gate above its maximum rejects the model, and
+Pipewright checks the gates again before a version becomes the default (a measure that could not be taken fails
+its gate). The example's evaluate step calls `fairness_measures()` from the component runtime; BigQuery ML use
+cases get it from the same configuration.
+
 ## Approved images
 
 A platform can limit what a use case's images are built from (new in 1.1). In the environment manifest:

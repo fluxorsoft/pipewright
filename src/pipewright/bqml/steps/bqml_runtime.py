@@ -326,6 +326,33 @@ def evaluate_rows(jobs: Jobs, ml_config: dict, predictions: str) -> dict:
     return out
 
 
+def fairness(jobs: Jobs, ml_config: dict, predictions: str) -> dict:
+    """evaluation.fairness on the test predictions: each attribute's groups and their gaps, shaped as the container
+    path records them (pipewright_runtime.fairness_measures); {} without evaluation.fairness."""
+    from pipewright_runtime import fairness_gaps
+
+    fair = ml_config["evaluation"].get("fairness")
+    if not fair:
+        return {}
+    data = ml_config["data"]
+    min_rows = int(fair.get("min_rows") or 30)
+    out = {}
+    for attr in fair["attributes"]:
+        rows = jobs.run(render("fairness.sql", predictions=predictions, attribute=q(attr),
+                               label=ident(data["label"]["column"]), positive=str(data["label"].get("positive", 1)),
+                               threshold=float(ml_config["evaluation"].get("decision_threshold") or 0.5)),
+                        f"fairness by {attr}")
+        groups, rates = {}, []
+        for r in rows:
+            entry = {"rows": int(r["row_count"])}
+            if entry["rows"] >= min_rows:
+                entry.update({k: None if r[k] is None else float(r[k]) for k in ("selection_rate", "tpr", "fpr")})
+                rates.append(entry)
+            groups[str(r["_pw_group"])] = entry
+        out[attr] = {"groups": groups, **fairness_gaps(rates, fair["metrics"])}
+    return out
+
+
 # ------------------------------------------------------------------------- PSI --
 
 def baseline(profile: dict, bins: int = 10) -> list[float]:

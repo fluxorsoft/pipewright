@@ -239,6 +239,13 @@ bqml.options: "CREATE MODEL options, for example {max_iterations: 50, l2_reg: 0.
 bqml.transform: "A .sql file with the expressions of a TRANSFORM clause (without TRANSFORM ( ... )), for preparation the model needs when it is served: BigQuery ML applies it in ML.PREDICT and at a Model Registry endpoint. Pinned by the release."
 bqml.prepare: "A .sql file with a SELECT over {rows} (the run's rows): preparation in SQL, pinned by the release. Its output is written into the run's rows before training; scoring runs the same file. An endpoint runs no SQL, so preparation needed online belongs in bqml.transform."
 bqml.explain: "Compute global explanations when the model is created (ML.GLOBAL_EXPLAIN). Left out, explainability.enabled."
+evaluation.fairness: "Bias measures per attribute on the test set (binary classification, Pipewright 1.1): the largest gap between the attribute's groups. Recorded in the evaluation record and the model card; gates refuse a model above a maximum."
+evaluation.fairness.attributes: "Columns of the data contract to measure by, for example gender or age_band. They need not be features and may be personal data: they are measured, never trained on."
+evaluation.fairness.metrics: "demographic_parity_difference (selection rates), equal_opportunity_difference (true positive rates), equalized_odds_difference (the larger of the true and false positive rate gaps). Default: all three."
+evaluation.fairness.gates: "A maximum per measure, for example {metric: demographic_parity_difference, max: 0.1}. Pipewright rechecks them before a version becomes the default."
+evaluation.fairness.gates.metric: "The fairness measure this gate limits."
+evaluation.fairness.gates.max: "The largest gap allowed between the attribute's groups, from 0 to 1."
+evaluation.fairness.min_rows: "Groups with fewer test rows are listed but not measured (default 30), so a tiny group cannot decide a gate."
 bqml.max_bytes_billed: "The most bytes one BigQuery ML job of this use case may bill. Left out, the platform's policies.bqml.max_bytes_billed, else 100 GiB. Tree models bill far more bytes than linear ones."
 synthetic: Synthetic data generation. Off unless enabled; with it off nothing is compiled, built or released for it.
 synthetic.enabled: Switches synthetic data on for this use case. May differ per environment (for example on in production-grade environments only).

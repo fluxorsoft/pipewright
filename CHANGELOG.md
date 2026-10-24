@@ -22,6 +22,10 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
   split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
   `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
+- **Fairness metrics and gates** (FR-53): `evaluation.fairness` (attributes, measures, gates, `min_rows`) for
+  binary classification: demographic parity, equal opportunity and equalised odds differences on the test set, in
+  the evaluation record and the model card, gated in the run and again by Pipewright's gate check.
+  `fairness_measures()` and `fairness_problems()` in the component runtime; BigQuery ML computes them in SQL.
 - **Approved image allow-list** (FR-54): manifest `policies.images` (`base_images` patterns, `package_indexes`,
   `default_base_image`). `validate` and `release` refuse other base images, indexes and direct references; builds
   use the platform's base and first index; the contract records the base images by digest (`images`, left out
