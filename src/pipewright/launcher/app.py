@@ -129,6 +129,22 @@ def create_app(registry: Registry | None = None) -> Flask:
                                            verify=verify, champion_info=champion_info)
         return state["decisions"]
 
+    def loop_on(contract: ReleaseContract) -> bool:
+        """retraining.loop.enabled for the release here (read from its ml_config; no case store needed)."""
+        from pipewright.retraining import cases as rc
+        from pipewright.retraining.service import ml_config
+
+        policy = ((reg().manifest.get("policies") or {}).get("retraining")) or {}
+        return rc.Settings.from_config(ml_config(contract).get("retraining") or {}, policy).loop
+
+    def via_loop(contract: ReleaseContract, rid: str, trigger: str, source_uri: str, **detail) -> dict:
+        """The closed retrain loop (D-104): this environment never trains. A scheduled or landing training run
+        becomes a retrain case (or joins the open one), which the loop trains where releases come from."""
+        result = decisions().propose(contract, {"run_id": rid, "observation": {
+            "triggers": [trigger], "source_uri": source_uri, **detail}})
+        log.info("%s training of %s through the closed retrain loop: %s", trigger, contract.usecase, result)
+        return {**result, "usecase": contract.usecase, "loop": True}
+
     def _propose(body: dict):
         contract = reg().get(body.get("usecase") or "")
         if contract is None:
@@ -241,6 +257,9 @@ def create_app(registry: Registry | None = None) -> Flask:
             rid = run_id(contract.usecase, event.bucket, event.name, event.generation)
             stem = os.path.splitext(os.path.basename(event.name))[0]
             try:
+                if landing_pipeline(contract) == "training" and loop_on(contract):
+                    results.append(via_loop(contract, rid, "landing", event.uri))
+                    continue
                 results.append(start(contract, landing_pipeline(contract), event.uri, rid, "landing", stem))
             except Exception:  # noqa: BLE001 - retried by Pub/Sub; duplicates are rejected by job ID
                 failed = True
@@ -260,6 +279,13 @@ def create_app(registry: Registry | None = None) -> Flask:
             r = resolve_run(contract, body)
         except BadRequest as e:
             return jsonify(status="error", reason=str(e)), 400
+        if r.pipeline == "training" and r.trigger == "schedule" and loop_on(contract):
+            try:
+                return jsonify(via_loop(contract, r.run_id, "schedule", r.source_uri,
+                                        schedule=body.get("schedule"))), 200
+            except Exception as e:  # noqa: BLE001
+                log.exception("scheduled retrain of %s not recorded", usecase)
+                return jsonify(status="error", reason=str(e)[:300]), 500
         try:
             result = start(contract, r.pipeline, r.source_uri, r.run_id, r.trigger, body.get("schedule") or "",
                            dict(r.overrides), r.loop)

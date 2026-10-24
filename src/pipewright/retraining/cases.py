@@ -122,7 +122,10 @@ def observe(current: dict | None, last_approved_at: str | None, obs: dict, s: Se
             ctx: dict) -> Outcome:
     """An inference run reported drift or performance (obs). ctx: usecase, environment, tenant, release,
     requested_by, run_id; also champion (version, created) when known."""
-    fired = sorted(set(obs.get("triggers") or []) & set(s.when))
+    # A schedule or a landing is an explicit request to retrain: it fires whatever retraining.when says (the closed
+    # retrain loop turns production's training runs into cases, D-104).
+    fired = sorted((set(obs.get("triggers") or []) & set(s.when))
+                   | ({"schedule", "landing"} & set(obs.get("triggers") or []) if s.loop else set()))
     if s.mode == "off":
         return Outcome(None, status="no case: retraining.mode is off")
     if not fired:
@@ -139,13 +142,26 @@ def observe(current: dict | None, last_approved_at: str | None, obs: dict, s: Se
             "case_id": cid, "usecase": ctx["usecase"], "environment": ctx["environment"], "tenant": ctx["tenant"],
             "release": ctx.get("release"), "mode": s.mode, "state": "open", "created_at": iso(now),
             "opened_at": iso(now), "updated_at": iso(now), "requested_by": ctx.get("requested_by"),
-            "triggers": fired, "required": list(s.required), "source_uri": s.source_uri,
+            "triggers": fired, "required": list(s.required), "source_uri": s.source_uri or obs.get("source_uri"),
             "champion": ctx.get("champion") or {}, "observations": [obs], "approvals": [], "until": None,
             "baseline": None, "escalated_at": None, "training": None, "history": [],
         }
         _log(case, now, "proposed", by=ctx.get("requested_by"), run_id=ctx.get("run_id"), triggers=fired)
         submit = None
-        if s.mode == "candidate":
+        if s.mode == "candidate" and s.loop:
+            # Candidate mode with the closed retrain loop: trained and validated in test without a person; only the
+            # production approval is a person's (`pipewright loop advance --approve`, or its CI gate).
+            uri = case["source_uri"]
+            if uri:
+                case["state"], case["approved_at"] = "approved", iso(now)
+                case["loop"] = {"state": "approved", "source_uri": uri, "history": [
+                    {"at": iso(now), "state": "approved", "by": "retraining.mode candidate",
+                     "note": "trained and validated in test without a person; production needs the approval"}]}
+                return Outcome(case, [("retrain.proposed", {"triggers": fired}),
+                                      ("retrain.approved", {"by": "retraining.mode candidate", "source_uri": uri,
+                                                            "loop": True})], None,
+                               f"case {cid} opened and handed to the closed retrain loop (candidate)")
+        elif s.mode == "candidate":
             submit = {"kind": "candidate", "source_uri": s.source_uri, "run_key": f"{cid}-candidate"}
         return Outcome(case, [("retrain.proposed", {"triggers": fired})], submit, f"case {cid} opened ({s.mode})")
 

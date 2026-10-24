@@ -400,3 +400,41 @@ def test_the_cli_sends_ungrouped_decisions_over_the_run_requests_topic(monkeypat
     assert client.run_requests_topic(SimpleNamespace(launcher={"url": "https://l"}), None) is None
     monkeypatch.setenv("PIPEWRIGHT_RUN_VIA", "http")
     assert client.run_requests_topic(private, None) is None
+
+
+def test_production_schedules_and_landings_become_loop_cases(gcs, monkeypatch):
+    """Loop phase 2 (D-104): with retraining.loop.enabled this environment never trains. A scheduled or landing
+    training run opens a case (or joins the open one); in candidate mode the case goes to the loop at once."""
+    pytest.importorskip("flask")
+    from pipewright import adapters
+    from pipewright.launcher.app import create_app
+    from tests.test_launcher import FakeRegistry
+
+    submitted = []
+    monkeypatch.setattr(adapters, "submit", lambda *a, **k: submitted.append(a) or "projects/p/l/r/pipelineJobs/j")
+
+    def app_for(mode):
+        ml = {**ML, "retraining": {**ML["retraining"], "mode": mode, "source_uri": None, "loop": {"enabled": True}}}
+        contract = replace(V3, triggers={**V3.triggers, "schedules": {"weekly": {
+            "pipeline": "training", "source_uri": "bq://proj-a.d.entities"}}},
+            pipelines={**V3.pipelines, "inference": {**INFERENCE, "static_parameters": {"ml_config": ml}}})
+        reg = FakeRegistry([contract])
+        reg.gcp, reg.bucket = None, "b"
+        reg.manifest.update(launcher={"url": "https://l", "service_account": "launcher@p"})
+        return create_app(reg).test_client()
+
+    app = app_for("propose")
+    first = app.post("/run", json={"usecase": "churn", "schedule": "weekly", "run_key": "w1"}).json
+    assert first["loop"] and first["status"] == "recorded" and first["state"] == "open"
+    again = app.post("/run", json={"usecase": "churn", "schedule": "weekly", "run_key": "w2"}).json
+    assert again["case_id"] == first["case_id"]                  # one case: the open one absorbs the next schedule
+    case = json.loads(gcs[f"cases/churn/{first['case_id']}.json"][0])
+    assert case["triggers"] == ["schedule"] and case["source_uri"] == "bq://proj-a.d.entities"
+    assert submitted == []                                        # nothing trained here
+
+    gcs.clear()
+    got = app_for("candidate").post("/run", json={"usecase": "churn", "schedule": "weekly", "run_key": "w3"}).json
+    assert got["state"] == "approved" and submitted == []
+    case = json.loads(gcs[f"cases/churn/{got['case_id']}.json"][0])
+    assert case["loop"]["state"] == "approved" and case["loop"]["source_uri"] == "bq://proj-a.d.entities"
+    assert json.loads(gcs["cases/churn/current.json"][0])["open"] is None

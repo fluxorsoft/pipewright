@@ -836,6 +836,11 @@ rollback. A person carries the case across.
 - Enterprise (D-105): production's platform file grants the test runners read-only access to the tenant's data
   (`tenants.<t>.loop_readers`, with `approved_by`) and lets them in through its perimeter for BigQuery; test's
   (`tenants.<t>.loop_production_project`) lets its runner out to production for BigQuery.
+- Phase 2 (built 2026-10-24): with the loop on, a scheduled or landing training run in production opens a case (or
+  joins the open one) instead of training there; in `retraining.mode: candidate` the case goes to the loop at once,
+  so a person decides only the production approval (the phase 3 shape). `pipewright-decisions` (FR-56) advances
+  loops on its schedule; Fleet View shows each loop and its steps. The test runner reading a landed gs:// file in
+  production needs a read grant the Enterprise blueprint does not give yet (it grants BigQuery only, D-105).
 - Not yet: BigQuery ML use cases (promoted by retraining, D-115, which would train in production: they join with
   promotion by files); the online canary path with automatic rollback (D-108, unit-tested only: the test use cases
   are batch); a loop's features and label window come from test's configuration (only the entity rows are read

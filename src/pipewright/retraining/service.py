@@ -96,6 +96,9 @@ class Decisions:
             held["out"] = out
             if out.case is None:
                 return None, None
+            if out.case["state"] == "approved":            # handed to the closed retrain loop at once (candidate)
+                return out.case, {**pointer, "open": None, "last_case": out.case["case_id"],
+                                  "last_approved_at": out.case.get("approved_at")}
             return out.case, {**pointer, "open": out.case["case_id"], "last_case": out.case["case_id"]}
 
         self.store.update(contract.usecase, change)

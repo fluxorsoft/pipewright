@@ -46,6 +46,9 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   rollback`. Run requests may name `champion_version` and `model_version` for pipelines that declare them
   (`pipewright run --champion-version`, `--model-version`); the example's pipelines and the BigQuery ML pipelines
   do.
+  With the loop on, scheduled and landing training runs in production open a case instead of training there,
+  and `retraining.mode: candidate` hands the case to the loop at once (only the production approval is a
+  person's).
 - **BigQuery ML** (`spec.bqml`): a use case trains and scores in BigQuery with pipelines Pipewright provides, on the
   environment's orchestrator. The run's rows (features at each cut-off, the label window, the team's
   `prepare.sql`) with a held-out test set; the data contract in SQL; `CREATE MODEL` on the training rows (with the
