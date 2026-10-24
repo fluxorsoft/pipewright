@@ -27,6 +27,8 @@ EXPORTABLE = ("linear_reg", "logistic_reg")
 PARITY_SAMPLE = 200
 TOLERANCE = 1e-6
 _SCORE = {"binary": "_pw_score", "regression": "_pw_prediction", "multiclass": "_pw_label"}
+# The tables API names legacy types; CAST takes the standard SQL names.
+_STANDARD = {"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL", "RECORD": "STRUCT"}
 
 
 def _rt():
@@ -109,7 +111,8 @@ def parity_doc(gcp, env, uc, run: str, model_ref: str) -> dict:
 
 def parity_sql(uc, doc: dict, model_ref: str, transform: str | None) -> str:
     rt = _rt()
-    casts = ", ".join(f"SAFE_CAST(JSON_VALUE(j, '$.{c}') AS {t}) AS {rt.q(c)}" for c, t in doc["columns"].items())
+    casts = ", ".join(f"SAFE_CAST(JSON_VALUE(j, '$.{c}') AS {_STANDARD.get(t, t)}) AS {rt.q(c)}"
+                      for c, t in doc["columns"].items())
     rows = ", ".join(rt.string(json.dumps(r["instance"])) for r in doc["rows"])
     inner = rt.imported_inner("SELECT * FROM given", transform)
     return rt.render("parity_predict.sql", casts=casts, rows=rows, model=model_ref, inner=inner,

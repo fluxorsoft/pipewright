@@ -11,7 +11,7 @@ UC = SimpleNamespace(ml_config=lambda: ML)
 
 
 def doc(task="binary"):
-    return {"task": task, "expected": promotion._SCORE[task], "columns": {"tenure": "INT64", "plan": "STRING"},
+    return {"task": task, "expected": promotion._SCORE[task], "columns": {"tenure": "INTEGER", "plan": "STRING"},
             "rows": [{"instance": {"tenure": 1, "plan": "a"}, "expected": 0.62759, "has_null": False},
                      {"instance": {"tenure": None, "plan": "b"}, "expected": 0.1, "has_null": True}]}
 
