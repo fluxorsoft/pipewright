@@ -6,6 +6,7 @@ import ast
 import configparser
 import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -137,8 +138,15 @@ def ray_build_context(uc: ResolvedUseCase, dest: Path) -> Path:
 
 
 def _build_and_push(ctx: Path, repository: str, package: str, uc: ResolvedUseCase, release_id: str,
-                    base_image: str | None, verbose: bool, gcp, log, what: str) -> str:
+                    base_image: str | None, verbose: bool, gcp, log, what: str,
+                    images_policy: dict | None = None) -> str:
     ref = f"{repository}/{package}"
+    if images_policy:                  # policies.images (FR-54): pip installs from the first approved index
+        from pipewright.build import allowlist
+
+        reqs = ctx / "requirements.txt"
+        if reqs.is_file():
+            reqs.write_text(allowlist.with_index(reqs.read_text(encoding="utf-8"), images_policy), encoding="utf-8")
     tag_name = f"{release_id}-{context_hash(ctx, release_id, uc.name, base_image or '')[:12]}"
     tag = f"{ref}:{tag_name}"
     if gcp is not None:
@@ -163,8 +171,23 @@ def _build_and_push(ctx: Path, repository: str, package: str, uc: ResolvedUseCas
     raise ConfigError(f"pushed {tag} but found no digest for {ref} (got {digests})")
 
 
+def base_digest(image: str) -> str:
+    """image@sha256:... of a base image, from its registry (no pull): what the release contract records."""
+    if "@sha256:" in image:
+        return image
+    out = _docker("buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}")
+    try:
+        digest = json.loads(out).get("digest")
+    except ValueError:
+        digest = None
+    if not digest:
+        raise ConfigError(f"could not read the digest of the base image {image}")
+    return f"{image.split('@')[0]}@{digest}"
+
+
 def build_and_push(uc: ResolvedUseCase, repository: str, release_id: str, token: str,
-                   base_image: str | None = None, verbose: bool = False, gcp=None, log=print) -> str:
+                   base_image: str | None = None, verbose: bool = False, gcp=None, log=print,
+                   images_policy: dict | None = None) -> str:
     """Returns the pushed image as repository/name@sha256:digest.
 
     The tag is <release_id>-<context hash>, never moved (repositories with immutable tags work; contracts pin the
@@ -173,8 +196,10 @@ def build_and_push(uc: ResolvedUseCase, repository: str, release_id: str, token:
     docker_login(repository.split("/", 1)[0], token)
     with tempfile.TemporaryDirectory(prefix="pipewright-build-") as tmp:
         ctx = build_context(uc, Path(tmp))
+        if images_policy and images_policy.get("default_base_image") and not base_image:
+            base_image = images_policy["default_base_image"]
         return _build_and_push(ctx, repository, f"{uc.name}-components", uc, release_id, base_image, verbose, gcp,
-                               log, "component image")
+                               log, "component image", images_policy)
 
 
 SYNTHETIC_KINDS = ("engine", "evaluation")
@@ -213,7 +238,8 @@ def synthetic_build_context(uc: ResolvedUseCase, dest: Path, kind: str) -> Path:
 
 
 def build_and_push_synthetic(uc: ResolvedUseCase, repository: str, release_id: str, token: str,
-                             verbose: bool = False, gcp=None, log=print) -> tuple[str, str]:
+                             verbose: bool = False, gcp=None, log=print,
+                             images_policy: dict | None = None) -> tuple[str, str]:
     """The synthetic pipeline's images (<name>-synthetic, <name>-synthetic-evaluation), as (engine, evaluation)
     references by digest; same tagging as build_and_push, so an unchanged image is reused."""
     docker_login(repository.split("/", 1)[0], token)
@@ -221,16 +247,17 @@ def build_and_push_synthetic(uc: ResolvedUseCase, repository: str, release_id: s
     for kind, package in (("engine", f"{uc.name}-synthetic"), ("evaluation", f"{uc.name}-synthetic-evaluation")):
         with tempfile.TemporaryDirectory(prefix=f"pipewright-synthetic-{kind}-") as tmp:
             ctx = synthetic_build_context(uc, Path(tmp), kind)
-            refs.append(_build_and_push(ctx, repository, package, uc, release_id, None, verbose, gcp, log,
-                                        f"synthetic {kind} image"))
+            refs.append(_build_and_push(ctx, repository, package, uc, release_id,
+                                        (images_policy or {}).get("default_base_image"), verbose, gcp, log,
+                                        f"synthetic {kind} image", images_policy))
     return refs[0], refs[1]
 
 
 def build_and_push_ray(uc: ResolvedUseCase, repository: str, release_id: str, token: str, base_image: str,
-                       verbose: bool = False, gcp=None, log=print) -> str:
+                       verbose: bool = False, gcp=None, log=print, images_policy: dict | None = None) -> str:
     """The use case's Ray image (<name>-ray), on the platform's Ray base image; same tagging as build_and_push."""
     docker_login(repository.split("/", 1)[0], token)
     with tempfile.TemporaryDirectory(prefix="pipewright-ray-build-") as tmp:
         ctx = ray_build_context(uc, Path(tmp))
         return _build_and_push(ctx, repository, f"{uc.name}-ray", uc, release_id, base_image, verbose, gcp, log,
-                               "Ray image")
+                               "Ray image", images_policy)

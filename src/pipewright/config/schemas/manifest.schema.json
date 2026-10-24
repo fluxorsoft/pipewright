@@ -199,6 +199,29 @@
             }
           }
         },
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "approved image allow-list (Pipewright 1.1): the base images and package indexes a use case's images may be built from; validate and release refuse anything else",
+          "properties": {
+            "base_images": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "patterns (fnmatch) every base image must match: component, Ray and synthetic images"
+            },
+            "package_indexes": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^https://" },
+              "description": "the pip indexes requirement files may name; the first is used when a file names none; direct references are refused"
+            },
+            "default_base_image": {
+              "type": "string",
+              "minLength": 1,
+              "description": "the base of the component and synthetic images instead of python:3.11-slim (for example a mirror)"
+            }
+          }
+        },
         "synthetic": {
           "type": "object",
           "additionalProperties": false,

@@ -103,12 +103,14 @@ class ReleaseContract:
     # Set when the release came through `pipewright promote`: the source release, digests, model, who, policy.
     promoted_from: dict = field(default_factory=dict)
     synthetic: dict = field(default_factory=dict)     # the synthetic pipeline's images and purpose (FR-49)
+    # policies.images (FR-54): the base images by digest and the approved indexes; left out of the JSON when empty
+    images: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> ReleaseContract:
         known = set(cls.__dataclass_fields__)
         optional = {"source_commit", "created_at", "labels", "blueprint", "pipelines", "metadata", "ray",
-                    "promoted_from", "synthetic"}
+                    "promoted_from", "synthetic", "images"}
         missing = sorted(known - optional - set(data))
         if missing:
             raise ConfigError(f"contract is missing fields: {missing}")
@@ -119,7 +121,10 @@ class ReleaseContract:
         return cls.from_dict(json.loads(text))
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=2, sort_keys=True)
+        data = asdict(self)
+        if not data["images"]:
+            del data["images"]                     # a release without policies.images reads as in 1.0
+        return json.dumps(data, indent=2, sort_keys=True)
 
     @property
     def pipeline_names(self) -> list[str]:

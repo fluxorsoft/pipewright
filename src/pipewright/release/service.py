@@ -83,7 +83,8 @@ class ReleaseResult:
     checks: list[str]
 
 
-def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp, log) -> str:
+def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp, log,
+               images_policy: dict | None = None) -> str:
     """The use case's Ray image, on the base image the platform set for its tenant."""
     from pipewright.ray_clusters import settings as ray_settings
 
@@ -93,7 +94,7 @@ def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp,
     base = ray_settings.base_image(settings, env.region, gpu)
     log(f"building Ray image on {base} (docker)...")
     image = images.build_and_push_ray(uc, env.artifact_registry["docker"], release_id, _token(gcp), base, gcp=gcp,
-                                      log=log)
+                                      log=log, images_policy=images_policy)
     log(f"Ray image: {image}")
     return image
 
@@ -113,20 +114,33 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
         if any(r.error or r.plan.action == "blocked" for r in results):
             raise ConfigError("tables sync failed: fix the table plan before releasing")
 
+    # policies.images (FR-54): approved bases and indexes only, refused before anything is built.
+    from pipewright.build import allowlist
+
+    images_policy = allowlist.policy(env) or None
+    if images_policy and (refused := allowlist.check(uc, env)):
+        raise ConfigError(["the environment's approved image allow-list refuses this release:", *refused])
     if component_image:
         log(f"component image (given): {component_image}")
     else:
         log("building component image (docker)...")
         component_image = images.build_and_push(uc, env.artifact_registry["docker"], release_id, _token(gcp),
-                                                gcp=gcp, log=log)
+                                                gcp=gcp, log=log, images_policy=images_policy)
         log(f"component image: {component_image}")
-    ray_image = _ray_image(uc, env, release_id, gcp, log) if uc.ray else None
+    ray_image = _ray_image(uc, env, release_id, gcp, log, images_policy) if uc.ray else None
     synthetic_images = None
     if uc.synthetic_image_needed:
         log("building synthetic images (docker)...")
         synthetic_images = images.build_and_push_synthetic(uc, env.artifact_registry["docker"], release_id,
-                                                           _token(gcp), gcp=gcp, log=log)
+                                                           _token(gcp), gcp=gcp, log=log, images_policy=images_policy)
         log(f"synthetic images: {synthetic_images[0]}, {synthetic_images[1]}")
+    recorded_images = {}
+    if images_policy:
+        recorded_images = {
+            "base_images": {what: images.base_digest(image)
+                            for what, image in allowlist.usecase_bases(uc, env, images_policy).items()},
+            "package_indexes": list(images_policy.get("package_indexes") or [])}
+        log(f"base images: {', '.join(sorted(set(recorded_images['base_images'].values())))}")
 
     # Contracts are write-once (evidence points at them). The same commit with the same images and templates is a
     # retry: reuse the contract. The same commit with anything different (e.g. a Pipewright upgrade that changes an
@@ -169,6 +183,10 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
             log(f"template ({pipeline}): {uploaded[pipeline][0]}")
         contract = publish.build_contract(uc, env, infos, uploaded, component_image, release_id, commit,
                                           ray_image=ray_image, synthetic_images=synthetic_images)
+        if recorded_images:
+            import dataclasses
+
+            contract = dataclasses.replace(contract, images=recorded_images)
         try:
             gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
         except PreconditionFailed:

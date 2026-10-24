@@ -474,6 +474,23 @@ synthetic:
 Approval of a synthetic release by named approver groups, releasing it into other environments, evidence and
 per-environment privacy policy are in Pipewright Enterprise.
 
+## Approved images
+
+A platform can limit what a use case's images are built from (new in 1.1). In the environment manifest:
+
+```json
+"policies": {"images": {
+  "base_images": ["europe-west2-docker.pkg.dev/acme-ml/mirror/*"],
+  "package_indexes": ["https://europe-west2-python.pkg.dev/acme-ml/pypi-mirror/simple/"],
+  "default_base_image": "europe-west2-docker.pkg.dev/acme-ml/mirror/python:3.11-slim"
+}}
+```
+
+Every base image (component, Ray and synthetic images) must match a pattern; requirement files may name only the
+approved indexes, and pip uses the first when a file names none; direct references (`pkg @ https://...`, `git+`,
+local paths) are refused. `validate` reports what breaks the policy, `release` refuses it before building, and the
+release contract records the base images by digest. Without `policies.images` nothing changes.
+
 ## Promotion between environments
 
 What runs in production is what was tested: `pipewright promote --from test --to prod --usecase <name>` takes the

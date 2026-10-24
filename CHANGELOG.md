@@ -22,6 +22,10 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
   split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
   `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
+- **Approved image allow-list** (FR-54): manifest `policies.images` (`base_images` patterns, `package_indexes`,
+  `default_base_image`). `validate` and `release` refuse other base images, indexes and direct references; builds
+  use the platform's base and first index; the contract records the base images by digest (`images`, left out
+  when no policy is set).
 - **Approvals in GitHub** (FR-56, D-120 to D-123): `pipewright decisions pending [--json]` lists model approvals,
   retrain cases and closed loops waiting for a person, with the GitHub environment that gates each.
   `pipewright ci init` adds `pipewright-decisions` (every 15 minutes: advances loops, starts gate runs) and

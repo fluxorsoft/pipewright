@@ -53,6 +53,10 @@ def cmd_validate(args) -> int:
             ray_pin = ray_version.check(uc)
             if not ray_pin.ok:
                 raise ConfigError(f"ray version: {ray_pin.message}", source=f"{path} ({env.name})")
+            from pipewright.build import allowlist
+
+            if refused := allowlist.check(uc, env):                 # policies.images (FR-54)
+                raise ConfigError(refused, source=f"{path} ({env.name})")
             print(f"OK    {name} ({env.name})")
         except ConfigError as e:
             failed += 1
