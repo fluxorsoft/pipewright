@@ -32,6 +32,13 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   (`bqml.max_bytes_billed`, manifest `policies.bqml`); `examples/bqml` (`pipewright new-usecase --from bqml`).
   `spec.components` is required only without `bqml`.
 
+### Changed
+
+- **Value-free errors** (NFR-18): errors from BigQuery and Cloud Storage on the data paths (the component runtime's
+  `read_source` and `write_table`, the BigQuery ML steps, the CLI's BigQuery queries) no longer quote data values:
+  quoted literals and what follows "value:" are replaced with `...`, column and table names stay
+  (`pipewright.errors.value_free`). The example's contract check reports how many values break a rule, not which.
+
 ### Fixed
 
 - **Retrain decisions in private environments** without a required approver group: the CLI sent them to the
