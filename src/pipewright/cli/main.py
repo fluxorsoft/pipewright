@@ -389,9 +389,16 @@ def cmd_loop(args) -> int:
 
 
 def cmd_decisions(args) -> int:
+    import contextlib
+    import logging
+
     from pipewright import decisions
 
-    items = decisions.pending(args.root, args.env, args.usecase or None)
+    # The Agent Platform SDK logs "Getting versions for ..." to stdout: keep stdout for the list (the workflows
+    # parse --json).
+    logging.getLogger("google.cloud.aiplatform").setLevel(logging.WARNING)
+    with contextlib.redirect_stdout(sys.stderr):
+        items = decisions.pending(args.root, args.env, args.usecase or None)
     if args.json:
         print(json.dumps([i.to_dict() for i in items], indent=2))
         return 0
@@ -434,7 +441,10 @@ def cmd_retrain_decide(args) -> int:
         return 1
     print(f"recorded: case {latest['case_id']} is {latest['state']}" + (
         f" until {latest['until']}" if latest.get("until") and latest["state"] in ("snoozed", "declined") else ""))
-    if latest["state"] == "approved" and latest.get("mode") != "candidate":
+    if latest["state"] == "approved" and latest.get("loop"):
+        print(f"handed to the closed retrain loop: `pipewright loop start --env {args.env} --usecase "
+              f"{latest['usecase']} --case {latest['case_id']}` (or the pipewright-decisions workflow)")
+    elif latest["state"] == "approved" and latest.get("mode") != "candidate":
         print("training is submitted by the launcher; `pipewright retrain show` shows the job")
     return 0
 
