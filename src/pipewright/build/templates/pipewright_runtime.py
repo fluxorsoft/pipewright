@@ -82,6 +82,35 @@ def emit_event(event_type: str, ml_config: dict, run_id: str | None = None, **da
 
 
 # ------------------------------------------------------------------ sources --
+# Value-free errors (NFR-18, D-65): a data engine's message can quote the rows it failed on. Errors from Google's
+# clients on the data paths keep the column and the rule, never the value. Same rules as pipewright.errors.value_free
+# (kept in step by a test).
+_QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+_AFTER_VALUE = re.compile(r"(?i)\b(values?|got|found|literal)(\s*[:=]\s*)(?![`'\"])[^\s,;)\]]+")
+HIDDEN = "..."
+
+
+def value_free(text: str) -> str:
+    """The message with data values taken out."""
+    text = _QUOTED.sub(lambda m: m.group(0)[0] + HIDDEN + m.group(0)[0], str(text))
+    return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, text)
+
+
+def _value_free_errors(fn):
+    """Errors from Google's clients (BigQuery, Cloud Storage) leave fn with their data values taken out."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if type(e).__module__.startswith("google."):
+                raise RuntimeError(f"{fn.__name__}: {type(e).__name__}: {value_free(str(e))}") from None
+            raise
+    return wrapper
+
+
 # Same rules as pipewright.runs.sources (kept in step by a test).
 _BQ = re.compile(r"^bq://(?:([a-z][a-z0-9-]{4,61}[a-z0-9])\.)?([A-Za-z_][A-Za-z0-9_]{0,1023})\.([A-Za-z0-9_$-]{1,1024})$")
 
@@ -106,6 +135,7 @@ def bigquery_client(project: str, ml_config: dict | None = None):
     return bigquery.Client(project=project, default_query_job_config=config)
 
 
+@_value_free_errors
 def read_source(source_uri: str, project: str, ml_config: dict | None = None, run_id: str | None = None,
                 labels: bool = False):
     """A run's input as a DataFrame. gs://.../*.parquet is read as Parquet, any other gs:// object as CSV;
@@ -522,6 +552,7 @@ def _write_bigquery(df, table: str, ml_config: dict, project: str, dataset: str)
     return f"bq://{project}.{dataset}.{table}"
 
 
+@_value_free_errors
 def write_table(table: str, rows, ml_config: dict, project: str, dataset: str, run_id: str) -> list[str]:
     """Appends rows (a DataFrame or a list of dicts) to `table` in the configured store; returns where they went."""
     import pandas as pd

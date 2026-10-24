@@ -55,7 +55,8 @@ def test_contract_catches_problems():
     errors, _ = mlkit.check_contract(df, DATA)
     text = "\n".join(errors)
     assert "tenure_months: 1 values below 0" in text
-    assert "plan: values outside [1, 12]" in text
+    assert "plan: 1 values outside [1, 12]" in text
+    assert not any(line.startswith("plan:") and "6" in line for line in errors)     # the value never appears
     assert "duplicate rows for key ['customer_id']" in text
     assert "snapshot_date: 1 values are not date" in text
     assert "unexpected columns: ['extra']" in text

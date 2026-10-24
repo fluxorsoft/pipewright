@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from pipewright.errors import ConfigError
+from pipewright.errors import ConfigError, value_free
 from pipewright.gcp.session import Gcp, error_text
 
 BQ = "https://bigquery.googleapis.com/bigquery/v2"
@@ -45,14 +45,14 @@ def query(gcp: Gcp, project: str, sql: str, params: list[dict] | None = None, lo
         body["location"] = location
     r = gcp.post(f"{BQ}/projects/{project}/queries", body)
     if not r.ok:
-        raise ConfigError(error_text(r))
+        raise ConfigError(value_free(error_text(r)))   # NFR-18
     res = r.body
     while not res.get("jobComplete"):
         time.sleep(2)
         ref = res["jobReference"]
         r = gcp.get(f"{BQ}/projects/{project}/queries/{ref['jobId']}", location=ref.get("location"), timeoutMs=60000)
         if not r.ok:
-            raise ConfigError(error_text(r))
+            raise ConfigError(value_free(error_text(r)))   # NFR-18
         res = r.body
     return res
 

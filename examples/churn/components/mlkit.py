@@ -74,8 +74,8 @@ def check_contract(df: pd.DataFrame, data_cfg: dict, mode: str = "training",
         if "max" in col and (values > col["max"]).any():
             errors.append(f"{name}: {int((values > col['max']).sum())} values above {col['max']}")
         if "allowed" in col and not values.isin(col["allowed"]).all():
-            errors.append(f"{name}: values outside {col['allowed']}: "
-                          f"{sorted(map(str, set(values[~values.isin(col['allowed'])])))[:5]}")
+            # the count, never the values: error text ends up in logs and tickets (value-free errors, NFR-18)
+            errors.append(f"{name}: {int((~values.isin(col['allowed'])).sum())} values outside {col['allowed']}")
 
     unique = [c for c in contract.get("unique", []) if c in df.columns]
     if unique and df.duplicated(subset=unique).any():

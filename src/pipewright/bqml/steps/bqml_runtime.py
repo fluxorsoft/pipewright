@@ -134,8 +134,10 @@ class Jobs:
         job = self.client.query(sql, job_config=self.config(sql))
         try:
             rows = [dict(r.items()) for r in job.result()]
-        except Exception as e:  # noqa: BLE001
-            raise RuntimeError(f"{what} failed (job {job.job_id}): {getattr(e, 'message', e)}") from None
+        except Exception as e:  # noqa: BLE001 - BigQuery's message, with its data values taken out (NFR-18)
+            from pipewright_runtime import value_free
+
+            raise RuntimeError(f"{what} failed (job {job.job_id}): {value_free(getattr(e, 'message', e))}") from None
         self.billed += int(job.total_bytes_billed or 0)
         print(json.dumps({"severity": "INFO", "message": f"{what}: job {job.job_id}, "
                           f"{int(job.total_bytes_billed or 0)} bytes billed, {time.time() - started:.1f} s"}),

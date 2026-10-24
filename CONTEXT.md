@@ -182,7 +182,7 @@ requirements named).
 | NFR-12 | **Vendor-neutral observability:** structured logs and events; tools connect through platform configuration | Met | D-30 |
 | NFR-13 | **Use-case code does not change between deployment profiles** | Met: Agent Platform Pipelines and Kubeflow Pipelines on private GKE run the same compiled templates | adapters, manifest |
 | NFR-14 | **Works behind TLS-inspecting proxies** | Met | D-49 |
-| NFR-18 | **Value-free error messages:** errors name the column and rule, never the offending value | Planned | D-65 |
+| NFR-18 | **Value-free error messages:** errors name the column and rule, never the offending value | Met on `phase-1` (1.1.0): BigQuery and Cloud Storage errors on the data paths (runtime `read_source` and `write_table`, the BigQuery ML steps, the CLI's BigQuery queries) have quoted literals and values taken out (`pipewright.errors.value_free`); the example's contract check reports counts, not values | D-65 |
 
 ### 4.3 Constraints
 
@@ -290,7 +290,7 @@ events and logs --> alerts (Cloud Monitoring), the platform's tools, audit
 | D-49 | TLS-inspecting proxies supported: `REQUESTS_CA_BUNDLE`, `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`, `UV_NATIVE_TLS`, `PIPEWRIGHT_BUILD_CA_BUNDLE` (a Docker build secret, never stored in a layer) | Real corporate networks | Active |
 | D-52 | Images reach private environments by copying a release by digest into the environment's registry; the copy keeps the digest | The digest that was approved is the digest that runs | Active |
 | D-55 | Contracts carry `metadata` (owner, objective, description, contacts, model) | Tools with no repository checkout need it | Active |
-| D-65 | **Value-free errors** (column and rule, never the value) | Error text is the most common accidental data leak | Active (not built) |
+| D-65 | **Value-free errors** (column and rule, never the value) | Error text is the most common accidental data leak | Active (built on `phase-1`, 2026-10-24) |
 | D-68 | **Drift opens a human decision; no automatic retraining.** Modes `off`, `propose` (the recommended minimum for production), `candidate` (never promotes) | Retraining on the same data does not improve a model; drift has causes needing opposite responses (data bug, seasonality, real change, harmless shift) | Active |
 | D-69 | **Email notifies; an authenticated identity approves.** Approval is `pipewright retrain approve`; approvers are verified when they act | Anyone can forward an email; regulated approvals need a named, verified approver | Active |
 | D-70 | **Decision events always go on the lifecycle events topic;** delivery to a team's own app is an opt-in, per-tenant filtered subscription (`retraining.decisions.publish`), checked by `doctor` | Audit needs every decision; topics stay platform-owned while teams choose delivery | Active |
@@ -1051,7 +1051,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Synthetic data: sequential generation (FR-49 follow-up): event histories per entity (transactions, sessions, claims) where order and gaps matter | Built, released in 1.0.0 (2026-10-18); used end to end on Kubeflow (`mode: relational`) |
 | Synthetic data: SmartNoise engine (FR-49 follow-up): OpenDP's differentially private generators (MST, AIM; MIT) as a second engine behind the interface, for a formal privacy guarantee where measured risk is not enough | Roadmap: phase 4, after 1.1.0 (user to revisit; 2026-10-24) |
 | Synthetic data: AI-assisted authoring (FR-49 follow-up): a drafted `synthetic` section and column rules from a table's schema and profile (Gemini), for a person to review | Built in Pipewright Enterprise (`pipewright synthetic-draft`, 2026-10-18) |
-| Value-free error messages (NFR-18, D-65) | Planned: phase 1 |
+| Value-free error messages (NFR-18, D-65) | Phase 1: built on branch `phase-1` 2026-10-24 |
 | Ray on Agent Platform, a cluster per Ray step of a run (FR-45, D-77, section 8.9) | Built 2026-10-10 |
 | Standing Ray clusters, a long-lived cluster per tenant (section 8.15): on private GKE, kept by the platform as a KubeRay cluster whose workers scale to zero; a cluster per run stays the default. Not on Agent Platform | Built 2026-10-17 |
 | Features from BigQuery feature tables, point in time, for training and batch scoring (FR-46, D-79, D-80, section 8.11) | Built 2026-10-10 |
