@@ -22,6 +22,8 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
   split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
   `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
+- **No generative AI in BigQuery ML SQL** (C-08): `prepare.sql` and TRANSFORM calling `AI.*` or `ML.GENERATE_*`
+  are refused at validate and release.
 - **Fairness metrics and gates** (FR-53): `evaluation.fairness` (attributes, measures, gates, `min_rows`) for
   binary classification: demographic parity, equal opportunity and equalised odds differences on the test set, in
   the evaluation record and the model card, gated in the run and again by Pipewright's gate check.

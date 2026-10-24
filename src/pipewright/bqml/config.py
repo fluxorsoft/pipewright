@@ -28,6 +28,10 @@ TASK_OUTPUT_COLUMNS = {
 }
 _FLOAT = {"FLOAT", "FLOAT64"}
 _OPTION = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+# C-08, kept for 1.1: no generative AI in a use case's SQL. BigQuery's AI.* functions (AI.GENERATE, AI.FORECAST, ...)
+# and ML.GENERATE_* call Google's generative and foundation models row by row: outputs that may change between calls,
+# rows sent to a model, and a cost the byte limit does not cover.
+_GENERATIVE = re.compile(r"\b(AI\s*\.\s*[A-Z_]+|ML\s*\.\s*GENERATE_[A-Z_]+)\s*\(", re.I)
 
 
 def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, has_inference: bool,
@@ -116,13 +120,23 @@ def _sql_file(name: str | None, directory: Path, where: str, problems: list[str]
         problems.append(f"{where}: {name} is empty")
     elif ";" in _strip_comments(sql):
         problems.append(f"{where}: {name} holds one statement; remove the semicolons")
+    called = sorted({re.sub(r"\s+", "", m.group(1)).upper()
+                     for m in _GENERATIVE.finditer(_strip_comments(sql, identifiers=True))})
+    if called:
+        problems.append(f"{where}: {name} calls {', '.join(called)}: generative AI functions are out of scope "
+                        "for Pipewright (C-08); compute such values outside the use case, or remove the call")
     return {"file": name, "sql": sql, "sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest()}
 
 
-def _strip_comments(sql: str) -> str:
+def _strip_comments(sql: str, identifiers: bool = False) -> str:
+    """The SQL without comments and string literals (with identifiers, also without quoted names)."""
     sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.S)
     sql = re.sub(r"--[^\n]*", "", sql)
-    return re.sub(r"'(?:[^'\\]|\\.)*'", "''", sql)
+    sql = re.sub(r"'(?:[^'\\]|\\.)*'", "''", sql)
+    if identifiers:
+        sql = re.sub(r'"(?:[^"\\]|\\.)*"', '""', sql)
+        sql = re.sub(r"`[^`]*`", "``", sql)
+    return sql
 
 
 def _output_problems(table, task: str, problems: list[str]) -> None:

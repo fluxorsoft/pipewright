@@ -197,3 +197,14 @@ def test_performance_key_must_be_in_the_scores(repo):
         problems(repo)
     repo.usecase["spec"]["monitoring"]["performance"]["labels"]["key"] = "customer_id"
     assert resolve(repo).ml["monitoring"]["performance"]["enabled"]
+
+
+def test_generative_ai_functions_are_refused(repo):
+    """C-08, kept for 1.1: no generative AI in a use case's SQL; in comments, strings and quoted names it is fine."""
+    bqml_repo(repo, prepare="sql/prepare.sql")
+    text = problems(repo, sql={"sql/prepare.sql": "SELECT *, AI.GENERATE(note, connection_id => 'c').result AS s, "
+                                                  "ml.generate_embedding(MODEL m, TABLE t) FROM {rows}"})
+    assert "calls AI.GENERATE, ML.GENERATE_EMBEDDING: generative AI functions are out of scope" in text
+    fine = ("-- not AI.GENERATE(x)\nSELECT *, 'AI.GENERATE(' AS note, `ai.generate(` AS a, "
+            "ML.STANDARD_SCALER(x) OVER () AS s FROM {rows}")
+    assert resolve(repo, sql={"sql/prepare.sql": fine}).ml["bqml"]["prepare"]["file"] == "sql/prepare.sql"

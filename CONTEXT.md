@@ -194,7 +194,7 @@ requirements named).
 | C-04 | Any Python ML framework: a use case's components install what they need from its `components/requirements.txt`, and its register step names the serving container (an Agent Platform prebuilt or the team's own). The example uses PyTorch |
 | C-06 | Agent Platform naming: Gemini Enterprise Agent Platform was formerly Vertex AI (renamed April 2026). APIs, SDK, IAM roles and the orchestrator value `vertex` are unchanged |
 | C-07 | Pipewright starts at a `source_uri` (files on Cloud Storage, or BigQuery tables and views); how data gets there is the team's own pipeline (D-17) |
-| C-08 | GenAI and LLM fine-tuning are out of scope for v1 |
+| C-08 | GenAI and LLM fine-tuning are out of scope for v1. Kept for 1.1 (user, 2026-10-24): `validate` and `release` refuse BigQuery's generative AI functions (`AI.*`, `ML.GENERATE_*`) in a use case's SQL |
 
 ---
 
