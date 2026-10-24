@@ -8,6 +8,9 @@ which also catches a version a pipeline made the default by itself.
 
 Rollout: by default the new version takes all traffic and older versions are removed. With --canary it takes
 model.serving.canary_percent and the current version keeps the rest; `--promote` then moves all traffic to it.
+
+A BigQuery ML version (Pipewright 1.1) is deployed from its registry entry, then checked: the endpoint's scores on
+the run's test rows must match ML.PREDICT's (bqml/serving.py), or traffic goes back and the version is removed.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ class DeployPlan:
     already_deployed: bool
     other_versions: list[str]
     gate_problems: list = None          # problems with the default version's evaluation record
+    labels: dict = None                 # the default version's registry labels (BigQuery ML: run and model)
 
 
 def endpoint_name(uc: ResolvedUseCase) -> str:
@@ -77,7 +81,8 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     problems = gates.verify(Gcp(creds), record, uc.ml["evaluation"], earlier)
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
                       serving["replicas"], bool(current),
-                      [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems)
+                      [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems,
+                      dict(getattr(default, "labels", None) or {}))
 
 
 def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, log=print) -> None:
@@ -104,6 +109,8 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     model.deploy(endpoint=endpoint, deployed_model_display_name=f"{p.model}-v{p.version}", machine_type=p.machine,
                  min_replica_count=max(p.replicas["min"], 1), max_replica_count=p.replicas["max"],
                  traffic_percentage=share, sync=True)
+    if (p.labels or {}).get("pipewright-engine") == "bqml":
+        _bqml_parity(uc, env, creds, p, endpoint, previous, log)
     if share < 100:
         log(f"canary: v{p.version} serves {share}%, {', '.join(f'v{d.model_version_id}' for d in previous)} the "
             "rest. Watch it, then `pipewright deploy-model --promote` (or --undeploy-canary).")
@@ -114,6 +121,31 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
         endpoint.undeploy(deployed_model_id=old.id)
     log(f"live: {p.endpoint} serves {p.model} v{p.version}")
     _deployed(uc, env, creds, p.version, 100)
+
+
+def _bqml_parity(uc: ResolvedUseCase, env: Environment, creds, p: DeployPlan, endpoint, previous: list,
+                 log=print) -> None:
+    """The new BigQuery ML deployment scores as ML.PREDICT does, or it is removed and traffic goes back."""
+    from pipewright.bqml import serving
+    from pipewright.gcp import Gcp
+
+    new = next(d for d in endpoint.list_models() if str(d.model_version_id) == str(p.version)
+               and d.id not in {o.id for o in previous})
+    try:
+        result = serving.parity(Gcp(creds), uc, env, p.labels, endpoint, new.id)
+    except ConfigError as e:
+        result = {"ok": False, "error": str(e)}
+    if result.get("ok"):
+        log(f"parity: {result['rows']} test rows score as ML.PREDICT does (largest difference "
+            f"{result['max_difference']:.2e})")
+        return
+    if previous:
+        endpoint.update(traffic_split={previous[0].id: 100, **{o.id: 0 for o in previous[1:]}, new.id: 0})
+    endpoint.undeploy(deployed_model_id=new.id)
+    why = result.get("error") or (f"largest difference {result['max_difference']:.2e} on {result['rows']} test rows "
+                                  f"(tolerance {serving.TOLERANCE})")
+    raise ConfigError(f"v{p.version} of {p.model} was removed from {p.endpoint}: its scores do not match ML.PREDICT "
+                      f"({why})" + ("; the previous version serves all traffic again" if previous else ""))
 
 
 def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: int) -> None:
