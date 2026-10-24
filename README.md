@@ -295,6 +295,32 @@ source that resolves to the same tables: `- feature_group: customer_profile` wit
 from the Feature Registry at each run. `pipewright new-usecase --from features` starts from an example with two
 feature tables.
 
+## Online features
+
+An endpoint can take entity IDs and read the features itself (new in 1.1):
+
+```yaml
+model:
+  serving: { enabled: true, features: online }
+data:
+  features_from:
+    sources:
+      - feature_group: customer_profile        # served by the feature view of the same name
+        features: [tenure_months, monthly_charges]
+      - table: bq://feats.support
+        online_view: support_activity          # a table source names its view
+        features: [num_support_tickets]
+```
+
+The platform team gives the tenant a Feature Store online store (Bigtable) in the manifest
+(`tenants.<tenant>.features.online_store`); its feature views serve the same features training and batch scoring read
+from `data.features_from`, so there is one feature definition. A request is then `{"instances": ["c-42"]}` (or
+`[{"customer_id": "c-42"}]`): the serving handler reads each view's latest values and builds the row in the model's
+feature order; a missing value fails the request rather than defaulting. `validate` refuses a model feature no view
+serves, `doctor` checks the store, the views and how fresh their last sync is, and `deploy-model` runs the endpoint as
+the tenant's runner, which may read the views. Online stores have a standing cost: they are off unless the platform
+creates one. Endpoints on Agent Platform today; KServe later.
+
 ## Reproducible runs and label windows
 
 Two optional keys in `config/data.yaml`, both off unless set (new in 1.1):

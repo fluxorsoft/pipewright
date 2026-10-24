@@ -22,6 +22,10 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   lower-is-better in gates, the champion comparison and tuning. A regression use case defaults to rmse and a random
   split, and refuses a stratified one. The example's `mlkit` gains `regression_metrics`, `multiclass_metrics` and
   `class_baseline` (prediction drift on class shares; `psi` reads both baseline kinds).
+- **Online feature lookup** (FR-51): `model.serving.features: online` with the tenant's online store from the
+  manifest (`tenants.<t>.features.online_store`) and a view per `data.features_from` source (`online_view`, default
+  the feature group). The example's serving handler takes entity IDs and reads the views; `doctor` checks the views
+  and their last sync; `deploy-model` serves as the tenant's runner. Off unless set.
 - **No generative AI in BigQuery ML SQL** (C-08): `prepare.sql` and TRANSFORM calling `AI.*` or `ML.GENERATE_*`
   are refused at validate and release.
 - **Fairness metrics and gates** (FR-53): `evaluation.fairness` (attributes, measures, gates, `min_rows`) for
