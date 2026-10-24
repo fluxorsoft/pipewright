@@ -110,6 +110,13 @@ def bqml_train(project: str, rows_table: str, run_id: str, ml_config: dict) -> s
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-train"}))
     model = rt.model_ref(project, ml_config, run_id)
+    forecast = ml_config["bqml"].get("forecast")
+    if forecast and forecast["engine"] == "ai_forecast":     # AI.FORECAST trains nothing: evaluation measures it
+        return ""
+    if forecast:
+        steps = rt.forecast_steps(jobs, ml_config, rows_table)
+        jobs.run(rt.forecast_create_sql(ml_config, model, rows_table, steps), f"CREATE MODEL {model}")
+        return model
     imported = ml_config["bqml"].get("import")
     if imported:                               # bqml.import: a model trained elsewhere
         jobs.run(rt.render("import_any_model.sql", model=model, format=imported["format"].upper(),
@@ -136,15 +143,21 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     evaluation, section = ml_config["evaluation"], ml_config["bqml"]
     task = ml_config["data"]["label"].get("task", "binary")
     predictions = rt.table_ref(project, ml_config, run_id, "test")
-    jobs.run(rt.predict_sql(ml_config, model, rows_table, predictions, "_pw_test", jobs.labels, True,
-                            parts=rt.model_parts(jobs, model) if ml_config["bqml"].get("import") else None),
-             "test predictions")
+    forecast = section.get("forecast")
     unsupervised = task in rt.UNSUPERVISED
-    result = (rt.evaluate_unsupervised(jobs, ml_config, model, rows_table) if unsupervised
-              else rt.evaluate_rows(jobs, ml_config, predictions))
+    if forecast:                       # the held-out latest period, forecast and measured against what happened
+        result = rt.evaluate_forecast(jobs, ml_config, forecast, model, rows_table, predictions)
+    else:
+        jobs.run(rt.predict_sql(ml_config, model, rows_table, predictions, "_pw_test", jobs.labels, True,
+                                parts=rt.model_parts(jobs, model) if section.get("import") else None),
+                 "test predictions")
+        result = (rt.evaluate_unsupervised(jobs, ml_config, model, rows_table) if unsupervised
+                  else rt.evaluate_rows(jobs, ml_config, predictions))
     record = {"metrics": result["metrics"], "slices": result["slices"], "rows": {"test": result["rows"]},
               "task": task, "engine": "bqml",
-              "model": {"bigquery_model": model, "model_type": section["model_type"], "options": section["options"]},
+              "model": {"bigquery_model": model or None, "model_type": section["model_type"],
+                        "options": section["options"], **({"forecast": forecast} if forecast else {})},
+              **({"horizon_evaluated": result["horizon"]} if forecast else {}),
               "sql": {k: section[k]["sha256"] for k in ("transform", "prepare") if section.get(k)},
               **({"per_class": result["per_class"]} if "per_class" in result else {}),
               **({"confusion": result["_confusion"]} if "_confusion" in result else {})}
@@ -156,7 +169,20 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     if champion_version and champion is None:
         raise ValueError(f"champion_version {champion_version}: {section['registry_id']} has no such version")
     champion_model = ((champion or {}).get("labels") or {}).get("pipewright-bq-model")
-    if champion_model:
+    if forecast:
+        # ARIMA_PLUS forecasts from its own training end, so it has no champion (config refuses one); an AI.FORECAST
+        # champion is its approved settings, run on this run's history.
+        champion_model = None
+        if forecast["engine"] == "ai_forecast" and evaluation["champion"]["enabled"] and champion:
+            run = (champion.get("labels") or {}).get("pipewright-run")
+            approved = ((rt.read_record(project, f"{section['records']}{run}/") or {}).get("model") or {}).get(
+                "forecast")
+            if approved:
+                champion_table = rt.table_ref(project, ml_config, run_id, "champion")
+                got = rt.evaluate_forecast(jobs, ml_config, approved, "", rows_table, champion_table)
+                record["champion"] = {**got["metrics"], "_version": champion.get("versionId"), "_settings": approved}
+                champion_model = "ai_forecast"
+    elif champion_model:
         dataset = ml_config["platform"]["bigquery_dataset"]
         champion_ref = f"{project}.{dataset}.{champion_model}"
         champion_predictions = rt.table_ref(project, ml_config, run_id, "champion")
@@ -177,7 +203,7 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
         stats["prediction_baseline"] = {}
     else:
         stats["prediction_baseline"] = rt.column_baseline(
-            jobs, predictions, "_pw_prediction" if task == "regression" else "_pw_score", "TRUE")
+            jobs, predictions, "_pw_prediction" if task in ("regression", "forecast") else "_pw_score", "TRUE")
     stats["rows"] = int(jobs.run(f"SELECT COUNTIF(NOT _pw_test) AS n FROM `{rows_table}`", "training rows")[0]["n"])
     record["training_stats"] = stats
     if section.get("explain"):
@@ -215,21 +241,31 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-register"}))
     registry_id = ml_config["bqml"]["registry_id"]
-    jobs.run(rt.render("register.sql", model=model, registry_id=registry_id), "registration")
-    version = rt.registered_version(jobs, model)
-    rt.label_version(project, region, registry_id, version, {
-        "pipewright-usecase": rt.base_name(ml_config["usecase"]).replace("_", "-"),
-        "pipewright-run": rt.run_part(run_id), "pipewright-bq-model": model.rsplit(".", 1)[1],
-        "pipewright-engine": "bqml", "status": "candidate"})
+    forecast = ml_config["bqml"].get("forecast") or {}
+    tags = {"pipewright-usecase": rt.base_name(ml_config["usecase"]).replace("_", "-"),
+            "pipewright-run": rt.run_part(run_id), "status": "candidate"}
+    if forecast.get("engine") == "ai_forecast":
+        # No model to register: a version without files, whose evaluation record holds the settings it was measured
+        # with; scoring runs AI.FORECAST with those once a person approves it.
+        version = rt.upload_version(
+            project, region, registry_id, {**tags, "pipewright-engine": "ai-forecast"},
+            f"AI.FORECAST {forecast['model']}, horizon {forecast['horizon']} (no model files: the settings in its "
+            "evaluation record are the version)", ml_config["platform"].get("kms_key"))
+    else:
+        jobs.run(rt.render("register.sql", model=model, registry_id=registry_id), "registration")
+        version = rt.registered_version(jobs, model)
+        rt.label_version(project, region, registry_id, version, {
+            **tags, "pipewright-bq-model": model.rsplit(".", 1)[1], "pipewright-engine": "bqml"})
     default = ml_config["registry"].get("set_default") == "on_approval"
     if default:
         rt.make_default(project, region, registry_id, version)
     primary = ml_config["evaluation"]["primary_metric"]
     emit_event("model.registered", ml_config, run_id, model=registry_id, version=version, default=default,
-               primary_metric=primary, primary_value=primary_value, bigquery_model=model)
+               primary_metric=primary, primary_value=primary_value, bigquery_model=model or None)
     folder = rt.record_uri(ml_config, run_id)
     write_lineage(ml_config, run_id, folder, lineage_record(
-        ml_config, run_id, source_uri, {"name": registry_id, "version": str(version), "bigquery_model": model},
+        ml_config, run_id, source_uri, {"name": registry_id, "version": str(version),
+                                        **({"bigquery_model": model} if model else {"engine": "ai_forecast"})},
         rt.read_record(project, folder) or {}, f"{folder}evaluation.json", rows_table or None))
     return version
 
@@ -246,6 +282,9 @@ def bqml_champion(project: str, region: str, ml_config: dict, model_version: str
     section = ml_config["bqml"]
     version = rt.default_version(project, region, section["registry_id"], version=model_version)
     labels = (version or {}).get("labels") or {}
+    if labels.get("pipewright-engine") == "ai-forecast":     # AI.FORECAST: no BigQuery model, its record's settings
+        record = f"{section['records']}{labels.get('pipewright-run', '')}/"
+        return namedtuple("Champion", ["model", "version", "record"])("ai_forecast", str(version["versionId"]), record)
     if not labels.get("pipewright-bq-model"):
         which = f"version {model_version}" if model_version else "default version"
         raise ValueError(f"{section['registry_id']} has no {which} from a bqml training run: train and approve one "
@@ -266,8 +305,22 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-score"}))
     scored = rt.table_ref(project, ml_config, run_id, "scored")
-    jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False,
-                            parts=rt.model_parts(jobs, model)), "predictions")
+    if ml_config["bqml"].get("forecast"):
+        # The settings the champion was approved with (its record), else the release's; AI.FORECAST reads the
+        # history in this run's rows, ARIMA_PLUS forecasts from the end of its training data.
+        settings = ((rt.version_record(project, ml_config, model_version) or {}).get("model") or {}).get(
+            "forecast") or ml_config["bqml"]["forecast"]
+        if settings["engine"] == "ai_forecast" and ml_config["data"]["label"]["column"] not in {
+                f.name for f in jobs.client.get_table(rows_table).schema}:
+            raise ValueError(f"the rows have no {ml_config['data']['label']['column']} column: AI.FORECAST "
+                             "forecasts from the series' history")
+        jobs.run(rt.forecast_table_sql(ml_config, rt.forecast_sql(ml_config, settings, model, rows_table, "TRUE",
+                                                                   settings["horizon"]), scored, jobs.labels),
+                 "forecast")
+        rt.forecast_failures(jobs, scored)
+    else:
+        jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False,
+                                parts=rt.model_parts(jobs, model)), "predictions")
     output = ml_config["inference"]["output_table"]
     target = f"{project}.{ml_config['platform']['bigquery_dataset']}.{output}"
     table_columns = [f.name for f in jobs.client.get_table(target).schema]
@@ -316,7 +369,8 @@ def bqml_monitor(project: str, rows_table: str, scored_table: str, rows: int, mo
         if "classes" in base:
             value = rt.class_psi(base["classes"], rt.class_shares(jobs, scored_table))
         else:
-            column = "_pw_prediction" if ml_config["data"]["label"].get("task") == "regression" else "_pw_score"
+            column = ("_pw_prediction" if ml_config["data"]["label"].get("task") in ("regression", "forecast")
+                      else "_pw_score")
             value = rt.psi(base["fractions"], rt.column_fractions(jobs, scored_table, column, "TRUE", base["edges"]))
         result["prediction_psi"] = round(value, 4)
         if value > mon["prediction_drift"]["threshold"]:

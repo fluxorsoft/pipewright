@@ -196,6 +196,10 @@
               "items": {
                 "type": "string"
               }
+            },
+            "ai_forecast": {
+              "type": "boolean",
+              "description": "allow bqml.forecast.engine ai_forecast (AI.FORECAST with Google's TimesFM model), the one exception to C-08; off unless true (Pipewright 1.1)"
             }
           }
         },

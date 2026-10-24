@@ -389,6 +389,9 @@ def _bqml_section(spec: dict, ml: dict, model: dict, directory: Path, env: Envir
         problems.append("steps: Ray steps are not part of a bqml use case (training runs in BigQuery)")
     if model["serving"]["enabled"] and model["serving"]["target"] != "vertex":
         problems.append("model.serving.target: a bqml model is served from Model Registry (target vertex)")
+    if model["serving"]["enabled"] and ml["bqml"].get("forecast"):
+        problems.append("model.serving: a forecast is not served online; scoring writes it to "
+                        "inference.output_table")
 
 
 def _synthetic_pipeline(spec: dict, pipelines: dict, directory: Path, problems: list[str]) -> Path | None:
@@ -445,6 +448,8 @@ def _feature_policy(ml: dict, env: Environment, tenant: str, problems: list[str]
                                 f"{tenant!r} in {env.name} ({', '.join(allowed) or 'none listed'}); ask the platform "
                                 "team")
     if (env.features or {}).get("required"):
+        if not spec and (ml["data"].get("label") or {}).get("task") == "forecast":
+            return                           # a forecast learns from its series alone: no model features
         if not spec:
             problems.append(f"{env.name} requires features from feature tables (features.required): add "
                             "data.features_from")

@@ -234,7 +234,7 @@ data_protection.erasure: How a data subject's rows are found for `pipewright dat
 data_protection.erasure.key_column: The column that identifies a data subject, such as customer_id.
 
 bqml: "BigQuery ML as the training engine. Pipewright then provides the training and scoring pipelines: they run on the environment's orchestrator, their steps submit BigQuery jobs, and the data and the model stay in BigQuery. A bqml use case has no pipelines, components or framework of its own."
-bqml.model_type: "The BigQuery ML model type, matching data.label.task: logistic_reg, boosted_tree_classifier or random_forest_classifier for binary and multiclass; linear_reg, boosted_tree_regressor or random_forest_regressor for regression."
+bqml.model_type: "The BigQuery ML model type, matching data.label.task: logistic_reg, boosted_tree_classifier or random_forest_classifier for binary and multiclass; linear_reg, boosted_tree_regressor or random_forest_regressor for regression; kmeans for clustering, pca for decomposition and arima_plus for forecast (Pipewright 1.1)."
 bqml.options: "CREATE MODEL options, for example {max_iterations: 50, l2_reg: 0.1}. Pipewright sets the label, the split, the key, the registry and explanations itself, so those options are refused."
 bqml.transform: "A .sql file with the expressions of a TRANSFORM clause (without TRANSFORM ( ... )), for preparation the model needs when it is served: BigQuery ML applies it in ML.PREDICT and at a Model Registry endpoint. Pinned by the release."
 bqml.prepare: "A .sql file with a SELECT over {rows} (the run's rows): preparation in SQL, pinned by the release. Its output is written into the run's rows before training; scoring runs the same file. An endpoint runs no SQL, so preparation needed online belongs in bqml.transform."
@@ -256,6 +256,13 @@ bqml.import.outputs.score: "The output column with the positive class probabilit
 bqml.import.outputs.score_index: "When the score column is an array of class probabilities: the positive class's position in it (from 0)."
 bqml.import.outputs.label: "The output column with the predicted class (multi-class; optional for binary)."
 bqml.import.outputs.prediction: "The output column with the prediction (regression)."
+bqml.forecast: "A forecast (data.label.task forecast, Pipewright 1.1): the series is data.label.column over data.split.time_column, one series per id_columns value. Training holds out the latest period (data.split.test_fraction of the time range), forecasts it and measures the forecast against what happened (mae, rmse, mape); scoring writes the next horizon points to inference.output_table (forecast_timestamp, forecast_value, the interval and the ID columns)."
+bqml.forecast.engine: "arima_plus (the default: CREATE MODEL ARIMA_PLUS, registered like any BigQuery ML model) or ai_forecast (AI.FORECAST with Google's TimesFM model: no model is trained, the version holds the settings it was measured with). ai_forecast sends the series to a Google foundation model, an exception to C-08 the platform allows with policies.bqml.ai_forecast."
+bqml.forecast.horizon: "How many time points scoring forecasts, per series (at most 10000)."
+bqml.forecast.id_columns: "The columns that tell series apart (for example a store), from data.contract.columns. Left out, the rows are one series."
+bqml.forecast.confidence_level: "The share of future values the prediction interval should hold. Default 0.95."
+bqml.forecast.model: "ai_forecast only: the TimesFM model. TimesFM 2.5 (generally available)."
+bqml.forecast.context_window: "ai_forecast only: how many of the latest points the model reads. Left out, the smallest window that covers the history."
 bqml.max_bytes_billed: "The most bytes one BigQuery ML job of this use case may bill. Left out, the platform's policies.bqml.max_bytes_billed, else 100 GiB. Tree models bill far more bytes than linear ones."
 synthetic: Synthetic data generation. Off unless enabled; with it off nothing is compiled, built or released for it.
 synthetic.enabled: Switches synthetic data on for this use case. May differ per environment (for example on in production-grade environments only).

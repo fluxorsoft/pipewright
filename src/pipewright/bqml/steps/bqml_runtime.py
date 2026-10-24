@@ -348,11 +348,111 @@ def predict_sql(ml_config: dict, model: str, rows_table: str, out_table: str, wh
                   where=where, threshold=threshold)
 
 
+# ------------------------------------------------------------------ forecasts --
+
+def forecast_ids(ml_config: dict) -> list[str]:
+    return [ident(c) for c in ml_config["bqml"]["forecast"]["id_columns"]]
+
+
+def forecast_steps(jobs: Jobs, ml_config: dict, rows_table: str) -> int:
+    """The held-out period's length: the most time points one series has in the test rows."""
+    ids = forecast_ids(ml_config)
+    row = jobs.run(render("forecast_steps.sql", time_column=ident(ml_config["data"]["split"]["time_column"]),
+                          rows_table=rows_table,
+                          group_by=f" GROUP BY {', '.join(q(c) for c in ids)}" if ids else ""), "held-out period")
+    steps = int(row[0]["steps"]) if row else 0
+    if not steps:
+        raise ValueError("a forecast needs held-out rows: the test rows (the latest period) are empty")
+    return steps
+
+
+def forecast_create_sql(ml_config: dict, model: str, rows_table: str, steps: int) -> str:
+    """CREATE MODEL (ARIMA_PLUS) on the series up to the held-out period. Its horizon covers both that period
+    (evaluation) and bqml.forecast.horizon (scoring): ML.FORECAST forecasts no further than it."""
+    section, data = ml_config["bqml"], ml_config["data"]
+    settings, ids = section["forecast"], forecast_ids(ml_config)
+    time_column, label = ident(data["split"]["time_column"]), ident(data["label"]["column"])
+    options = {"model_type": section["model_type"], "time_series_timestamp_col": time_column,
+               "time_series_data_col": label,
+               **({"time_series_id_col": ids if len(ids) > 1 else ids[0]} if ids else {}),
+               "horizon": max(int(settings["horizon"]), steps), **section["options"]}
+    return render("create_model.sql", model=model, rows_table=rows_table, transform="",
+                  columns=", ".join(q(c) for c in [*ids, time_column, label]),
+                  options=", ".join(f"{k} = {literal(v)}" for k, v in options.items()))
+
+
+def forecast_sql(ml_config: dict, settings: dict, model: str, rows_table: str, where: str, horizon: int) -> str:
+    """The forecast: ML.FORECAST of an ARIMA_PLUS model, or AI.FORECAST over the rows (where) with the settings."""
+    ids = forecast_ids(ml_config)
+    selected = "".join(f"{q(c)}, " for c in ids)
+    confidence = float(settings.get("confidence_level", 0.95))
+    if settings["engine"] != "ai_forecast":
+        return render("forecast_arima.sql", ids=selected, model=model, horizon=int(horizon),
+                      confidence_level=confidence)
+    data = ml_config["data"]
+    time_column, label = ident(data["split"]["time_column"]), ident(data["label"]["column"])
+    history = (f"SELECT {selected}{q(time_column)}, {q(label)} FROM `{rows_table}` WHERE {where}")
+    window = settings.get("context_window")
+    return render("forecast_ai.sql", ids=selected, history=history, label=label, time_column=time_column,
+                  model=settings["model"].replace("'", ""), horizon=int(horizon), confidence_level=confidence,
+                  id_cols=f" id_cols => [{', '.join(string(c) for c in ids)}]," if ids else "",
+                  context_window=f", context_window => {int(window)}" if window else "")
+
+
+def forecast_table_sql(ml_config: dict, forecast: str, out_table: str, labels: dict,
+                       rows_table: str | None = None) -> str:
+    """The forecast into a table; with rows_table (evaluation), joined to the held-out actual values."""
+    if not rows_table:
+        return render("forecast_table.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
+                      forecast=forecast, actual="", join="")
+    data, ids = ml_config["data"], forecast_ids(ml_config)
+    label = ident(data["label"]["column"])
+    join = render("forecast_actuals.sql", ids="".join(f"{q(c)}, " for c in ids),
+                  time_column=ident(data["split"]["time_column"]), label=label, rows_table=rows_table,
+                  on="".join(f" AND a.{q(c)} = f.{q(c)}" for c in ids))
+    return render("forecast_table.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
+                  forecast=forecast, actual=f", a.{q(label)}", join="\n" + join)
+
+
+def forecast_failures(jobs: Jobs, table: str) -> None:
+    """AI.FORECAST reports a series it could not forecast in ai_forecast_status: fail rather than score part."""
+    row = jobs.run(f"SELECT COUNTIF(_pw_status != '') AS failed, ANY_VALUE(NULLIF(_pw_status, '')) AS status "
+                   f"FROM `{table}`", "forecast status")[0]
+    if int(row["failed"] or 0):
+        raise RuntimeError(f"the forecast failed for {row['failed']} rows: {row['status']}")
+
+
+def evaluate_forecast(jobs: Jobs, ml_config: dict, settings: dict, model: str, rows_table: str,
+                      out_table: str) -> dict:
+    """{metrics, slices, rows, horizon}: the forecast over the held-out latest period against the actual values,
+    measured as regression is (the same definitions as the container path)."""
+    steps = forecast_steps(jobs, ml_config, rows_table)
+    jobs.run(forecast_table_sql(ml_config, forecast_sql(ml_config, settings, model, rows_table, "NOT _pw_test",
+                                                        steps), out_table, jobs.labels, rows_table),
+             "forecast of the held-out period")
+    forecast_failures(jobs, out_table)
+    result = evaluate_rows(jobs, ml_config, out_table)
+    if not result["rows"]:
+        raise ValueError("the forecast matched none of the held-out rows: is data.split.time_column a regular series "
+                         "(one row per series and time point)?")
+    return {**result, "horizon": steps}
+
+
+def version_record(project: str, ml_config: dict, version: str, session=None) -> dict | None:
+    """A registry version's evaluation record, from its run label."""
+    platform = ml_config["platform"]
+    found = default_version(project, platform["region"], ml_config["bqml"]["registry_id"], session=session,
+                            version=version)
+    run = ((found or {}).get("labels") or {}).get("pipewright-run")
+    return read_record(project, f"{ml_config['bqml']['records']}{run}/") if run else None
+
+
 # --------------------------------------------------------------------- metrics --
 
 def metrics_sql(ml_config: dict, predictions: str, group: str | None = None) -> str:
     data = ml_config["data"]
     task = data["label"].get("task", "binary")
+    task = "regression" if task == "forecast" else task       # a forecast is measured as regression is
     threshold = float(ml_config["evaluation"].get("decision_threshold") or 0.5)
     return render(f"metrics_{task}.sql", predictions=predictions, label=ident(data["label"]["column"]),
                   group=f"CAST({q(group)} AS STRING)" if group else "'overall'",
@@ -539,6 +639,32 @@ def make_default(project: str, region: str, registry_id: str, version: str, sess
     r = session.post(url, json={"versionAliases": ["default"]}, timeout=60)
     if r.status_code >= 300:
         raise RuntimeError(f"making v{version} the default: {r.status_code} {r.text[:300]}")
+
+
+def upload_version(project: str, region: str, registry_id: str, labels: dict, description: str,
+                   kms_key: str | None = None, session=None, wait_s: int = 300) -> str:
+    """A registry version without model files (AI.FORECAST: the approved settings are the version, in its
+    evaluation record). Creates the model on its first version. Returns the version ID."""
+    session = session or _session()
+    base = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}"
+    parent = f"projects/{project}/locations/{region}/models/{registry_id}"
+    exists = session.get(f"{base}/models/{registry_id}", timeout=60).status_code == 200
+    model = {"displayName": registry_id, "description": description, "labels": labels,
+             **({"encryptionSpec": {"kmsKeyName": kms_key}} if kms_key else {})}
+    r = session.post(f"{base}/models:upload", timeout=60,
+                     json={"model": model, **({"parentModel": parent} if exists else {"modelId": registry_id})})
+    if r.status_code >= 300:
+        raise RuntimeError(f"Model Registry upload: {r.status_code} {r.text[:300]}")
+    operation, deadline = r.json()["name"], time.time() + wait_s
+    while True:
+        op = session.get(f"https://{region}-aiplatform.googleapis.com/v1/{operation}", timeout=60).json()
+        if op.get("done"):
+            if op.get("error"):
+                raise RuntimeError(f"Model Registry upload: {op['error']}")
+            return str(op["response"]["modelVersionId"])
+        if time.time() > deadline:
+            raise RuntimeError(f"Model Registry upload did not finish within {wait_s} s ({operation})")
+        time.sleep(5)
 
 
 def write_record(project: str, uri: str, record: dict) -> str:

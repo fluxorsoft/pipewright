@@ -12,7 +12,10 @@ import re
 from pathlib import Path
 
 from pipewright.bqml import (
+    AI_FORECAST_MODELS,
     DEFAULT_MAX_BYTES_BILLED,
+    FORECAST_ENGINES,
+    MAX_HORIZON,
     MIN_BYTES_BILLED,
     MODEL_TYPES,
     RESERVED_OPTIONS,
@@ -27,12 +30,15 @@ TASK_OUTPUT_COLUMNS = {
     "regression": {"prediction": "FLOAT64"},
     "clustering": {"predicted_label": "STRING", "score": "FLOAT64"},  # the cluster; distance to its centroid
     "decomposition": {},                                             # keeps the principal_component_* it has
+    "forecast": {"forecast_timestamp": "TIMESTAMP", "forecast_value": "FLOAT64"},  # and the series' ID columns
 }
 _FLOAT = {"FLOAT", "FLOAT64"}
 _OPTION = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # C-08, kept for 1.1: no generative AI in a use case's SQL. BigQuery's AI.* functions (AI.GENERATE, AI.FORECAST, ...)
 # and ML.GENERATE_* call Google's generative and foundation models row by row: outputs that may change between calls,
-# rows sent to a model, and a cost the byte limit does not cover.
+# rows sent to a model, and a cost the byte limit does not cover. The one exception is AI.FORECAST through
+# bqml.forecast.engine ai_forecast, where the platform allows it (policies.bqml.ai_forecast): Pipewright's own SQL
+# calls it with the settings a person approved, never a team's SQL file.
 _GENERATIVE = re.compile(r"\b(AI\s*\.\s*[A-Z_]+|ML\s*\.\s*GENERATE_[A-Z_]+)\s*\(", re.I)
 
 
@@ -44,8 +50,16 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
     label = data.get("label") or {}
     task = label.get("task", "binary")
     imported = _imported(spec, task, problems)
+    forecast = _forecast(spec, ml, task, policy, env_name, problems)
     model_type = "imported" if imported else str(spec.get("model_type") or "").lower()
-    if imported:
+    if forecast and forecast["engine"] == "ai_forecast":
+        if model_type:
+            problems.append(f"{where}.model_type: AI.FORECAST trains no model; remove model_type next to "
+                            "bqml.forecast.engine ai_forecast")
+        model_type = "ai_forecast"
+    elif forecast and not model_type:
+        model_type = "arima_plus"
+    if imported or model_type == "ai_forecast":
         pass
     elif not model_type:
         problems.append(f"{where}: give model_type (BigQuery ML trains) or import (a model trained elsewhere)")
@@ -53,7 +67,7 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
         fits = ", ".join(MODEL_TYPES.get(task, ())) or "none"
         problems.append(f"{where}.model_type {model_type!r} does not fit data.label.task {task} (use: {fits})")
     allowed = policy.get("allowed_model_types")
-    if allowed and model_type not in allowed:
+    if allowed and model_type not in allowed and model_type != "ai_forecast":    # it has its own switch
         problems.append(f"{where}.model_type {model_type} is not allowed in {env_name} (platform policy): "
                         f"{', '.join(allowed)}")
     if not label.get("column") and task not in ("clustering", "decomposition"):
@@ -67,6 +81,8 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
         if k in RESERVED_OPTIONS:
             problems.append(f"{where}.options.{key}: Pipewright sets it"
                             + (" (use bqml.explain)" if k == "enable_global_explain" else ""))
+        elif model_type == "ai_forecast":
+            problems.append(f"{where}.options.{key}: AI.FORECAST takes its settings from bqml.forecast")
         elif not _OPTION.match(k):
             problems.append(f"{where}.options.{key}: not a CREATE MODEL option name")
         elif isinstance(value, (dict, list)) and not (isinstance(value, list) and all(
@@ -90,10 +106,14 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
         problems.append(f"{where}.max_bytes_billed {limit} is above {env_name}'s limit {ceiling} (platform "
                         "policy policies.bqml.max_bytes_billed)")
 
-    if task in ("clustering", "decomposition") and spec.get("explain"):
+    if task in ("clustering", "decomposition", "forecast") and spec.get("explain"):
         problems.append(f"{where}.explain: global explanations are for supervised models, not {task}")
+    if task == "forecast" and spec.get("transform"):
+        problems.append(f"{where}.transform: a forecast has no features to transform; shape the series in "
+                        "bqml.prepare")
     resolved = {"model_type": model_type, "options": options, **({"import": imported} if imported else {}),
-                "explain": False if imported or task in ("clustering", "decomposition")
+                **({"forecast": forecast} if forecast else {}),
+                "explain": False if imported or task in ("clustering", "decomposition", "forecast")
                 else bool(spec.get("explain", ml["explainability"]["enabled"])),
                 "max_bytes_billed": int(limit),
                 "transform": _sql_file(spec.get("transform"), directory, f"{where}.transform", problems),
@@ -116,6 +136,48 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
             problems.append(f"monitoring.performance.labels.key {key!r} is not a column of inference.output_table "
                             f"{output}: bqml scoring keeps the input columns the table has")
     return resolved
+
+
+def _forecast(spec: dict, ml: dict, task: str, policy: dict, env_name: str, problems: list[str]) -> dict | None:
+    """bqml.forecast (Pipewright 1.1): the series (data.label.column over data.split.time_column, one per
+    id_columns value), the horizon scoring forecasts, and the engine: ARIMA_PLUS, or AI.FORECAST where allowed."""
+    given = spec.get("forecast")
+    if task != "forecast":
+        if given:
+            problems.append(f"bqml.forecast: for data.label.task forecast; this use case is {task}")
+        return None
+    given = dict(given or {})
+    if not given.get("horizon"):
+        problems.append("bqml.forecast.horizon: how many time points scoring forecasts")
+    engine = given.get("engine", "arima_plus")
+    if engine not in FORECAST_ENGINES:
+        problems.append(f"bqml.forecast.engine {engine!r} is not one of {', '.join(FORECAST_ENGINES)}")
+    out = {"engine": engine, "horizon": min(int(given.get("horizon") or 1), MAX_HORIZON),
+           "id_columns": list(given.get("id_columns") or []),
+           "confidence_level": float(given.get("confidence_level", 0.95))}
+    columns = {c["name"] for c in (ml["data"].get("contract") or {}).get("columns", [])}
+    for col in out["id_columns"]:
+        if columns and col not in columns:
+            problems.append(f"bqml.forecast.id_columns: column {col!r} is not in data.contract.columns")
+    if engine == "ai_forecast":
+        if policy.get("ai_forecast") is not True:
+            problems.append(f"bqml.forecast.engine ai_forecast: AI.FORECAST sends the series to Google's TimesFM "
+                            f"model, an exception to C-08 that {env_name} has not switched on (platform policy "
+                            "policies.bqml.ai_forecast)")
+        out["model"] = given.get("model", AI_FORECAST_MODELS[0])
+        if out["model"] not in AI_FORECAST_MODELS:
+            problems.append(f"bqml.forecast.model {out['model']!r}: use {', '.join(AI_FORECAST_MODELS)}")
+        if given.get("context_window"):
+            out["context_window"] = int(given["context_window"])
+    else:
+        for key in ("model", "context_window"):
+            if key in given:
+                problems.append(f"bqml.forecast.{key}: for engine ai_forecast; ARIMA_PLUS takes bqml.options")
+        if ml["evaluation"]["champion"]["enabled"]:
+            problems.append("evaluation.champion: ARIMA_PLUS forecasts from the end of its own training data, so the "
+                            "champion cannot be measured on this run's held-out period; gate with "
+                            "evaluation.gates")
+    return out
 
 
 IMPORT_OUTPUT = {"binary": "score", "multiclass": "label", "regression": "prediction"}

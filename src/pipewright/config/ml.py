@@ -26,6 +26,8 @@ TASK_METRICS = {
     # BigQuery ML only (bqml): no label; ML.EVALUATE's measures (Pipewright 1.1)
     "clustering": {"davies_bouldin_index", "mean_squared_distance"},
     "decomposition": {"total_explained_variance_ratio"},
+    # BigQuery ML only (bqml.forecast): the forecast against the held-out latest period, as regression measures it
+    "forecast": {"rmse", "mae", "mape", "r2", "median_absolute_error"},
 }
 UNSUPERVISED = ("clustering", "decomposition")
 # Used when the use case sets none: primary metric, metrics.
@@ -34,6 +36,7 @@ TASK_DEFAULTS = {
     "regression": ("rmse", ["rmse", "mae", "r2"]),
     "clustering": ("davies_bouldin_index", ["davies_bouldin_index", "mean_squared_distance"]),
     "decomposition": ("total_explained_variance_ratio", ["total_explained_variance_ratio"]),
+    "forecast": ("mae", ["mae", "rmse", "mape"]),
 }
 LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error",
                    "davies_bouldin_index", "mean_squared_distance"}
@@ -110,6 +113,8 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         _unsupervised(task, label, ml, problems)
     elif not label and contract:
         problems.append(f"data.label.column: a {task} model learns a label; name its column")
+    if task == "forecast":
+        _forecast(spec, ml, problems)
     for col in (contract or {}).get("unique", []):
         known(col, "data.contract.unique")
     split = data["split"]
@@ -309,6 +314,26 @@ def _unsupervised(task: str, label: str | None, ml: dict, problems: list[str]) -
         problems.append(f"evaluation: slice gates and fairness need a label; not for {task}")
 
 
+def _forecast(spec: dict, ml: dict, problems: list[str]) -> None:
+    """forecast (BigQuery ML only): the label is the series' value, data.split.time_column its time; the test rows
+    are the latest period. No features (the series alone), so no feature drift; no champion unless set."""
+    split = ml["data"]["split"]
+    if split["strategy"] != "time" or not split.get("time_column"):
+        problems.append("data.split: a forecast holds out the latest period: strategy time with time_column (the "
+                        "series' time)")
+    if ml["features"]["include"]:
+        problems.append("features.include: a forecast learns from the series alone; leave features out")
+    ml["features"]["include"] = []
+    mon = ml["monitoring"]
+    if mon["drift"]["enabled"]:
+        problems.append("monitoring.drift: a forecast has no features; use monitoring.prediction_drift")
+    if mon["performance"]["enabled"]:
+        problems.append("monitoring.performance: not for forecasts yet; the evaluation gates measure each version on "
+                        "the held-out latest period")
+    if "enabled" not in ((spec.get("evaluation") or {}).get("champion") or {}):
+        ml["evaluation"]["champion"]["enabled"] = False
+
+
 def _task_defaults(task: str, spec: dict, data: dict, evaluation: dict) -> None:
     """Defaults for a regression or multi-class use case where the use case sets none. Binary keeps DEFAULTS."""
     if task == "binary":
@@ -319,9 +344,9 @@ def _task_defaults(task: str, spec: dict, data: dict, evaluation: dict) -> None:
         evaluation["primary_metric"] = primary
     if "metrics" not in given:
         evaluation["metrics"] = list(metrics)
-    if task in ("regression", "clustering", "decomposition") and "strategy" not in (
+    if task in ("regression", "clustering", "decomposition", "forecast") and "strategy" not in (
             (spec.get("data") or {}).get("split") or {}):
-        data["split"]["strategy"] = "random"        # stratified needs classes
+        data["split"]["strategy"] = "time" if task == "forecast" else "random"    # stratified needs classes
 
 
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")

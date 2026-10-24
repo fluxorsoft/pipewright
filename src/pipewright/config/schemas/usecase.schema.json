@@ -318,7 +318,7 @@
             "column": { "type": "string" },
             "values": { "type": "array" },
             "positive": {},
-            "task": { "enum": ["binary", "multiclass", "regression", "clustering", "decomposition"] }
+            "task": { "enum": ["binary", "multiclass", "regression", "clustering", "decomposition", "forecast"] }
           }
         },
         "split": {
@@ -542,7 +542,21 @@
       "properties": {
         "model_type": {
           "enum": ["logistic_reg", "boosted_tree_classifier", "random_forest_classifier", "linear_reg",
-                   "boosted_tree_regressor", "random_forest_regressor", "kmeans", "pca"]
+                   "boosted_tree_regressor", "random_forest_regressor", "kmeans", "pca", "arima_plus"]
+        },
+        "forecast": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["horizon"],
+          "description": "a forecast (data.label.task forecast, Pipewright 1.1): the series is data.label.column over data.split.time_column, one series per id_columns value",
+          "properties": {
+            "engine": { "enum": ["arima_plus", "ai_forecast"], "description": "arima_plus (CREATE MODEL), or ai_forecast (AI.FORECAST, where policies.bqml.ai_forecast allows it)" },
+            "horizon": { "type": "integer", "minimum": 1, "maximum": 10000, "description": "time points scoring forecasts" },
+            "id_columns": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" } },
+            "confidence_level": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+            "model": { "enum": ["TimesFM 2.5"], "description": "ai_forecast only" },
+            "context_window": { "enum": [64, 128, 256, 512, 1024, 2048, 4096, 8192, 15360], "description": "ai_forecast only: the latest points the model reads" }
+          }
         },
         "import": {
           "type": "object",
