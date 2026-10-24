@@ -134,6 +134,8 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
     events.emit(events.event("model.approved", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
                              version=version, previous=previous, by=identity),
                 env.observability.get("events_topic"), Gcp(creds), stream=io.StringIO(), region=env.region)
+    online = not ((uc.ml or {}).get("bqml") or {}).get("forecast")       # a forecast is never served online
     log(f"{uc.model['name']}: default v{previous} -> v{version}"
         + (f" (approved by {identity})" if identity else "")
-        + ". Inference uses it from the next run; `pipewright deploy-model` serves it online.")
+        + ". Inference uses it from the next run"
+        + ("; `pipewright deploy-model` serves it online." if online else "."))
