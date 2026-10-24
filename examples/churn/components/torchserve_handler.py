@@ -24,6 +24,7 @@ Each request logs which views served it, never the IDs or the values.
 
 import json
 import os
+import urllib.error
 import urllib.request
 
 import torch
@@ -52,8 +53,13 @@ def fetch(store: str, view: str, key: str, token: str) -> dict:
     body = json.dumps({"dataKey": {"key": str(key)}, "dataFormat": "KEY_VALUE"}).encode("utf-8")
     request = urllib.request.Request(url, data=body, method="POST",
                                      headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=10) as r:
-        found = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(request, timeout=10) as r:
+            found = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ValueError(f"the online store has no entity with this ID (view {view})") from None
+        raise ValueError(f"the online store answered HTTP {e.code} (view {view})") from None
     return {f["name"]: _value(f.get("value") or {}) for f in (found.get("keyValues") or {}).get("features") or []}
 
 
