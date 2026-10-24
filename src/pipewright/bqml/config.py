@@ -25,6 +25,8 @@ TASK_OUTPUT_COLUMNS = {
     "binary": {"predicted_label": "STRING", "score": "FLOAT64"},      # score: probability of the positive class
     "multiclass": {"predicted_label": "STRING", "score": "FLOAT64"},  # score: probability of predicted_label
     "regression": {"prediction": "FLOAT64"},
+    "clustering": {"predicted_label": "STRING", "score": "FLOAT64"},  # the cluster; distance to its centroid
+    "decomposition": {},                                             # keeps the principal_component_* it has
 }
 _FLOAT = {"FLOAT", "FLOAT64"}
 _OPTION = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -54,7 +56,7 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
     if allowed and model_type not in allowed:
         problems.append(f"{where}.model_type {model_type} is not allowed in {env_name} (platform policy): "
                         f"{', '.join(allowed)}")
-    if not label.get("column"):
+    if not label.get("column") and task not in ("clustering", "decomposition"):
         problems.append(f"{where}: needs data.label.column (the label CREATE MODEL learns)")
     if not data.get("contract"):
         problems.append(f"{where}: needs data.contract (the columns checked before training)")
@@ -88,8 +90,11 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
         problems.append(f"{where}.max_bytes_billed {limit} is above {env_name}'s limit {ceiling} (platform "
                         "policy policies.bqml.max_bytes_billed)")
 
+    if task in ("clustering", "decomposition") and spec.get("explain"):
+        problems.append(f"{where}.explain: global explanations are for supervised models, not {task}")
     resolved = {"model_type": model_type, "options": options, **({"import": imported} if imported else {}),
-                "explain": False if imported else bool(spec.get("explain", ml["explainability"]["enabled"])),
+                "explain": False if imported or task in ("clustering", "decomposition")
+                else bool(spec.get("explain", ml["explainability"]["enabled"])),
                 "max_bytes_billed": int(limit),
                 "transform": _sql_file(spec.get("transform"), directory, f"{where}.transform", problems),
                 "prepare": _sql_file(spec.get("prepare"), directory, f"{where}.prepare", problems)}

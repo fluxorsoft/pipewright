@@ -22,7 +22,10 @@ MODEL_TYPES = {
     "binary": ("logistic_reg", "boosted_tree_classifier", "random_forest_classifier"),
     "multiclass": ("logistic_reg", "boosted_tree_classifier", "random_forest_classifier"),
     "regression": ("linear_reg", "boosted_tree_regressor", "random_forest_regressor"),
+    "clustering": ("kmeans",),                     # tier 1c (Pipewright 1.1): no label
+    "decomposition": ("pca",),
 }
+UNSUPERVISED = ("clustering", "decomposition")
 ALL_MODEL_TYPES = sorted({t for types in MODEL_TYPES.values() for t in types})
 
 # CREATE MODEL options Pipewright sets itself: the label, the split (test rows never reach CREATE MODEL), the

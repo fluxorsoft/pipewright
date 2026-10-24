@@ -20,7 +20,9 @@ _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")
 EPS = 1e-4                                   # as the container path's PSI (mlkit)
 KEEP_DAYS = 30                               # test predictions kept for a look; the run's rows are kept
 # As config.ml.LOWER_IS_BETTER (a test keeps them in step).
-LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error"}
+LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error",
+                   "davies_bouldin_index", "mean_squared_distance"}
+UNSUPERVISED = ("clustering", "decomposition")
 MIN_LABELLED = 50                            # performance needs this many labelled predictions, as the container path
 
 
@@ -241,7 +243,14 @@ def create_model_sql(ml_config: dict, model: str, rows_table: str, columns: list
     """CREATE MODEL on the training rows: the features and the label, or every column with a TRANSFORM clause
     (BigQuery ML takes what the clause names)."""
     section, data = ml_config["bqml"], ml_config["data"]
-    label = data["label"]["column"]
+    label = (data.get("label") or {}).get("column")
+    if data["label"].get("task") in UNSUPERVISED:                     # k-means, PCA: no label
+        options = {"model_type": section["model_type"], **section["options"]}
+        selected = "* EXCEPT (_pw_test)" if section.get("transform") else ", ".join(
+            q(c) for c in feature_columns(ml_config, columns))
+        return render("create_model.sql", model=model, rows_table=rows_table, columns=selected,
+                      transform=f"TRANSFORM (\n{section['transform']['sql']}\n)" if section.get("transform") else "",
+                      options=", ".join(f"{k} = {literal(v)}" for k, v in options.items()))
     options = {"model_type": section["model_type"], "input_label_cols": [label], "data_split_method": "NO_SPLIT",
                **({"enable_global_explain": True} if section.get("explain") else {}), **section["options"]}
     transform = section.get("transform")
@@ -260,7 +269,7 @@ def feature_columns(ml_config: dict, columns: list[str]) -> list[str]:
     data, features = ml_config["data"], ml_config["features"]
     if not ml_config["bqml"].get("prepare"):
         return [c for c in features.get("include") or [] if c in columns]
-    label = data["label"]["column"]
+    label = (data.get("label") or {}).get("column")
     skip = {label, "_pw_test", data["split"].get("time_column"), *split_keys(ml_config),
             *(ml_config.get("data_protection") or {}).get("personal_data_columns", []), *features.get("exclude", []),
             ((data.get("features_from") or {}).get("entity") or {}).get("time_column")}
@@ -317,7 +326,16 @@ def predict_sql(ml_config: dict, model: str, rows_table: str, out_table: str, wh
                       outputs=imported_outputs(ml_config, evaluation), model=model,
                       inner=imported_inner(rows, parts.get("transform")))
     data = ml_config["data"]
-    label, task = data["label"]["column"], data["label"].get("task", "binary")
+    task = data["label"].get("task", "binary")
+    if task == "decomposition":
+        return render("predict_plain.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
+                      model=model, rows_table=rows_table, where=where)
+    if task == "clustering":
+        return render("predict.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
+                      predicted_columns="CENTROID_ID, NEAREST_CENTROIDS_DISTANCE",
+                      outputs=render("outputs_clustering.sql"), model=model, rows_table=rows_table, where=where,
+                      threshold="")
+    label = data["label"]["column"]
     positive = str(data["label"].get("positive", 1))
     outputs = render(f"outputs_{task}.sql", label=ident(label), positive=positive)
     if task == "multiclass" and evaluation:
@@ -348,6 +366,16 @@ def shape_metrics(row: dict, names: list[str]) -> dict:
         v = row.get(n)
         out[n] = None if v is None or (isinstance(v, float) and math.isnan(v)) else round(float(v), 6)
     return out
+
+
+def evaluate_unsupervised(jobs: Jobs, ml_config: dict, model: str, rows_table: str) -> dict:
+    """{metrics, rows, slices}: ML.EVALUATE of a k-means model on the test rows, or of a PCA model."""
+    names = ml_config["evaluation"]["metrics"]
+    task = ml_config["data"]["label"].get("task")
+    rows = (f", (SELECT * EXCEPT (_pw_test) FROM `{rows_table}` WHERE _pw_test)" if task == "clustering" else "")
+    found = (jobs.run(render("evaluate_unsupervised.sql", model=model, rows=rows), "ML.EVALUATE") or [{}])[0]
+    n = int(jobs.run(f"SELECT COUNTIF(_pw_test) AS n FROM `{rows_table}`", "test rows")[0]["n"])
+    return {"metrics": shape_metrics(found, names), "rows": n, "slices": {}}
 
 
 def evaluate_rows(jobs: Jobs, ml_config: dict, predictions: str) -> dict:

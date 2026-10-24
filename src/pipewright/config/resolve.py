@@ -223,6 +223,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         online = _online_features(ml, env, tenant, problems)
         if online:
             ml["online_features"] = online
+    task = ((ml["data"].get("label") or {}).get("task")) or "binary"
+    if task in ("clustering", "decomposition") and not bqml_spec:
+        problems.append(f"data.label.task {task}: BigQuery ML only (bqml.model_type kmeans or pca)")
     if bqml_spec:
         _bqml_section(bqml_spec, ml, model, directory, env, tables, pipelines, triggers, steps_spec(eff),
                       f"{meta['name']}", tenant, problems)

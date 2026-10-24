@@ -74,8 +74,8 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
                        prepared=rt.prepared_sql(ml_config, source), test_flag=test_flag), "the run's rows")
     counts = jobs.run(f"SELECT COUNT(*) AS n, COUNTIF(_pw_test) AS test FROM `{rows_table}`", "row counts")[0]
     columns = [f.name for f in jobs.client.get_table(rows_table).schema]
-    label = data["label"]["column"]
-    if mode == "training" and label not in columns:
+    label = (data.get("label") or {}).get("column")
+    if mode == "training" and label and label not in columns:
         raise ValueError(f"the run's rows have no label column {label!r}: bqml.prepare must keep it")
     emit_event("data.snapshot.written", ml_config, run_id, table=rows_table, rows=int(counts["n"]),
                test_rows=int(counts["test"]), source_uri=source_uri, mode=mode,
@@ -139,7 +139,9 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     jobs.run(rt.predict_sql(ml_config, model, rows_table, predictions, "_pw_test", jobs.labels, True,
                             parts=rt.model_parts(jobs, model) if ml_config["bqml"].get("import") else None),
              "test predictions")
-    result = rt.evaluate_rows(jobs, ml_config, predictions)
+    unsupervised = task in rt.UNSUPERVISED
+    result = (rt.evaluate_unsupervised(jobs, ml_config, model, rows_table) if unsupervised
+              else rt.evaluate_rows(jobs, ml_config, predictions))
     record = {"metrics": result["metrics"], "slices": result["slices"], "rows": {"test": result["rows"]},
               "task": task, "engine": "bqml",
               "model": {"bigquery_model": model, "model_type": section["model_type"], "options": section["options"]},
@@ -160,15 +162,19 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
         champion_predictions = rt.table_ref(project, ml_config, run_id, "champion")
         jobs.run(rt.predict_sql(ml_config, champion_ref, rows_table, champion_predictions, "_pw_test", jobs.labels,
                                 True, parts=rt.model_parts(jobs, champion_ref)), "champion predictions")
-        record["champion"] = {**rt.evaluate_rows(jobs, ml_config, champion_predictions)["metrics"],
+        champion_metrics = (rt.evaluate_unsupervised(jobs, ml_config, champion_ref, rows_table) if unsupervised
+                            else rt.evaluate_rows(jobs, ml_config, champion_predictions))["metrics"]
+        record["champion"] = {**champion_metrics,
                               "_version": champion.get("versionId"), "_model": champion_ref}
 
     # PSI baselines for scoring: the drift features on the training rows, the predictions on the test rows.
     columns = {f.name for f in jobs.client.get_table(rows_table).schema}
     drift = [c for c in ml_config["monitoring"]["drift"]["features"] or [] if c in columns]
     stats = {"drift_baseline": {c: rt.column_baseline(jobs, rows_table, c, "NOT _pw_test") for c in drift}}
-    if task == "multiclass":
+    if task in ("multiclass", "clustering"):                 # class shares: the clusters' for k-means
         stats["prediction_baseline"] = {"classes": rt.class_shares(jobs, predictions)}
+    elif task == "decomposition":
+        stats["prediction_baseline"] = {}
     else:
         stats["prediction_baseline"] = rt.column_baseline(
             jobs, predictions, "_pw_prediction" if task == "regression" else "_pw_score", "TRUE")

@@ -23,13 +23,20 @@ TASK_METRICS = {
     "multiclass": {"accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "precision_macro", "recall_macro",
                    "log_loss"},
     "regression": {"rmse", "mae", "mape", "r2", "median_absolute_error"},
+    # BigQuery ML only (bqml): no label; ML.EVALUATE's measures (Pipewright 1.1)
+    "clustering": {"davies_bouldin_index", "mean_squared_distance"},
+    "decomposition": {"total_explained_variance_ratio"},
 }
+UNSUPERVISED = ("clustering", "decomposition")
 # Used when the use case sets none: primary metric, metrics.
 TASK_DEFAULTS = {
     "multiclass": ("f1_macro", ["accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "log_loss"]),
     "regression": ("rmse", ["rmse", "mae", "r2"]),
+    "clustering": ("davies_bouldin_index", ["davies_bouldin_index", "mean_squared_distance"]),
+    "decomposition": ("total_explained_variance_ratio", ["total_explained_variance_ratio"]),
 }
-LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error"}
+LOWER_IS_BETTER = {"log_loss", "brier", "calibration_error", "rmse", "mae", "mape", "median_absolute_error",
+                   "davies_bouldin_index", "mean_squared_distance"}
 # evaluation.fairness (FR-53): the largest gap between groups of an attribute, binary classification. Not in
 # DEFAULTS, so a use case without it resolves (and releases) exactly as before.
 FAIRNESS_METRICS = ("demographic_parity_difference", "equal_opportunity_difference", "equalized_odds_difference")
@@ -99,6 +106,10 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
         task = "binary"
     metrics_known = TASK_METRICS[task]
     _task_defaults(task, spec, data, evaluation)
+    if task in UNSUPERVISED:
+        _unsupervised(task, label, ml, problems)
+    elif not label and contract:
+        problems.append(f"data.label.column: a {task} model learns a label; name its column")
     for col in (contract or {}).get("unique", []):
         known(col, "data.contract.unique")
     split = data["split"]
@@ -283,6 +294,21 @@ def _fairness(evaluation: dict, task: str, label: str | None, known, problems: l
     fair["min_rows"] = int(fair.get("min_rows") or 30)
 
 
+def _unsupervised(task: str, label: str | None, ml: dict, problems: list[str]) -> None:
+    """clustering (k-means) and decomposition (PCA): no label, so nothing that needs one."""
+    if label:
+        problems.append(f"data.label.column: a {task} model has no label; leave the column out")
+    if ml["data"]["split"]["strategy"] == "stratified":
+        problems.append(f"data.split: strategy stratified needs a label; use random or time for {task}")
+    mon = ml["monitoring"]
+    if mon["performance"]["enabled"]:
+        problems.append(f"monitoring.performance: a {task} model has no outcome to compare with")
+    if task == "decomposition" and mon["prediction_drift"]["enabled"]:
+        problems.append("monitoring.prediction_drift: PCA has no prediction; feature drift still applies")
+    if ml["evaluation"].get("slice_gates") or ml["evaluation"].get("fairness"):
+        problems.append(f"evaluation: slice gates and fairness need a label; not for {task}")
+
+
 def _task_defaults(task: str, spec: dict, data: dict, evaluation: dict) -> None:
     """Defaults for a regression or multi-class use case where the use case sets none. Binary keeps DEFAULTS."""
     if task == "binary":
@@ -293,7 +319,8 @@ def _task_defaults(task: str, spec: dict, data: dict, evaluation: dict) -> None:
         evaluation["primary_metric"] = primary
     if "metrics" not in given:
         evaluation["metrics"] = list(metrics)
-    if task == "regression" and "strategy" not in ((spec.get("data") or {}).get("split") or {}):
+    if task in ("regression", "clustering", "decomposition") and "strategy" not in (
+            (spec.get("data") or {}).get("split") or {}):
         data["split"]["strategy"] = "random"        # stratified needs classes
 
 
