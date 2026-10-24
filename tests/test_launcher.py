@@ -103,7 +103,7 @@ class FakeRegistry:
     def live(self, force=False):
         return self._live
 
-    def get(self, usecase):
+    def get(self, usecase, release=None):
         return next((c for c in self._live if c.usecase == usecase), None)
 
     @property
@@ -178,3 +178,31 @@ def test_pubsub_run_requests(client):
 def test_health(client):
     r = client.get("/health")
     assert r.json["usecases"]["churn"] == {"release": "abc123", "pipelines": ["training"]} and r.json["errors"]
+
+
+def test_a_run_for_a_newer_release_reloads_the_pointers():
+    """Pointers are cached for POINTER_TTL; a run request names the release live when it was sent (Pipewright 1.1),
+    so a run right after `pipewright release` gets that release (found live: it got the previous one)."""
+    from types import SimpleNamespace
+
+    from pipewright.launcher.registry import Registry
+
+    old = SimpleNamespace(usecase="churn", release_id="r1")
+    new = SimpleNamespace(usecase="churn", release_id="r2")
+    forced = []
+    reg = Registry.__new__(Registry)
+    reg.live = lambda force=False: forced.append(force) or ([new] if force else [old])
+    assert reg.get("churn") is old and reg.get("churn", release="r1") is old and forced == [False, False]
+    assert reg.get("churn", release="r2") is new and forced[-1] is True
+
+
+def test_the_live_release_is_optional_in_a_run_request(repo):
+    from pipewright.config import load_environment
+    from pipewright.runs import launch
+
+    class Broken:
+        def __getattr__(self, name):
+            raise RuntimeError("no access")
+
+    repo.write()
+    assert launch.live_release(load_environment(repo.root, "dev"), "churn", gcp=Broken()) is None

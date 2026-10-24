@@ -495,9 +495,11 @@ def cmd_run(args) -> int:
         source_uri = synthetic.get("source_uri")          # the data the engine learns from, as configured
         if not source_uri:
             raise ConfigError(f"{args.usecase} has no synthetic pipeline in {env.name} (synthetic.enabled)")
-    result = launch.run(env, launch.body(args.usecase, args.pipeline, source_uri, args.schedule, args.run_key,
-                                         replay=bool(replay), champion_version=args.champion_version,
-                                         model_version=args.model_version))
+    payload = launch.body(args.usecase, args.pipeline, source_uri, args.schedule, args.run_key,
+                          replay=bool(replay), champion_version=args.champion_version,
+                          model_version=args.model_version)
+    release = launch.live_release(env, args.usecase)
+    result = launch.run(env, {**payload, **({"release": release} if release else {})})
     if result.get("status") == "requested":
         print(f"requested: {result['usecase']} {result['pipeline']} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")

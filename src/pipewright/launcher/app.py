@@ -6,7 +6,7 @@ Environment:
 
 Routes:
   POST /pubsub   GCS landing events (Pub/Sub push)  -> 2xx ack, 5xx retry
-  POST /run      {"usecase", "schedule"?, "pipeline"?, "source_uri"?, "run_key"?}   schedules and API runs
+  POST /run      {"usecase", "schedule"?, "pipeline"?, "source_uri"?, "run_key"?, "release"?}   schedules and API runs
   POST /pubsub/run   the same body as /run, in a Pub/Sub push envelope (manifest launcher.run_requests_topic):
                      how pipelines inside a private perimeter request runs  -> 2xx ack, 5xx retry
   POST /retraining/propose   {"usecase", "run_id", "observation", "champion"}: drift or performance from an
@@ -271,7 +271,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         usecase = body.get("usecase")
         if not usecase:
             return jsonify(status="error", reason="usecase is required"), 400
-        contract = reg().get(usecase)
+        contract = reg().get(usecase, release=body.get("release"))
         if contract is None:
             reason = reg().errors.get(usecase, "no live release")
             return jsonify(status="error", reason=f"{usecase}: {reason}"), 404

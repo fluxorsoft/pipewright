@@ -83,8 +83,13 @@ class Registry:
             self._live, self._errors, self._loaded = live, errors, time.monotonic()
             return live
 
-    def get(self, usecase: str) -> ReleaseContract | None:
-        return next((c for c in self.live() if c.usecase == usecase), None)
+    def get(self, usecase: str, release: str | None = None) -> ReleaseContract | None:
+        """release: the release a run request was sent for (Pipewright 1.1). A newer one than the cached pointer
+        names reloads the pointers, so a run right after `pipewright release` gets that release, not the last."""
+        found = next((c for c in self.live() if c.usecase == usecase), None)
+        if release and (found is None or found.release_id != release):
+            found = next((c for c in self.live(force=True) if c.usecase == usecase), None)
+        return found
 
     @property
     def errors(self) -> dict[str, str]:

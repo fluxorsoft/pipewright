@@ -75,6 +75,19 @@ def body(usecase: str, pipeline: str | None, source_uri: str | None, schedule: s
     return out
 
 
+def live_release(env: Environment, usecase: str, gcp=None) -> str | None:
+    """The release live now (its pointer), sent with a run request: a launcher whose cached pointer is older reloads
+    it. None when it cannot be read; the launcher then uses what it has."""
+    try:
+        from pipewright.gcp import Gcp
+        from pipewright.release import service
+
+        pointer, _ = service.read_pointer(gcp or Gcp(), env, usecase)
+        return pointer.release_id if pointer else None
+    except Exception:  # noqa: BLE001 - optional: the request works without it
+        return None
+
+
 def run(env: Environment, payload: dict, session=None, gcp=None) -> dict:
     """Private environments (manifest launcher.run_requests_topic) take run requests over Pub/Sub: their launcher
     accepts no calls from outside the network. PIPEWRIGHT_RUN_VIA=http calls /run directly (from inside it)."""
