@@ -53,7 +53,8 @@ def synthetic_pipeline(
     select.set_display_name("select-synthetic").set_caching_options(False)
 
     with dsl.If(select.outputs["decision"] == "release", name="gates-passed"):
+        # The dataset comes from ml_config at run time: a compiled-in name would differ between environments, so a
+        # promoted release would never compile the same as the tested one.
         publish = publish_synthetic(selection=select.outputs["selection"], project=project,
-                                    bq_dataset=str((_CONFIG.get("platform") or {}).get("bigquery_dataset") or ""),
                                     run_id=run_id, ml_config=ml_config)
         publish.set_display_name("publish-synthetic").set_caching_options(False)

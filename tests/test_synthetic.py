@@ -289,6 +289,8 @@ def test_compile_the_synthetic_pipeline_on_its_own_image(repo):
                                "publish-synthetic"}
     res = doc["deploymentSpec"]["executors"]["exec-generate-synthetic"]["container"]["resources"]
     assert res["resourceCpuLimit"] == "4"
+    # No environment's dataset compiled in (found in the 1.1.0 QA: promotion compares templates across environments)
+    assert '"bq_dataset": {"runtimeValue"' not in json.dumps(doc)       # no task gets it as a compiled-in value
 
 
 # --------------------------------------------------------------------- CLI --

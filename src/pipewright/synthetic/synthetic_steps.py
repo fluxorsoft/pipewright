@@ -187,9 +187,9 @@ def select_synthetic(results: list, run_id: str, ml_config: dict, record: dsl.Ou
 
 
 @dsl.component(base_image=BASE_IMAGE, target_image=EVALUATION_IMAGE)
-def publish_synthetic(selection: str, project: str, bq_dataset: str, run_id: str, ml_config: dict) -> str:
+def publish_synthetic(selection: str, project: str, run_id: str, ml_config: dict, bq_dataset: str = "") -> str:
     """The chosen candidate, with the column rules applied, appended to synthetic.output_table (run_id on every
-    row). Returns where it went."""
+    row). Returns where it went. bq_dataset: the tenant dataset, else ml_config's (releases from 1.1 pass none)."""
     import io
     import json
 
@@ -199,6 +199,7 @@ def publish_synthetic(selection: str, project: str, bq_dataset: str, run_id: str
     from pipewright_synthetic import rules
 
     syn, contract = ml_config["synthetic"], ml_config["data"]["contract"]
+    bq_dataset = bq_dataset or (ml_config.get("platform") or {}).get("bigquery_dataset") or ""
     chosen = json.loads(selection)
     if syn.get("mode") == "relational":
         return _publish_tables(chosen, project, bq_dataset, run_id, ml_config)
