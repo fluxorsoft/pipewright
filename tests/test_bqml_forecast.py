@@ -196,3 +196,22 @@ def test_arima_plus_is_refit_on_the_whole_series_before_registration():
     sql = rt.forecast_create_sql(ML, "p.d.m_refit", "p.d.rows", 14, refit=True)
     assert sql.rstrip().endswith("SELECT `store`, `day`, `units`\nFROM `p.d.rows`") and "_pw_test" not in sql
     assert "horizon = 14" in sql and "data_frequency = 'DAILY'" in sql
+
+
+def test_a_bqml_version_gets_a_description_like_a_container_one():
+    """model list shows 'run <id>, <metric>=<value>' for BigQuery ML versions too (found in the 1.1.0 QA)."""
+    sent = []
+
+    class Session:
+        def get(self, url, timeout):
+            return type("R", (), {"json": lambda self: {"labels": {"a": "1"}}})()
+
+        def patch(self, url, params, json, timeout):
+            sent.append((params, json))
+            return type("R", (), {"status_code": 200, "text": ""})()
+
+    rt.label_version("p", "r", "m", "2", {"b": "2"}, session=Session(), description="run r1, auc=0.8100")
+    rt.label_version("p", "r", "m", "2", {"c": "3"}, session=Session())
+    assert sent[0] == ({"updateMask": "labels,versionDescription"},
+                       {"labels": {"a": "1", "b": "2"}, "versionDescription": "run r1, auc=0.8100"})
+    assert sent[1] == ({"updateMask": "labels"}, {"labels": {"a": "1", "c": "3"}})

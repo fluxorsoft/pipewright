@@ -261,8 +261,11 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
             rt.write_record(project, rt.record_uri(ml_config, run_id), record)
         jobs.run(rt.render("register.sql", model=model, registry_id=registry_id), "registration")
         version = rt.registered_version(jobs, model)
+        primary = ml_config["evaluation"]["primary_metric"]
         rt.label_version(project, region, registry_id, version, {
-            **tags, "pipewright-bq-model": model.rsplit(".", 1)[1], "pipewright-engine": "bqml"})
+            **tags, "pipewright-bq-model": model.rsplit(".", 1)[1], "pipewright-engine": "bqml"},
+            description=f"run {run_id}, {primary}={primary_value:.4f}" if primary_value == primary_value  # not NaN
+            else f"run {run_id}")
     default = ml_config["registry"].get("set_default") == "on_approval"
     if default:
         rt.make_default(project, region, registry_id, version)

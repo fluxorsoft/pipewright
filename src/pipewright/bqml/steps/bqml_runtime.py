@@ -628,11 +628,15 @@ def registered_version(jobs: Jobs, model: str, wait_s: int = 300) -> str:
         time.sleep(10)
 
 
-def label_version(project: str, region: str, registry_id: str, version: str, labels: dict, session=None) -> None:
+def label_version(project: str, region: str, registry_id: str, version: str, labels: dict, session=None,
+                  description: str | None = None) -> None:
+    """Adds labels to a registry version; with description, also its version description (as model list shows)."""
     session = session or _session()
     url = registry_url(project, region, registry_id) + f"@{version}"
     current = session.get(url, timeout=60).json().get("labels") or {}
-    r = session.patch(url, params={"updateMask": "labels"}, json={"labels": {**current, **labels}}, timeout=60)
+    body = {"labels": {**current, **labels}, **({"versionDescription": description} if description else {})}
+    r = session.patch(url, params={"updateMask": "labels,versionDescription" if description else "labels"},
+                      json=body, timeout=60)
     if r.status_code >= 300:
         raise RuntimeError(f"labelling v{version}: {r.status_code} {r.text[:300]}")
 
