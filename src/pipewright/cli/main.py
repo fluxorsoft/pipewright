@@ -278,13 +278,12 @@ def cmd_model_list(args) -> int:
 
 def cmd_lineage(args) -> int:
     import contextlib
-    import logging
 
     from pipewright.gcp import Gcp
     from pipewright.models import lineage
 
     uc, env = _one(args)
-    logging.getLogger("google.cloud.aiplatform").setLevel(logging.WARNING)
+    _quiet_agent_platform_sdk()
     with contextlib.redirect_stdout(sys.stderr):
         info = lineage.lineage(uc, env, Gcp(), args.version)
     print(json.dumps(info, indent=2, default=str) if args.json else lineage.render(info))
@@ -409,13 +408,12 @@ def cmd_loop(args) -> int:
 
 def cmd_decisions(args) -> int:
     import contextlib
-    import logging
 
     from pipewright import decisions
 
     # The Agent Platform SDK logs "Getting versions for ..." to stdout: keep stdout for the list (the workflows
     # parse --json).
-    logging.getLogger("google.cloud.aiplatform").setLevel(logging.WARNING)
+    _quiet_agent_platform_sdk()
     with contextlib.redirect_stdout(sys.stderr):
         items = decisions.pending(args.root, args.env, args.usecase or None)
     if args.json:
@@ -930,6 +928,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.plugins = plugins.register_all(sub, common)
     return p
+
+
+def _quiet_agent_platform_sdk() -> None:
+    """The Agent Platform SDK logs "Getting versions for ..." per model at INFO, and sets its logger's level when it is
+    imported: import it first, then quiet it (setting the level before the import did nothing)."""
+    import logging
+
+    try:
+        import google.cloud.aiplatform  # noqa: F401
+    except ImportError:
+        return
+    for name in ("google.cloud.aiplatform", "google.cloud.aiplatform.models"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def main(argv: list[str] | None = None) -> int:
