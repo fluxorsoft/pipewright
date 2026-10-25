@@ -125,3 +125,24 @@ def test_show_tells_how_training_ended_and_how_to_retry():
     case = rc.reconcile(approved(), "FAILED", "KeyError: tenure_months", None, ONE, T0).case
     text = render(case)
     assert "FAILED: KeyError: tenure_months" in text and f"pipewright retrain retry --case {case['case_id']}" in text
+
+
+def test_a_failed_kubeflow_run_names_its_failed_step(monkeypatch):
+    from types import SimpleNamespace
+
+    from pipewright import adapters
+    from pipewright.kube import KubeClient
+
+    class Kube:
+        def get(self, path, **params):
+            if path.endswith("/runs"):
+                return SimpleNamespace(ok=True, body={"runs": [{"run_id": "u1", "state": "FAILED"}]})
+            return SimpleNamespace(ok=True, body={"run_details": {"task_details": [
+                {"display_name": "bqml-register", "state": "FAILED"}, {"display_name": "executor", "state": "FAILED"},
+                {"display_name": "bqml-register-driver", "state": "FAILED"}, {"display_name": "bqml-train",
+                                                                               "state": "SUCCEEDED"}]}})
+
+    monkeypatch.setattr(KubeClient, "from_manifest", classmethod(lambda cls, m, gcp, dns=False: Kube()))
+    contract = SimpleNamespace(orchestrator="kfp")
+    state, message = adapters.job_state(contract, "churn-x", {"kubernetes": {"namespace": "kubeflow"}}, None)
+    assert state == "FAILED" and message.startswith("step bqml-register failed")

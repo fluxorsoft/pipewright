@@ -30,10 +30,14 @@ def job_state(contract: ReleaseContract, job_id: str, manifest: dict | None = No
         from pipewright.kube import KubeClient
 
         k8s = (manifest or {}).get("kubernetes") or {}
-        run = find(KubeClient.from_manifest(manifest or {}, gcp), k8s.get("namespace") or "kubeflow", job_id)
+        kube = KubeClient.from_manifest(manifest or {}, gcp)
+        run = find(kube, k8s.get("namespace") or "kubeflow", job_id)
         if not run:
             return None, ""
-        return run.get("state"), str((run.get("error") or {}).get("message") or "")
+        message = str((run.get("error") or {}).get("message") or "")
+        if not message and str(run.get("state")).upper() == "FAILED":
+            message = _failed_steps(kube, k8s.get("namespace") or "kubeflow", run)
+        return run.get("state"), message
     from pipewright.gcp import Gcp
 
     gcp = gcp or Gcp()
@@ -44,3 +48,17 @@ def job_state(contract: ReleaseContract, job_id: str, manifest: dict | None = No
     if not r.ok:
         raise RuntimeError(f"pipeline job {job_id}: HTTP {r.status}")
     return (r.body or {}).get("state"), str(((r.body or {}).get("error") or {}).get("message") or "")
+
+
+
+def _failed_steps(kube, namespace: str, run: dict) -> str:
+    """Kubeflow keeps a failed run's error in its step's log, not on the run: name the steps that failed."""
+    from pipewright.adapters.kfp import api_path
+
+    r = kube.get(f"{api_path(namespace)}/runs/{run.get('run_id')}")
+    tasks = ((r.body or {}).get("run_details") or {}).get("task_details") or [] if r.ok else []
+    noise = ("driver", "executor", "root", "condition")
+    steps = sorted({t.get("display_name", "").split("(")[0] for t in tasks if t.get("state") == "FAILED"
+                    and not any(w in t.get("display_name", "") for w in noise)} - {""})
+    return (f"step {', '.join(steps)} failed (Kubeflow keeps the error in the step's log)" if steps
+            else "the run failed (Kubeflow keeps the error in the step's log)")
