@@ -35,7 +35,7 @@ def setup(repo, monkeypatch, tmp_path):
                                     "kfp": "https://europe-west2-kfp.pkg.dev/acme-ml-prod/ml-pipelines"})
     repo.environments["prod"]["promotion"] = {"from": "dev"}
     state = SimpleNamespace(calls=[], store={}, dst_template=TEMPLATE.replace("{image}", DST_IMAGE),
-                            model_error=None, repo=repo, dst_model={"name": "m"})
+                            model_error=None, version_error=None, repo=repo, dst_model={"name": "m"})
     src = source_contract()
     state.store[("acme-ml-dev-artifacts", "contracts/churn/abc123.json")] = (src.to_json(), 1)
     state.store[("acme-ml-dev-artifacts", "contracts/churn/current.json")] = (
@@ -70,6 +70,13 @@ def setup(repo, monkeypatch, tmp_path):
     monkeypatch.setattr(promote, "_download_template", lambda target, creds: TEMPLATE.replace("{image}", SRC_IMAGE))
     monkeypatch.setattr(promote, "copy_image", lambda gcp, s, d, log=print: state.calls.append(f"copy image {d}"))
     monkeypatch.setattr(promote, "promote_model", promote_model)
+
+    def source_version(gcp, src_env, name, rid, version, loop_case=None):
+        if state.version_error:
+            raise ConfigError(state.version_error)
+        return version or "3", {}
+
+    monkeypatch.setattr(promote, "source_version", source_version)
     monkeypatch.setattr(promote, "_find_model", lambda gcp, env, name: state.dst_model)
     monkeypatch.setattr(promote.publish, "compile_pinned", compile_pinned)
     monkeypatch.setattr(promote.publish, "upload_template", lambda info, repo_, uc, rid, creds: (
@@ -179,6 +186,14 @@ def test_the_checkout_must_be_the_source_commit(setup, monkeypatch):
     with pytest.raises(ConfigError, match="check out the source release's commit c0ffee"):
         setup.run()
     assert setup.calls == []
+
+
+def test_a_model_trained_by_another_release_is_refused_before_copying(setup):
+    """Found in the 1.1.0 QA: the images were copied before the model version was checked."""
+    setup.version_error = "v1 of churn-classifier was trained by release r0, not abc123"
+    with pytest.raises(ConfigError, match="trained by release r0"):
+        setup.run()
+    assert setup.calls == [] and prod_pointer(setup) is None
 
 
 # 6: a failure leaves the live pointer where it was.

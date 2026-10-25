@@ -287,12 +287,10 @@ def _wait(gcp: Gcp, env: Environment, operation: dict, what: str) -> dict:
     raise ConfigError(f"{what}: still running after 10 minutes ({name})")
 
 
-def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
-                  release_id: str, version: str | None, log=print, loop_case: str | None = None) -> dict:
-    """The source's approved version, as a new candidate version in the destination's Model Registry.
-    loop_case: a closed retrain loop's candidate (FR-48), validated in the source and approved for the destination
-    by the loop's production approval; it need not be the source's default."""
-    name = uc_dst.model["name"]
+def source_version(gcp: Gcp, src_env: Environment, name: str, release_id: str, version: str | None,
+                   loop_case: str | None = None) -> tuple[str, dict]:
+    """The source version a promotion takes: the default (approved) one, or the given one for a closed retrain loop,
+    trained by the release being promoted. Checked before anything is copied."""
     src_model = _find_model(gcp, src_env, name)
     if src_model is None:
         raise ConfigError(f"{name} has no versions in {src_env.name}")
@@ -309,6 +307,16 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     if trained_by and trained_by != publish._tag(release_id)[:63]:
         raise ConfigError(f"v{version} of {name} was trained by release {trained_by}, not {release_id}: promote the "
                           "release that trained it, or retrain")
+    return str(version), chosen
+
+
+def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
+                  release_id: str, version: str | None, log=print, loop_case: str | None = None) -> dict:
+    """The source's approved version, as a new candidate version in the destination's Model Registry.
+    loop_case: a closed retrain loop's candidate (FR-48), validated in the source and approved for the destination
+    by the loop's production approval; it need not be the source's default."""
+    name = uc_dst.model["name"]
+    version, chosen = source_version(gcp, src_env, name, release_id, version, loop_case)
     dest_uri = (f"{publish.pipeline_root(dst_env, uc_dst)}/promoted/{src_env.name}/{release_id}/"
                 f"v{version}/model")
     files = copy_model_files(gcp, chosen["artifactUri"], dest_uri, log)
@@ -485,6 +493,10 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     if first_version:
         policy.append(f"first version in {dst_env.name}: approved by {who} with the promotion"
                       if manual else f"first version in {dst_env.name}: the default (promote_model auto)")
+
+    # The model version is checked now too (the default, trained by this release), before anything is copied.
+    if mode == "model":
+        source_version(gcp, src_env, uc_dst.model["name"], rid, model_version, loop_case)
 
     # 5. The destination's tables, as a release creates them (configuration, additive only).
     if not skip_tables:
