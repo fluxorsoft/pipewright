@@ -269,6 +269,11 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
     default = ml_config["registry"].get("set_default") == "on_approval"
     if default:
         rt.make_default(project, region, registry_id, version)
+    # A model's first version is the registry's default from the start: the champion, as the container path labels it
+    # (evidence EV-06 then reads it as a first version, not as a default without an approval).
+    if default or str((rt.default_version(project, region, registry_id) or {}).get("versionId")) == str(version):
+        rt.label_version(project, region, registry_id, version, {"status": "champion"})
+        default = True
     primary = ml_config["evaluation"]["primary_metric"]
     emit_event("model.registered", ml_config, run_id, model=registry_id, version=version, default=default,
                primary_metric=primary, primary_value=primary_value, bigquery_model=model or None)
