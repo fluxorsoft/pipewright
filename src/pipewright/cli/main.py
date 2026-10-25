@@ -863,14 +863,16 @@ def build_parser() -> argparse.ArgumentParser:
     for action, text in (("approve", "approve retraining (one approval per required approver group)"),
                          ("decline", "decline: no retrain now; the case re-opens when the decline expires or "
                                      "things get worse"),
-                         ("snooze", "put off the decision for --days; re-opens early if things get worse")):
+                         ("snooze", "put off the decision for --days; re-opens early if things get worse"),
+                         ("retry", "resubmit an approved case's failed training, under its approval")):
         sp = rsub.add_parser(action, help=text)
         retrain_target(sp)
         sp.add_argument("--reason", required=True, help="recorded with your name")
         sp.add_argument("--group", help="the approver group you act for (default: the first you belong to)")
         sp.add_argument("--no-wait", action="store_true", help="do not wait for the launcher to record it")
-        if action == "approve":
-            sp.add_argument("--source-uri", help="training data to use (default: retraining.source_uri)")
+        if action in ("approve", "retry"):
+            sp.add_argument("--source-uri", help="training data to use (default: retraining.source_uri; a retry: "
+                                                 "the failed attempt's)")
         else:
             sp.add_argument("--because", required=True, choices=["data-problem", "seasonal", "no-harm", "other"])
             sp.add_argument("--days", type=int, required=action == "snooze",

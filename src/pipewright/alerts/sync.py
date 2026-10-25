@@ -52,6 +52,8 @@ DECISION_EVENTS = {
     "retrain.declined": "retrain declined",
     "retrain.snoozed": "retrain snoozed",
     "retrain.digest": "weekly retrain digest",
+    "retrain.training_failed": "retrain training failed",     # Pipewright 1.1: the approval stays; retry
+    "retrain.training_retried": "retrain training resubmitted",
 }
 for _event, _title in DECISION_EVENTS.items():
     EVENTS[_event] = (f'jsonPayload.pipewright_event.event_type="{_event}"', _title, ["case_id", "summary"])

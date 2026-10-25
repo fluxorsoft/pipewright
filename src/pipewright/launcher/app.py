@@ -88,7 +88,7 @@ def create_app(registry: Registry | None = None) -> Flask:
             _event("run.submitted", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid,
                    source_uri=source_uri, job=name, **(extra or {}), **({"loop": loop} if loop else {}))
             return {"usecase": contract.usecase, "pipeline": pipeline, "status": "submitted", "job_id": jid,
-                    "release": contract.release_id}
+                    "run_id": rid, "release": contract.release_id}
         except AlreadySubmitted:
             log.info("duplicate %s for %s", jid, source_uri)
             _event("run.duplicate", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid)
@@ -125,8 +125,29 @@ def create_app(registry: Registry | None = None) -> Flask:
                 resp = r.gcp.get(f"https://{contract.region}-aiplatform.googleapis.com/v1/{name}@{version}")
                 return {"created": resp.body.get("versionCreateTime")} if resp.ok else {}
 
+            def job_state(contract, job_id):
+                return adapters.job_state(contract, job_id, reg().manifest, getattr(r, "gcp", None))
+
+            def version_for_run(contract, run):
+                """The registry version a training run registered (container and BigQuery ML labels)."""
+                name = (contract.metadata or {}).get("model")
+                if not name:
+                    return None
+                api = f"https://{contract.region}-aiplatform.googleapis.com/v1"
+                found = r.gcp.get(f"{api}/projects/{contract.project}/locations/{contract.region}/models",
+                                  filter=f'display_name="{name}"')
+                part = run.lower().replace("-", "_")
+                for m in (found.body or {}).get("models", []) if found.ok else []:
+                    listed = r.gcp.get(f"{api}/{m['name']}:listVersions", pageSize=100)
+                    for v in (listed.body or {}).get("models", []) if listed.ok else []:
+                        labels = v.get("labels") or {}
+                        if labels.get("pipewright-run") in (run, part) or labels.get("run_id") == f"run-{run}":
+                            return str(v["versionId"])
+                return None
+
             state["decisions"] = Decisions(CaseStore(r.gcp, r.bucket), lambda: reg().manifest, submit, emit,
-                                           verify=verify, champion_info=champion_info)
+                                           verify=verify, champion_info=champion_info, job_state=job_state,
+                                           version_for_run=version_for_run)
         return state["decisions"]
 
     def loop_on(contract: ReleaseContract) -> bool:

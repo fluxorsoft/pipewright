@@ -92,7 +92,7 @@ def message(env: Environment, case: dict, action: str, reason: str, because: str
         raise ConfigError(f"unknown action {action}")
     if not (reason or "").strip():
         raise ConfigError("give --reason: it is recorded with your name")
-    if action != "approve" and because not in REASONS:
+    if action not in ("approve", "retry") and because not in REASONS:
         raise ConfigError(f"give --because: one of {', '.join(REASONS)}")
     if source_uri:
         from pipewright.runs import sources

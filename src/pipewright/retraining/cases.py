@@ -5,6 +5,8 @@ States:
     snoozed    a person put it off until `until`; re-opens then, or at once if things get worse
     declined   a person said no until `until` (declines expire too); re-opens like a snooze
     approved   quorum reached: training was submitted (propose) or the candidate was accepted (candidate). Final.
+               The approval stays when training fails: the launcher's tick records each attempt's outcome
+               (reconcile), retries transient failures itself, and `retrain retry` resubmits (Pipewright 1.1).
 
 One case is current per use case (the pointer). An approved case stops being current; the next alert after
 cooldown_days opens a new one.
@@ -14,13 +16,20 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-ACTIONS = ("approve", "decline", "snooze")
+ACTIONS = ("approve", "decline", "snooze", "retry")
 REASONS = ("data-problem", "seasonal", "no-harm", "other")      # why a decline or snooze: --because
 OBSERVATIONS_KEPT = 20
 HISTORY_KEPT = 200
+ATTEMPTS_KEPT = 20
+MAX_AUTO_RETRIES = 2                 # automatic retries of transient training failures, per case
+# A failure Google Cloud reports as temporary: capacity, quota, preemption, unavailable service. Anything else (the
+# data contract, the code, a missing table) fails the same way again: a person decides.
+TRANSIENT = re.compile(r"temporarily unavailable|stockout|does not have enough resources|resource[_ ]exhausted|"
+                       r"quota|rate limit|preempt|\b503\b|unavailable|deadline exceeded|try again later", re.I)
 
 
 class DecisionRefused(Exception):
@@ -202,6 +211,108 @@ def approved_how(entry: dict) -> dict:
     return entry.get("approval") or {"via": "not recorded by the client"}
 
 
+def job_outcome(state: str | None) -> str | None:
+    """succeeded, failed, or None while the job runs (or is unknown): Agent Platform and Kubeflow states alike."""
+    plain = str(state or "").upper().removeprefix("PIPELINE_STATE_")
+    if plain == "SUCCEEDED":
+        return "succeeded"
+    if plain in ("FAILED", "CANCELLED", "CANCELED", "ERROR"):
+        return "failed"
+    return None
+
+
+def _attempts(case: dict) -> list[dict]:
+    return list(case.get("training_attempts") or [])
+
+
+def reconcile(case: dict, state: str | None, error: str, version: str | None, s: Settings, now: datetime) -> Outcome:
+    """How an approved case's training ended, as its orchestrator reports it (the launcher's tick). The approval
+    stays. succeeded: the registered version, or rejected by the gates (nothing registered); failed: the error, and
+    an automatic retry when it is transient (at most MAX_AUTO_RETRIES per case)."""
+    t = case.get("training") or {}
+    cid = case["case_id"]
+    if case["state"] != "approved" or not t.get("job_id") or t.get("outcome"):
+        return Outcome(None, status=f"case {cid}: no training to reconcile")
+    outcome = job_outcome(state)
+    if outcome is None:
+        return Outcome(None, status=f"case {cid}: training {t['job_id']} is {state or 'not found yet'}")
+    case = copy.deepcopy(case)
+    t = case["training"]
+    t["finished_at"] = iso(now)
+    attempt = {"job_id": t["job_id"], "run_key": t.get("run_key"), "finished_at": t["finished_at"]}
+    if outcome == "succeeded":
+        known = bool(t.get("run_id"))
+        t["outcome"] = "registered" if version else ("rejected" if known else "succeeded")
+        if version:
+            t["version"] = str(version)
+        case["training_attempts"] = (_attempts(case) + [{**attempt, "outcome": t["outcome"],
+                                                         **({"version": str(version)} if version else {})}])[
+            -ATTEMPTS_KEPT:]
+        detail = {"registered": f"v{version} registered", "rejected": "the evaluation gates kept it out of the "
+                  "registry", "succeeded": "finished"}[t["outcome"]]
+        _log(case, now, f"training {t['outcome']}", reason=detail, job_id=t["job_id"])
+        return Outcome(case, [("retrain.training_finished", {"job_id": t["job_id"], "outcome": t["outcome"],
+                                                             **({"version": str(version)} if version else {})})],
+                       status=f"case {cid}: training {t['outcome']} ({detail})")
+    transient = bool(TRANSIENT.search(error or ""))
+    t.update(outcome="failed", error=(error or "no message from the orchestrator")[:500], transient=transient)
+    case["training_attempts"] = (_attempts(case) + [{**attempt, "outcome": "failed", "error": t["error"],
+                                                     "transient": transient}])[-ATTEMPTS_KEPT:]
+    _log(case, now, "training failed", reason=t["error"][:200], job_id=t["job_id"], transient=transient)
+    events = [("retrain.training_failed", {"job_id": t["job_id"], "error": t["error"][:300], "transient": transient,
+                                           "next": f"pipewright retrain retry --case {cid} --reason ..."})]
+    auto = sum(1 for a in case["training_attempts"] if a.get("auto"))
+    if transient and auto < MAX_AUTO_RETRIES:
+        n = len(case["training_attempts"])
+        submit = {"kind": t.get("kind") or "retrain", "source_uri": t.get("source_uri"), "run_key": f"{cid}-retry-{n}",
+                  "auto": True}
+        case["training_attempts"][-1]["retried"] = "automatically"
+        _log(case, now, "retry", reason=f"automatic: transient failure ({auto + 1} of {MAX_AUTO_RETRIES})")
+        events.append(("retrain.training_retried", {"by": "pipewright (transient failure)", "attempt": n + 1,
+                                                    "run_key": submit["run_key"]}))
+        return Outcome(case, events, submit, status=f"case {cid}: training failed (transient); retried as "
+                                                    f"{submit['run_key']}")
+    return Outcome(case, events, status=f"case {cid}: training failed; `pipewright retrain retry --case {cid}`")
+
+
+def retry(case: dict, by: str, group: str | None, s: Settings, now: datetime, reason: str = "",
+          source_uri: str | None = None, via: str = "", approval: dict | None = None) -> Outcome:
+    """A person resubmits an approved case's failed training, under the approval it has, with a fresh run key."""
+    cid = case["case_id"]
+    if case["state"] != "approved":
+        raise DecisionRefused(f"case {cid} is {case['state']}: only an approved case's training is retried")
+    if case.get("loop"):
+        raise DecisionRefused(f"case {cid} belongs to the closed retrain loop: `pipewright loop` runs and retries it")
+    t = case.get("training") or {}
+    if not t:
+        raise DecisionRefused(f"case {cid} has no training to retry")
+    if not (t.get("status") == "error" or t.get("outcome") == "failed"):
+        how = t.get("outcome") or "still running"
+        raise DecisionRefused(f"case {cid}'s training is {how}: only a failed one is retried")
+    if not (reason or "").strip():
+        raise DecisionRefused("give a reason (--reason)")
+    required = case.get("required") or list(s.required)
+    if required and group not in required:
+        where = f"approver group {group!r}" if group else "a direct call"
+        raise DecisionRefused(f"{where} cannot retry this case: a retry comes from a required approver group "
+                              f"({', '.join(required)})")
+    case = copy.deepcopy(case)
+    if t.get("status") == "error" and not t.get("outcome"):        # never submitted: count that attempt too
+        case["training_attempts"] = (_attempts(case) + [{"run_key": t.get("run_key"), "outcome": "not submitted",
+                                                         "error": t.get("error"), "at": iso(now)}])[-ATTEMPTS_KEPT:]
+    n = len(_attempts(case))
+    if case.get("training_attempts"):
+        case["training_attempts"][-1]["retried"] = by
+    entry = {"by": by, "group": group, "reason": reason.strip(), "via": via,
+             **({"approval": approval} if approval else {})}
+    _log(case, now, "retry", **entry, source_uri=source_uri)
+    submit = {"kind": t.get("kind") or "retrain", "source_uri": source_uri or t.get("source_uri"),
+              "run_key": f"{cid}-retry-{n}"}
+    return Outcome(case, [("retrain.training_retried", {**_who(by, group, entry), "attempt": n + 1,
+                                                        "run_key": submit["run_key"]})], submit,
+                   status=f"case {cid}: training resubmitted as {submit['run_key']}")
+
+
 def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now: datetime, reason: str = "",
            because: str | None = None, days: int | None = None, source_uri: str | None = None,
            via: str = "", approval: dict | None = None) -> Outcome:
@@ -211,6 +322,8 @@ def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now
         raise DecisionRefused(f"unknown action {action!r}")
     if not by:
         raise DecisionRefused("the decision has no verified identity")
+    if action == "retry":
+        return retry(case, by, group, s, now, reason, source_uri, via, approval)
     if case["state"] == "approved":
         raise DecisionRefused(f"case {case['case_id']} is already approved")
     if not (reason or "").strip():

@@ -299,6 +299,7 @@ def test_launcher_routes(gcs, monkeypatch):
     from tests.test_launcher import FakeRegistry
 
     monkeypatch.setattr(adapters, "submit", lambda *a, **k: "projects/p/locations/r/pipelineJobs/j")
+    monkeypatch.setattr(adapters, "job_state", lambda *a, **k: ("PIPELINE_STATE_RUNNING", ""))
     monkeypatch.setattr(identity, "verify", lambda token, audiences: {"tok-lead": "lead@x"}.get(token) or "")
     reg = FakeRegistry([CONTRACT])
     reg.gcp, reg.bucket = None, "b"

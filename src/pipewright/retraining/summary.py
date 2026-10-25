@@ -63,7 +63,10 @@ def summary(case: dict, event_type: str = "") -> str:
     state = case["state"]
     head = {"retrain.proposed": "needs a decision", "retrain.reopened": "re-opened, needs a decision",
             "retrain.escalated": "still undecided", "retrain.approval": "approval recorded",
-            "retrain.approved": "approved", "retrain.declined": "declined", "retrain.snoozed": "snoozed"}
+            "retrain.approved": "approved", "retrain.declined": "declined", "retrain.snoozed": "snoozed",
+            "retrain.training_failed": "approved, but its training failed",
+            "retrain.training_retried": "approved; training resubmitted",
+            "retrain.training_finished": "approved; training finished"}
     lines = [f"Case {cid}: {uc} ({env}), {', '.join(case.get('triggers') or [])}: {head.get(event_type, state)}."]
     champion = case.get("champion") or {}
     if champion.get("version"):
@@ -131,6 +134,18 @@ def render(case: dict) -> str:
     if case.get("training"):
         t = case["training"]
         lines += ["", f"Training: {t.get('kind')} {t.get('status')} job {t.get('job_id')} on {t.get('source_uri')}"]
+        if t.get("outcome"):
+            ended = {"registered": f"registered v{t.get('version')}", "rejected": "rejected by the evaluation gates",
+                     "succeeded": "finished", "failed": f"FAILED: {t.get('error')}"}.get(t["outcome"], t["outcome"])
+            lines.append(f"  ended {str(t.get('finished_at'))[:16]}: {ended}")
+            if t["outcome"] == "failed":
+                lines.append(f"  retry: pipewright retrain retry --case {case['case_id']} --reason ..."
+                             + ("  (transient: Pipewright retries it itself, twice)" if t.get("transient") else ""))
+        attempts = case.get("training_attempts") or []
+        if len(attempts) > 1 or (attempts and not t.get("outcome")):
+            lines.append("  attempts: " + "; ".join(
+                f"{a.get('run_key')} {a.get('outcome')}" + (f" (retried {a['retried']})" if a.get("retried") else "")
+                for a in attempts))
     lines += ["", "History:"] + [
         f"  {h['at']}  {h['action']:<10} {h.get('by') or ''} {('[' + h['group'] + ']') if h.get('group') else ''} "
         f"{h.get('reason') or ''}".rstrip() for h in (case.get("history") or [])[-15:]]

@@ -1,6 +1,8 @@
 """What the launcher does with retrain proposals, decisions and ticks. Clients are passed in, so it is testable.
 
     submit(contract, pipeline, source_uri, run_key, trigger) -> {"status", "job_id", ...}   the launcher's start()
+    job_state(contract, job_id) -> (state, error)                                          the orchestrator's view
+    version_for_run(contract, run_id) -> version or None                                   Model Registry
     emit(event_type, contract, data, attributes)                                             lifecycle events
     verify(token) -> email                                                                   identity.verify
 """
@@ -36,9 +38,12 @@ def ml_config(contract: ReleaseContract) -> dict:
 class Decisions:
     def __init__(self, store: CaseStore, manifest: Callable[[], dict], submit: Callable, emit: Callable,
                  verify: Callable[[str], str] | None = None, clock: Callable[[], datetime] | None = None,
-                 champion_info: Callable[[ReleaseContract, dict], dict] | None = None):
+                 champion_info: Callable[[ReleaseContract, dict], dict] | None = None,
+                 job_state: Callable[[ReleaseContract, str], tuple] | None = None,
+                 version_for_run: Callable[[ReleaseContract, str], str | None] | None = None):
         self.store, self.manifest, self.submit, self._emit = store, manifest, submit, emit
         self.verify = verify
+        self.job_state, self.version_for_run = job_state, version_for_run
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.champion_info = champion_info
 
@@ -60,6 +65,8 @@ class Decisions:
             result = self.submit(contract, "training", submit["source_uri"], submit["run_key"],
                                  "retrain" if submit["kind"] == "retrain" else "candidate")
             training = {"kind": submit["kind"], "status": result.get("status"), "job_id": result.get("job_id"),
+                        **({"run_id": result["run_id"]} if result.get("run_id") else {}),
+                        **({"auto": True} if submit.get("auto") else {}),
                         "source_uri": submit["source_uri"], "run_key": submit["run_key"],
                         "submitted_at": rc.iso(self.clock())}
         except Exception as e:  # noqa: BLE001 - recorded on the case; a person can retry with `retrain approve`
@@ -201,6 +208,10 @@ class Decisions:
                 current = self.store.current(contract.usecase)
                 if current:
                     results.append(self._tick_case(contract, s, current["case_id"], now))
+                if self.job_state:
+                    done = self._reconcile(contract, s, now)
+                    if done:
+                        results.append(done)
                 if digest and s.digest:
                     results.append(self.digest(contract, s, now))
             except Exception as e:  # noqa: BLE001 - one use case must not stop the others
@@ -221,6 +232,34 @@ class Decisions:
             for event_type, data in out.events:
                 self.emit(contract, s, case, event_type, data)
         return {"usecase": contract.usecase, "case_id": case_id, "detail": out.status if out else "gone"}
+
+    def _reconcile(self, contract: ReleaseContract, s: rc.Settings, now: datetime) -> dict | None:
+        """The last approved case's training: how it ended (Pipewright 1.1). Nothing to do once it has an outcome."""
+        pointer, _ = self.store.pointer(contract.usecase)
+        cid = pointer.get("last_case")
+        case = self.store.get(contract.usecase, cid) if cid else None
+        t = (case or {}).get("training") or {}
+        if not case or case.get("state") != "approved" or not t.get("job_id") or t.get("outcome"):
+            return None
+        state, error = self.job_state(contract, t["job_id"])
+        version = None
+        if rc.job_outcome(state) == "succeeded" and t.get("run_id") and self.version_for_run:
+            version = self.version_for_run(contract, t["run_id"])
+        held: dict = {}
+
+        def change(c):
+            held["out"] = rc.reconcile(c, state, error, version, s, now)
+            return held["out"].case
+
+        updated = self.store.update_case(contract.usecase, cid, change)
+        out = held.get("out")
+        if not out or not out.case:
+            return {"usecase": contract.usecase, "case_id": cid, "detail": out.status if out else "gone"}
+        for event_type, data in out.events:
+            self.emit(contract, s, out.case, event_type, data)
+        if out.submit:
+            self._submit(contract, updated or out.case, out.submit)
+        return {"usecase": contract.usecase, "case_id": cid, "detail": out.status}
 
     def digest(self, contract: ReleaseContract, s: rc.Settings, now: datetime) -> dict:
         week = now - timedelta(days=7)
