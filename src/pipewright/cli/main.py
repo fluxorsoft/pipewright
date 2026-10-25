@@ -123,6 +123,18 @@ def cmd_alerts_sync(args) -> int:
         plan = alerts_sync.sync(uc, env, dry_run=args.dry_run)
         print(alerts_sync.render(uc, plan, args.dry_run))
         failed += len(plan.errors)
+    if not args.usecase:        # a whole-repo sync: the policies of use cases that are gone (Pipewright 1.1)
+        deleted, kept, errors = alerts_sync.prune(env, set(_selected(root, None)), dry_run=args.dry_run)
+        if deleted or kept or errors:
+            print(f"Alerts of use cases not in this repo ({env.name})")
+        for name in deleted:
+            print(f"  {'PLAN' if args.dry_run else 'DONE'}  {name}: {'would delete' if args.dry_run else 'deleted'} "
+                  "(the use case is not in this repo and not released here)")
+        for name in kept:
+            print(f"  OK    {name}: kept (released in {env.name}, from another repo)")
+        for e in errors:
+            print(f"  FAIL  {e}")
+        failed += len(errors)
     return 1 if failed else 0
 
 

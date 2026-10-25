@@ -14,6 +14,10 @@ For each event: one Cloud Monitoring log-based alert policy that matches the eve
 labels Pipewright puts on every entry) and emails every address. One email notification channel
 per address, shared by all use cases that notify it. Owned objects carry the label pipewright-usecase; a policy for
 an event no longer configured is deleted. Idempotent, like `schedules sync`.
+
+A use case that is gone (Pipewright 1.1, prune): on a whole-repo sync, the environment's policies of a use case that
+is neither in this repo nor released in the environment (no live release pointer) are deleted. Several teams' repos
+may share an environment, so a use case another repo still releases keeps its policies.
 """
 
 from __future__ import annotations
@@ -202,6 +206,41 @@ def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run:
             if not r.ok and r.status != 404:
                 plan.errors.append(f"delete {name}: {error_text(r)}")
     return plan
+
+
+def prune(env: Environment, repo_usecases: set[str], gcp: Gcp | None = None, dry_run: bool = False,
+          released=None) -> tuple[list[str], list[str], list[str]]:
+    """(deleted, kept, errors): the environment's Pipewright policies of use cases not in this repo. A policy is
+    deleted only when its use case has no live release in the environment either; released(name) -> bool."""
+    gcp = gcp or Gcp()
+    if released is None:
+        from pipewright.release import service
+
+        def released(name):
+            return service.read_pointer(gcp, env, name)[0] is not None
+    try:
+        live = _list(gcp, f"{MON}/projects/{env.project}/alertPolicies", "alertPolicies",
+                     filter=f'user_labels."pipewright-environment"="{_label(env.name)}"')
+    except RuntimeError as e:
+        return [], [], [str(e)]
+    mine = {_label(n) for n in repo_usecases}
+    deleted, kept, errors, verdict = [], [], [], {}
+    for p in live:
+        name = (p.get("userLabels") or {}).get("pipewright-usecase")
+        if not name or name in mine:
+            continue
+        if name not in verdict:
+            verdict[name] = released(name)
+        if verdict[name]:
+            kept.append(p["displayName"])
+            continue
+        if not dry_run:
+            r = gcp.delete(f"{MON}/{p['name']}")
+            if not r.ok and r.status != 404:
+                errors.append(f"delete {p['displayName']}: {error_text(r)}")
+                continue
+        deleted.append(p["displayName"])
+    return deleted, kept, errors
 
 
 def wanted_policies(uc: ResolvedUseCase) -> dict[str, list[str]]:

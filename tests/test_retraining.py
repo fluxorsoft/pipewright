@@ -439,3 +439,33 @@ def test_production_schedules_and_landings_become_loop_cases(gcs, monkeypatch):
     case = json.loads(gcs[f"cases/churn/{got['case_id']}.json"][0])
     assert case["loop"]["state"] == "approved" and case["loop"]["source_uri"] == "bq://proj-a.d.entities"
     assert json.loads(gcs["cases/churn/current.json"][0])["open"] is None
+
+
+def test_alerts_of_use_cases_that_are_gone_are_pruned():
+    """Pipewright 1.1: a whole-repo alerts sync deletes the policies of a use case that is neither in the repo nor
+    released in the environment; another repo's released use case keeps its policies (found in the 1.1.0 QA)."""
+    from types import SimpleNamespace
+
+    from pipewright.alerts import sync
+
+    policies = [{"name": f"projects/p/alertPolicies/{i}", "displayName": f"pipewright {u} test: {e}",
+                 "userLabels": {"pipewright-usecase": u, "pipewright-environment": "test"}}
+                for i, (u, e) in enumerate([("churn", "model registered"), ("churn-ray", "model registered"),
+                                            ("churn-ray", "training evaluated"), ("fraud", "drift")])]
+    deleted_names = []
+
+    class Gcp:
+        def get(self, url, **params):
+            return SimpleNamespace(ok=True, body={"alertPolicies": policies})
+
+        def delete(self, url):
+            deleted_names.append(url.rsplit("/", 1)[-1])
+            return SimpleNamespace(ok=True, status=200)
+
+    env = SimpleNamespace(name="test", project="p")
+    deleted, kept, errors = sync.prune(env, {"churn"}, Gcp(), released=lambda name: name == "fraud")
+    assert deleted == ["pipewright churn-ray test: model registered", "pipewright churn-ray test: training evaluated"]
+    assert kept == ["pipewright fraud test: drift"] and errors == [] and deleted_names == ["1", "2"]
+    deleted_names.clear()
+    planned, _, _ = sync.prune(env, {"churn"}, Gcp(), dry_run=True, released=lambda name: False)
+    assert len(planned) == 3 and deleted_names == []                      # a dry run deletes nothing
