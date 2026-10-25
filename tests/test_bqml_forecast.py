@@ -204,7 +204,7 @@ def test_a_bqml_version_gets_a_description_like_a_container_one():
 
     class Session:
         def get(self, url, timeout):
-            return type("R", (), {"json": lambda self: {"labels": {"a": "1"}}})()
+            return type("R", (), {"status_code": 200, "json": lambda self: {"labels": {"a": "1"}}})()
 
         def patch(self, url, params, json, timeout):
             sent.append((params, json))
@@ -215,3 +215,22 @@ def test_a_bqml_version_gets_a_description_like_a_container_one():
     assert sent[0] == ({"updateMask": "labels,versionDescription"},
                        {"labels": {"a": "1", "b": "2"}, "versionDescription": "run r1, auc=0.8100"})
     assert sent[1] == ({"updateMask": "labels"}, {"labels": {"a": "1", "c": "3"}})
+
+
+def test_labelling_waits_for_the_registry_to_serve_a_new_version(monkeypatch):
+    """BigQuery reports a version before Model Registry serves it (404): labelling waits (found in the 1.1.0 QA)."""
+    monkeypatch.setattr(rt.time, "sleep", lambda s: None)
+    answers = [404, 404, 200]
+
+    class Session:
+        def get(self, url, timeout):
+            code = answers.pop(0)
+            return type("R", (), {"status_code": code, "json": lambda self: {"labels": {"a": "1"}}})()
+
+        def patch(self, url, params, json, timeout):
+            self.sent = json
+            return type("R", (), {"status_code": 200, "text": ""})()
+
+    s = Session()
+    rt.label_version("p", "r", "m", "3", {"b": "2"}, session=s)
+    assert answers == [] and s.sent == {"labels": {"a": "1", "b": "2"}}
