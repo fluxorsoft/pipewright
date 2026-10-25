@@ -139,13 +139,13 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 |---|---|
 | Configure | Multi-file use cases (one concern per file), JSON Schema validation with path-qualified errors, `${...}` references to manifest names, per-environment overrides on a fixed list of keys, `resolve` to print the effective configuration |
 | Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, **features from feature tables** joined point in time (no value from after a row's cut-off reaches training), tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
-| Train | Random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray** for a step that needs a cluster: on Agent Platform, or on KubeRay in private GKE; one cluster per run, sized in `steps.<step>.ray` within the platform's limits and deleted when the step ends, or on private GKE a standing cluster per team that scales its workers to zero |
+| Train | Containers, or **BigQuery ML** with no pipeline code (classification, regression, k-means, PCA, forecasts, imported models); random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray** for a step that needs a cluster: on Agent Platform, or on KubeRay in private GKE; one cluster per run, sized in `steps.<step>.ray` within the platform's limits and deleted when the step ends, or on private GKE a standing cluster per team that scales its workers to zero |
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
 | Run | A shared, multi-tenant launcher on Cloud Run, or inside a private GKE cluster pulling its subscriptions: file drops, schedules (Cloud Scheduler, or Kubernetes CronJobs where the platform's manifest says so), API calls and Pub/Sub run requests; deterministic run IDs, so retries never start duplicates |
 | Serve | Model Registry with the default version as the champion, promotion following an approval policy, online serving with an approval gate, canary, promote and undeploy (Agent Platform endpoints, or KServe on private GKE with the same request format), `pipewright model predict` |
 | Monitor | Feature drift and prediction drift (PSI) against training baselines, live performance once outcomes arrive, `monitor status`, email alerts configured in YAML |
-| Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps |
+| Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps; the closed retrain loop (production never trains); a failed retrain recorded on its case and retried; approvals in GitHub |
 | Observe | Lifecycle events on Pub/Sub and labelled structured logs for every key moment, with no vendor code in pipelines |
 | Protect | Personal data declared in the data contract and never used as a feature; erasure by key across a team's tables (BigQuery and Parquet) |
 | Synthesize | **Synthetic data**, off until a team switches it on: learned inside the environment by an engine (MOSTLY AI local mode by default; SDV if the team installs it), gated on fidelity, utility and privacy before anything is published; one table, or an entity table with its feature tables and event sequences, keys and timing intact; or rows from the data contract alone, with no real data |
@@ -319,7 +319,9 @@ from `data.features_from`, so there is one feature definition. A request is then
 feature order; a missing value fails the request rather than defaulting. `validate` refuses a model feature no view
 serves, `doctor` checks the store, the views and how fresh their last sync is, and `deploy-model` runs the endpoint as
 the tenant's runner, which may read the views. Online stores have a standing cost: they are off unless the platform
-creates one. Endpoints on Agent Platform today; KServe later.
+creates one. Both Agent Platform endpoints and KServe on private GKE serve this way; on KServe send objects
+(`[{"customer_id": "c-42"}]`), since its serving envelope refuses bare strings. A new feature view serves nothing
+until its first sync, which `doctor` reports.
 
 ## Reproducible runs and label windows
 
@@ -394,7 +396,11 @@ spec:
 - **Registry:** only a model that passes gate 1 is registered (`ALTER MODEL ... SET OPTIONS (vertex_ai_model_id)`),
   as a new version of `model.name`; approval and `deploy-model` work as for any model. Each run trains a new
   BigQuery model, so versions never overwrite each other. A BigQuery ML model is promoted by retraining in the next
-  environment (`model.promotion: retrain`).
+  environment (`model.promotion: retrain`); a `logistic_reg` or `linear_reg` model may instead be promoted by its
+  files (`model.promotion: model`): exported, copied, imported and registered in the next environment only when it
+  scores the run's test rows as the source does.
+- **Online serving:** `deploy-model` serves a BigQuery ML version on an Agent Platform endpoint and first checks
+  the endpoint's scores against `ML.PREDICT` on the run's test rows.
 - **Scoring:** `ML.PREDICT` with the default version into `inference.output_table`, then feature and prediction
   drift (PSI against the training baselines in the record) and performance against observed outcomes
   (`monitoring.performance.labels`: the latest score of each key from this version, the same metrics SQL) into
@@ -409,7 +415,24 @@ spec:
 - **Removing models:** a registered BigQuery ML model is removed with `DROP MODEL`, which also removes its Model
   Registry version. Model Registry refuses to delete it itself, and deleting the dataset that holds it leaves the
   registry entry behind with no way to remove it: drop the models before deleting a dataset.
-- **Not yet:** hyperparameter tuning, k-means, PCA, imported models and forecasting.
+- **Not yet:** hyperparameter tuning, and XGBoost imports.
+
+More model types (new in 1.1), with the same gates, approvals, scoring and evidence:
+
+- **Segments and components:** `model_type: kmeans` (`data.label.task: clustering`) or `pca`
+  (`decomposition`) need no label. They are measured with `ML.EVALUATE` (davies_bouldin_index and
+  mean_squared_distance; total_explained_variance_ratio) and gated on those; scoring writes each row's cluster or
+  components.
+- **Forecasts:** `data.label.task: forecast` with a `bqml.forecast` section (horizon, `id_columns` for one series
+  per store or product, confidence level). `arima_plus` holds out the latest period, forecasts it and measures the
+  forecast against what happened (mae, rmse, mape), then refits on the whole series before registration; scoring
+  writes the next `horizon` points with their prediction interval. `engine: ai_forecast` uses AI.FORECAST with
+  Google's TimesFM model instead: nothing is trained, and the version records the settings it was measured with.
+  It sends the series to a Google foundation model, so it is refused unless the platform sets
+  `policies.bqml.ai_forecast: true`. A forecast is not served online.
+- **Models trained elsewhere:** `bqml.import` (TensorFlow SavedModel or ONNX files on `gs://`, and which output
+  holds the score, label or prediction) instead of `model_type`. The model is imported, evaluated on the run's test
+  rows, gated and registered like a trained one; the files' checksums are recorded with the run.
 
 ## The closed retrain loop
 
@@ -432,6 +455,22 @@ scoring run in production to verify it. A failed validation or verification stop
 version it replaced. One loop runs at a time per use case, each step is recorded on the case and emitted as
 `loop.<state>`, and every run carries the case ID. The training and scoring pipelines take `champion_version` and
 `model_version` parameters for it (the example and the BigQuery ML pipelines declare them).
+`loop advance --approve` promotes, so run it from a clean checkout of the release live in test, as for
+`pipewright promote`.
+
+## When retraining fails
+
+An approved retrain whose training fails keeps its approval (new in 1.1): nobody has to decide again. The
+launcher's tick follows the case's training run and records how it ended on the case: a registered version, a
+version the gates rejected (the case closes as rejected), or a failure with the failed step and its error
+(`retrain.training_failed`). `pipewright retrain show` shows it with the attempts so far.
+
+- **Transient failures retry on their own:** capacity, quota, preemption and unavailable services are retried
+  automatically, at most twice per case (`retrain.training_retried`, marked automatic).
+- **Anything else waits for a person:** a broken data contract, code or a missing table fails the same way again.
+  Fix it, then `pipewright retrain retry --env prod --usecase churn --case <id> --reason "contract fixed"`
+  (optionally `--source-uri`). The retry is a new run with its own run key (`<case>-retry-N`) and is recorded with
+  your name. A loop case is retried through `pipewright loop`, not here.
 
 ## Approvals in GitHub
 
@@ -538,13 +577,36 @@ approved indexes, and pip uses the first when a file names none; direct referenc
 local paths) are refused. `validate` reports what breaks the policy, `release` refuses it before building, and the
 release contract records the base images by digest. Without `policies.images` nothing changes.
 
+## Use cases for some environments only
+
+A use case that only one environment can run, such as one serving on KServe or tuning on KubeRay where only test has
+GKE, names its environments (new in 1.1):
+
+```yaml
+spec:
+  tenant: churn
+  run_in: [test]
+```
+
+Whole-repo commands (`validate`, `doctor`, `release`, `tables sync`, `schedules sync`, `alerts sync`, `status`,
+`test`) skip it elsewhere with `SKIP churn-gke: runs only in test (spec.run_in)`; naming it with `--usecase` in
+another environment, or promoting it to one, is refused. Left out, a use case runs in every environment.
+
+A whole-repo `alerts sync` also removes the alert policies of use cases that are gone: those neither in the repo nor
+released in the environment. A use case another repo still releases there keeps its policies, and `--dry-run` shows
+what would be deleted.
+
 ## Promotion between environments
 
 What runs in production is what was tested: `pipewright promote --from test --to prod --usecase <name>` takes the
 release live in test (and its approved model) to production without rebuilding anything.
 
 - **Allowed source:** only from the environment the destination names (`promotion: { from: test }` in its
-  environment file), and from a clean checkout of the source release's commit.
+  environment file), and from a clean checkout of the source release's commit. A use case whose `run_in` leaves out
+  the destination is refused.
+- **A model this release trained:** the version promoted (the default in test, or `--model-version`) must have been
+  trained by the release being promoted; this is checked before anything is copied. After a new release, retrain in
+  test, approve, then promote.
 - **Destination policies first:** the use case is resolved under production's manifest (approval policies, feature
   rules, Ray limits); a refusal stops before anything is copied.
 - **The same code:** images are copied by digest and checked. Templates are compiled for production and must equal
@@ -634,8 +696,8 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 |---|---|
 | Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test` |
 | Release | `tables sync`, `release`, `status`, `rollback`, `promote`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
-| Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze` |
+| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `lineage`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
+| Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze`, `retrain retry`, `loop start`, `loop advance`, `loop show`, `loop rollback`, `decisions pending` |
 | Extend | `plugins` (commands added by installed packages) |
 
 Every command takes `--env` and most take `--usecase`. `pipewright <command> --help` lists the options.
@@ -682,7 +744,10 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
-| Online serving from Bigtable (endpoints read features by entity ID) | Planned |
+| Online serving from Bigtable (endpoints read features by entity ID) | Built (1.1); used end to end on Agent Platform endpoints and KServe |
+| BigQuery ML use cases: classification, regression, k-means, PCA, ARIMA_PLUS and AI.FORECAST forecasts, imported models | Built (1.1); used end to end on both orchestrators |
+| The closed retrain loop, failed retrains and their retry | Built (1.1); used end to end, test to production |
+| Fairness gates, approved images, approvals in GitHub, lineage per run | Built (1.1) |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 | Synthetic data (learned inside the environment and gated, or from the data contract alone) | Released in 1.0.0; used end to end on Agent Platform Pipelines and on Kubeflow in private GKE, inside an enforced perimeter |
 | Relational and sequential synthetic data (`mode: relational`: the entity table with its feature tables and event sequences) | Released in 1.0.0; used end to end on Kubeflow in private GKE |

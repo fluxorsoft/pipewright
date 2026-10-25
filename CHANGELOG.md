@@ -64,6 +64,24 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
   when `retraining.when` matches. Binary, multi-class and regression model types; byte limits per job
   (`bqml.max_bytes_billed`, manifest `policies.bqml`); `examples/bqml` (`pipewright new-usecase --from bqml`).
   `spec.components` is required only without `bqml`.
+- **More BigQuery ML model types:** `kmeans` (`data.label.task: clustering`) and `pca` (`decomposition`), measured
+  with `ML.EVALUATE`; forecasts (`data.label.task: forecast`, `bqml.forecast`) with `arima_plus` (a backtest on the
+  latest period, then a refit on the whole series before registration) or `ai_forecast` (AI.FORECAST, refused
+  unless the manifest sets `policies.bqml.ai_forecast`); models trained elsewhere (`bqml.import`: TensorFlow or
+  ONNX, with mapped outputs), evaluated and gated like a trained one.
+- **BigQuery ML promotion by files:** `model.promotion: model` for `logistic_reg` and `linear_reg`: the model is
+  exported, copied and imported, and registered only when it scores the test rows as the source does.
+- **BigQuery ML online serving:** `deploy-model` checks the endpoint's scores against `ML.PREDICT` on the run's test
+  rows.
+- **Failed retrains:** an approved case whose training fails keeps its approval; the launcher's tick records the
+  outcome on the case (registered, rejected by the gates, or failed with the failed step and error;
+  `retrain.training_failed`), retries transient failures automatically at most twice (`retrain.training_retried`),
+  and `pipewright retrain retry --case` starts a new run with its own run key. A failed Kubeflow run names its
+  failed step.
+- **`spec.run_in`:** the environments a use case runs in. Whole-repo commands skip it elsewhere with a note; naming
+  it in another environment, or promoting it to one, is refused.
+- **Alerts of use cases that are gone:** a whole-repo `alerts sync` deletes the policies of use cases neither in the
+  repo nor released in the environment (`--dry-run` shows them).
 
 ### Changed
 
@@ -74,6 +92,16 @@ Additive: a 1.0 use case, manifest and release behave exactly as before.
 
 ### Fixed
 
+- **A run straight after a release ran the previous release:** run requests now name the live release, and a
+  launcher holding an older cached pointer reloads it.
+- **Promotion** checks the model version (the default, trained by the release promoted) before copying tables and
+  images, so a refused promotion leaves nothing behind.
+- **Synthetic data pipeline:** the tenant's dataset is read from `ml_config` at run time instead of being compiled
+  into the template, so a promoted release compiles the same as the tested one.
+- **BigQuery ML registration** waits for Model Registry to serve a new version before labelling it; a model's first
+  version is labelled champion, and every version gets a description (run and primary metric), as for container
+  models.
+- **The CLI** no longer prints the Agent Platform SDK's per-model INFO lines.
 - **Retrain decisions in private environments** without a required approver group: the CLI sent them to the
   launcher directly, which a private launcher refuses. They now go over the run requests topic (`kind:
   retrain.decision`, with the person's ID token, verified as for a direct call); the launcher accepts them on

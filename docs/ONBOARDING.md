@@ -13,6 +13,8 @@ ML persona assumes the infrastructure already exists; this guide covers the hand
 | Landing prefix | e.g. `incoming/nimbus/`; files dropped here start the team's runs |
 | Online serving allowed | yes / no |
 | Feature datasets (optional) | `project.dataset` feature datasets the team may read, and whether the environment requires feature tables; see [FEATURES.md](FEATURES.md) |
+| Online store (optional, 1.1) | a Feature Store online store for the tenant (`tenants.<tenant>.features.online_store`), so endpoints read features by entity ID; it has a standing cost |
+| Platform policies (optional, 1.1) | `policies.images` (approved base images and package indexes), `policies.bqml` (byte limits; `ai_forecast` to allow AI.FORECAST) |
 | Environment manifest | published at `gs://<artifacts-bucket>/pipewright/environment.json` |
 
 The shared launcher picks up new tenants from the manifest within a minute; no launcher redeploy is needed.
@@ -82,7 +84,7 @@ TLS-intercepting proxy also set `REQUESTS_CA_BUNDLE`.
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `pipewright new-usecase --name <usecase> --tenant <tenant> --owner <team>` | Copies the churn example: two pipelines, components, config, schemas, tests, sample data. Table names get the prefix `<usecase>_`. `--from minimal` starts smaller (training only, required keys only); `--from-bq <project.dataset.table> --label <column>` also drafts the data contract from a BigQuery table; `--from ray` runs the tuning trials on a Ray cluster made for each run |
+| 1 | `pipewright new-usecase --name <usecase> --tenant <tenant> --owner <team>` | Copies the churn example: two pipelines, components, config, schemas, tests, sample data. Table names get the prefix `<usecase>_`. `--from minimal` starts smaller (training only, required keys only); `--from-bq <project.dataset.table> --label <column>` also drafts the data contract from a BigQuery table; `--from ray` runs the tuning trials on a Ray cluster made for each run; `--from bqml` trains in BigQuery ML with no pipeline code |
 | 2 | edit `config/`, `usecase.yaml`, components | Your data contract, features, gates, monitoring; your model code |
 | 2b | `pipewright test --env <env>` | Runs `tests.command` (the example's helper unit tests) |
 | 3 | `pipewright validate --env <env>` | Schema, overrides, references, files, table schemas |
@@ -116,8 +118,14 @@ pipewright model list   --env <env> --usecase <usecase>                    # ver
 pipewright monitor status --env <env> --usecase <usecase>                  # drift, performance, open retrain cases
 pipewright retrain show   --env <env> --usecase <usecase>                  # the decision pack of the open case
 pipewright retrain approve --env <env> --usecase <usecase> --reason "..."  # or decline / snooze --because ... --days N
+pipewright retrain retry --env <env> --usecase <usecase> --case <id> --reason "..."  # after a failed training
+pipewright decisions pending --env <env>                                   # what waits for a person
+pipewright lineage --env <env> --usecase <usecase> --version N             # a version back to its data and release
 pipewright data erase   --env <env> --usecase <usecase> --keys-file ids.txt   # counts; add --confirm to delete
 ```
+
+A use case meant for some environments only names them in `spec.run_in` (for example `[test]` for one serving on
+KServe); whole-repo commands skip it elsewhere, and naming it there is refused.
 
 Sources: a run's `source_uri` is a `gs://` object (CSV or Parquet) or a `bq://project.dataset.table` table or
 view. Teams fed from BigQuery set `triggers.landing: null` and start runs with schedules or the API; the runner

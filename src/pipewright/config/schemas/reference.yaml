@@ -97,7 +97,7 @@ data.label: The column the model learns to predict.
 data.label.column: The label column's name.
 data.label.values: The label's possible values, for example [0, 1].
 data.label.positive: The value that counts as positive for metrics such as precision and recall.
-data.label.task: "What the model predicts: binary (the default), multiclass or regression. It sets which metrics evaluation, gates, the champion comparison and monitoring accept, and their defaults: auc for binary, f1_macro for multiclass, rmse for regression (lower is better). Regression splits random unless data.split.strategy says otherwise."
+data.label.task: "What the model predicts: binary (the default), multiclass or regression; with BigQuery ML also clustering (kmeans), decomposition (pca) and forecast (arima_plus or AI.FORECAST), Pipewright 1.1. It sets which metrics evaluation, gates, the champion comparison and monitoring accept, and their defaults: auc for binary, f1_macro for multiclass, rmse for regression (lower is better), davies_bouldin_index for clustering, total_explained_variance_ratio for decomposition, mae for forecast. Regression splits random unless data.split.strategy says otherwise."
 data.split: How data is divided into training, validation and test sets.
 data.split.strategy: random, stratified (keeps the label's proportions) or time (the newest rows are the test set).
 data.split.time_column: The column that orders rows in time; needed with strategy time.
@@ -349,7 +349,7 @@ outputs.bigquery.retention_days: Days before partitions are deleted.
 
 model: The model in the Model Registry and how it is served.
 model.name: The model's display name in the Model Registry.
-model.promotion: How a model reaches the next environment (planned) - model copies the approved version, retrain trains it again from the same release.
+model.promotion: "How a model reaches the next environment with `pipewright promote`: model copies the approved version's files and registers them there as a candidate, retrain trains it again there from the same release. A BigQuery ML model is promoted by retraining, except logistic_reg and linear_reg, which may use model (exported, imported and checked to score the same)."
 model.serving: Online serving on an endpoint, deployed with `pipewright deploy-model`.
 model.serving.enabled: Whether the model is served online. Needs online serving for the tenant.
 model.serving.target: Where it is served.
