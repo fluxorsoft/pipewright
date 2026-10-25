@@ -110,6 +110,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     doc, path = assembled.doc, assembled.path
     validate(doc, "usecase", str(path))
     meta, spec = doc["metadata"], doc["spec"]
+    if spec.get("run_in") and env.name not in spec["run_in"]:
+        raise ConfigError(f"use case {path.parent.name} runs only in {', '.join(spec['run_in'])} (spec.run_in), "
+                          f"not in {env.name}", source=str(path))
     directory = path.parent.resolve()
     problems: list[str] = []
 

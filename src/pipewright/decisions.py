@@ -82,7 +82,7 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
     """Every pending decision of the environment's released use cases."""
     from pathlib import Path
 
-    from pipewright.config import discover_usecases, load_environment, resolve_usecase
+    from pipewright.config import discover_usecases, load_environment, resolve_usecase, run_in
     from pipewright.gcp import Gcp
     from pipewright.models import registry
     from pipewright.release import service as release
@@ -93,7 +93,8 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
     store = client.store(env, gcp)
     out: list[Item] = []
     for name, path in sorted(discover_usecases(Path(root)).items()):
-        if usecases and name not in usecases:
+        envs = run_in(path)                            # 1.1: a use case for other environments only
+        if usecases and name not in usecases or envs and env.name not in envs:
             continue
         pointer, _ = release.read_pointer(gcp, env, name)
         if pointer is None:

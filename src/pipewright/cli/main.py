@@ -10,16 +10,27 @@ from pathlib import Path
 import yaml
 
 from pipewright import __version__
-from pipewright.config import discover_usecases, load_environment, resolve_usecase
+from pipewright.config import discover_usecases, load_environment, resolve_usecase, run_in
 from pipewright.errors import ConfigError
 
 
-def _selected(root: Path, names: list[str] | None) -> dict[str, Path]:
+def _selected(root: Path, names: list[str] | None, env: str | None = None) -> dict[str, Path]:
+    """The use cases a command works on: those named, or all of them. With env, all of them leaves out those whose
+    spec.run_in names other environments (Pipewright 1.1), with a note; a named one is refused when resolved."""
     found = discover_usecases(root)
     if not names:
         if not found:
             raise ConfigError(f"no use cases found under {root / 'usecases'}")
-        return found
+        if env is None:
+            return found
+        out = {}
+        for name, path in found.items():
+            envs = run_in(path)
+            if envs and env not in envs:
+                print(f"SKIP  {name}: runs only in {', '.join(envs)} (spec.run_in)", file=sys.stderr)
+            else:
+                out[name] = path
+        return out
     missing = [n for n in names if n not in found]
     if missing:
         raise ConfigError(f"use case(s) not found: {', '.join(missing)} (looked in {root / 'usecases'})")
@@ -40,7 +51,7 @@ def cmd_validate(args) -> int:
     env = load_environment(root, args.env)
     if note := _ignored_keys(env):
         print(f"WARN  {note}\n")
-    selected = _selected(root, args.usecase)
+    selected = _selected(root, args.usecase, args.env)
     failed = 0
     for name, path in selected.items():
         try:
@@ -68,7 +79,7 @@ def cmd_validate(args) -> int:
 def cmd_resolve(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
-    for name, path in _selected(root, args.usecase).items():
+    for name, path in _selected(root, args.usecase, args.env).items():
         doc = resolve_usecase(path, env).to_dict()
         print(f"# resolved {name} for environment {env.name}")
         print(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False).rstrip())
@@ -81,7 +92,7 @@ def cmd_doctor(args) -> int:
 
     root = Path(args.root)
     env = load_environment(root, args.env)
-    usecases = [resolve_usecase(path, env) for path in _selected(root, args.usecase).values()]
+    usecases = [resolve_usecase(path, env) for path in _selected(root, args.usecase, args.env).values()]
     report = doctor.run(env, usecases, compile_check=not args.no_compile)
     print(report.render())
     return 1 if report.failed else 0
@@ -93,7 +104,7 @@ def cmd_tables_sync(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
     failed = 0
-    for path in _selected(root, args.usecase).values():
+    for path in _selected(root, args.usecase, args.env).values():
         uc = resolve_usecase(path, env)
         results = tables_sync.sync(uc, env, dry_run=args.dry_run)
         print(tables_sync.render(results, uc, args.dry_run))
@@ -106,7 +117,7 @@ def cmd_schedules_sync(args) -> int:
 
     root = Path(args.root)
     env = load_environment(root, args.env)
-    for path in _selected(root, args.usecase).values():
+    for path in _selected(root, args.usecase, args.env).values():
         uc = resolve_usecase(path, env)
         print(schedules_sync.render(schedules_sync.sync(uc, env, dry_run=args.dry_run), uc, args.dry_run))
     return 0
@@ -118,13 +129,13 @@ def cmd_alerts_sync(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
     failed = 0
-    for path in _selected(root, args.usecase).values():
+    for path in _selected(root, args.usecase, args.env).values():
         uc = resolve_usecase(path, env)
         plan = alerts_sync.sync(uc, env, dry_run=args.dry_run)
         print(alerts_sync.render(uc, plan, args.dry_run))
         failed += len(plan.errors)
     if not args.usecase:        # a whole-repo sync: the policies of use cases that are gone (Pipewright 1.1)
-        deleted, kept, errors = alerts_sync.prune(env, set(_selected(root, None)), dry_run=args.dry_run)
+        deleted, kept, errors = alerts_sync.prune(env, set(_selected(root, None, env.name)), dry_run=args.dry_run)
         if deleted or kept or errors:
             print(f"Alerts of use cases not in this repo ({env.name})")
         for name in deleted:
@@ -588,7 +599,7 @@ def cmd_test(args) -> int:
 
     root = Path(args.root)
     env = load_environment(root, args.env)
-    codes = [runner.run(resolve_usecase(path, env)) for path in _selected(root, args.usecase).values()]
+    codes = [runner.run(resolve_usecase(path, env)) for path in _selected(root, args.usecase, args.env).values()]
     return 1 if any(c for c in codes if c) else 0
 
 
@@ -597,7 +608,7 @@ def cmd_release(args) -> int:
 
     root = Path(args.root)
     env = load_environment(root, args.env)
-    for path in _selected(root, args.usecase).values():
+    for path in _selected(root, args.usecase, args.env).values():
         uc = resolve_usecase(path, env)
         release.release(uc, env, component_image=args.component_image, skip_tables=args.skip_tables)
     return 0
@@ -638,7 +649,7 @@ def cmd_status(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
     gcp = Gcp()
-    for name in _selected(root, args.usecase):
+    for name in _selected(root, args.usecase, args.env):
         pointer, _ = release.read_pointer(gcp, env, name)
         if pointer is None:
             print(f"{name} ({env.name}): never released")

@@ -3,6 +3,7 @@
 # A test keeps this file and usecase.schema.json in step: every key described, no description without a key.
 
 tenant: The tenant this use case belongs to, as named in the environment manifest. Given to you by the platform team; it decides the service account, BigQuery dataset and landing prefix the use case uses.
+run_in: The environments this use case runs in, by name (Pipewright 1.1), for a use case meant for some environments only, such as one serving on GKE. Whole-repo commands skip it elsewhere with a note; naming it in another environment, or promoting it to one, is refused. Left out, it runs in every environment.
 include: Glob patterns, relative to the use case folder, of files that hold the rest of the spec. Each file holds one or more top-level sections; a section lives in exactly one file.
 
 resources: Overrides of the tenant's resources from the manifest. Normally left out; the platform team's manifest fills them.

@@ -159,6 +159,21 @@ def test_cli_reports_failure_exit_code(repo, capsys):
     assert "FAIL  churn (dev)" in capsys.readouterr().out
 
 
+def test_run_in_skips_other_environments_and_refuses_them_by_name(repo, capsys):
+    """Pipewright 1.1, spec.run_in: a whole-repo command skips the use case elsewhere with a note, a command naming
+    it there is refused (resolving it fails), and its own environments are unchanged (found in the 1.1.0 QA)."""
+    repo.add_env("prod", project="acme-ml-prod")
+    repo.usecase["spec"]["run_in"] = ["dev"]
+    repo.write()
+    assert main(["validate", "--root", str(repo.root), "--env", "dev"]) == 0
+    assert "OK    churn (dev)" in capsys.readouterr().out
+    assert main(["validate", "--root", str(repo.root), "--env", "prod"]) == 0
+    captured = capsys.readouterr()
+    assert "SKIP  churn: runs only in dev (spec.run_in)" in captured.err and "churn (prod)" not in captured.out
+    assert "runs only in dev (spec.run_in), not in prod" in problems_of(repo, "prod")
+    assert main(["validate", "--root", str(repo.root), "--env", "prod", "--usecase", "churn"]) == 1
+
+
 # ------------------------------------------------------------ references --
 
 def test_parameter_references(repo):

@@ -44,6 +44,15 @@ def discover_usecases(root: Path) -> dict[str, Path]:
     return {p.parent.name: p for p in sorted(base.glob(f"*/{USECASE_FILE}"))}
 
 
+def run_in(path: Path) -> list[str] | None:
+    """spec.run_in of a use case (Pipewright 1.1): the environments it runs in, None for every environment. Read
+    from usecase.yaml alone, before resolving, so a use case meant for other environments is skipped before its
+    resolution fails there."""
+    doc = load_yaml(Path(path))
+    names = ((doc or {}).get("spec") or {}).get("run_in") if isinstance(doc, dict) else None
+    return [str(n) for n in names] if isinstance(names, list) and names else None
+
+
 def load_usecase_document(path: Path) -> UseCaseDocument:
     path = Path(path)
     folder = path.parent

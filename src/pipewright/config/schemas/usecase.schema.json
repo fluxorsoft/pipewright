@@ -34,6 +34,13 @@
       "then": { "required": ["components"] },
       "properties": {
         "tenant": { "$ref": "#/$defs/name" },
+        "run_in": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/name" },
+          "description": "The environments this use case runs in (Pipewright 1.1). Left out: every environment"
+        },
         "include": {
           "type": "array",
           "items": { "type": "string", "pattern": "\\.ya?ml$" },
