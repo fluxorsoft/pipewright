@@ -129,13 +129,14 @@ def cmd_alerts_sync(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
     failed = 0
-    for path in _selected(root, args.usecase, args.env).values():
+    selected = _selected(root, args.usecase, args.env)
+    for path in selected.values():
         uc = resolve_usecase(path, env)
         plan = alerts_sync.sync(uc, env, dry_run=args.dry_run)
         print(alerts_sync.render(uc, plan, args.dry_run))
         failed += len(plan.errors)
     if not args.usecase:        # a whole-repo sync: the policies of use cases that are gone (Pipewright 1.1)
-        deleted, kept, errors = alerts_sync.prune(env, set(_selected(root, None, env.name)), dry_run=args.dry_run)
+        deleted, kept, errors = alerts_sync.prune(env, set(selected), dry_run=args.dry_run)
         if deleted or kept or errors:
             print(f"Alerts of use cases not in this repo ({env.name})")
         for name in deleted:
