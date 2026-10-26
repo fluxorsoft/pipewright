@@ -6,7 +6,7 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.0.0.** Working end to end on Google Cloud, including private environments with
+> **Status: 1.1.0.** Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
 > file, the launcher image in GitHub Container Registry) and on PyPI as `pipewright-mlops`.
@@ -633,11 +633,11 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.0.0"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp]==1.1.0"     # the command is `pipewright`
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.0.0 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.1.0 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -740,7 +740,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |

@@ -18,7 +18,7 @@ inputs:
     required: false
     default: ""
   pip_spec:
-    description: What to install (PIPEWRIGHT_PIP_SPEC), e.g. pipewright-mlops[gcp]==1.0.0
+    description: What to install (PIPEWRIGHT_PIP_SPEC), e.g. pipewright-mlops[gcp]==1.1.0
     required: true
   pip_index:
     description: Extra package index (PIPEWRIGHT_PIP_INDEX)

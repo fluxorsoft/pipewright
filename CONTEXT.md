@@ -5,7 +5,7 @@
 > (design), the interfaces it promises, and how to work on it (conventions). It summarises; the code is the final
 > authority.
 >
-> **Last updated:** 2026-10-19. **Version:** 1.0.0 (released 2026-10-17, re-cut 2026-10-18). **Release contract:** 3. **Configuration and manifest
+> **Last updated:** 2026-10-26. **Version:** 1.1.0 (released 2026-10-26; 1.0.0 released 2026-10-17, re-cut 2026-10-18). **Release contract:** 3. **Configuration and manifest
 > API:** `pipewright/v1`.
 
 **How to use this file**
