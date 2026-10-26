@@ -167,6 +167,7 @@ requirements named).
 | FR-54 | **Approved image allow-list:** the platform lists, per environment, the base images and package indexes a use case's images may be built from (component, Ray and synthetic images); `validate` and `release` refuse anything else, and the release contract records the base images by digest. Declared in the manifest like other platform policy (D-81); Pipewright Enterprise sets it in the platform file. Raised with the forecasting route of the BigQuery ML design (approved libraries such as statsmodels and Prophet) | Planned (user, 2026-10-22) | manifest `policies`, `build/images.py` |
 | FR-55 | **Lineage per run:** a model version leads to its run, the release it ran (commit, images, templates, `ml_config` with its SQL digests), the exact rows it trained on (the run's snapshot or BigQuery ML rows), the sources those came from (entity table, feature tables or groups and their read time, the label table and window) and its evaluation and approvals: one `lineage.json` per run with the evaluation record, and a lineage section in Fleet View. Upstream lineage of the sources (Data Lineage API) later | Planned: 1.1.0 (user, 2026-10-24) | runtime, bqml steps, Enterprise Fleet View |
 | FR-56 | **Approval gates in CI:** every human decision (model approval, deployment, promotion, retrain decisions, the closed loop's steps, synthetic data releases) can be a GitHub Actions job that waits for its environment's required reviewers, then runs the `pipewright` command; a scheduled workflow lists what needs a decision and opens one gated job per item. Pipewright records the GitHub reviewer, the approval time and comment and the workflow run next to the CI identity | Planned: 1.1.0 (user, 2026-10-24) | `pipewright ci init`, events, evidence, Enterprise Fleet View |
+| FR-57 | **A/B testing of models (section 8.16):** a controlled experiment between the champion and a candidate, with sticky assignment by a unit key, a business metric and guardrails fixed in advance, a minimum sample and duration, analysis per arm, and a person deciding the winner through a decision case; recorded in the winning version's lineage. Batch first, then online | Planned: phase 5 (design 2026-10-26) |
 
 ### 4.2 Non-functional requirements
 
@@ -927,6 +928,55 @@ a named image user Kubernetes cannot verify as non-root (now numeric); release r
 wins). The platform side (the cluster, Kubeflow and KubeRay from mirrored images, KServe, finished pods deleted a
 minute after they succeed so the logging agent keeps up) is the platform's, not this repository's.
 
+### 8.16 A/B testing of models (FR-57, design note 2026-10-26; roadmap phase 5)
+
+Four ways of comparing models answer four different questions; Pipewright 1.1 has the first three, A/B testing is new:
+
+| | Question | Mechanism | Today |
+|---|---|---|---|
+| Offline comparison | Better on held-out history? | Candidate and champion score the same test rows | Built: every training run (the champion comparison and margin) |
+| Shadow | Sensible on live data? | The candidate scores live data, nothing acts on it | Batch only, by hand (`run --model-version`); no online shadow |
+| Canary | Safe to switch? | A share of live requests goes to the candidate, watched, promoted or rolled back | Built on Agent Platform endpoints (`deploy-model --canary`, FR-15); not on KServe |
+| A/B test | Better for the business? | Units randomly and stickily assigned to arms; a business outcome measured per arm; a person decides | Not built (this note) |
+
+A canary splits per request (one customer can see both models) and checks safety; it is not an A/B test.
+
+**Shape (additive, off by default).** A use case gains an optional `experiment` section:
+
+```yaml
+experiment:
+  name: offer-v7-vs-v5                  # salts the assignment; a new name re-randomises
+  arms: { control: champion, treatment: { model_version: 7 } }
+  allocation: { treatment: 0.1 }        # the rest is control
+  unit: customer_id                     # a data contract column; assignment is sticky per unit
+  metric: { name: orders_30d, source: <outcomes table>, window_days: 30, direction: higher }
+  guardrails: [{ name: basket_value, max_drop: 0.02 }]
+  minimum: { units_per_arm: 2000, days: 21 }
+```
+
+- **Assignment** is deterministic: `hash(experiment.name, unit) < allocation` puts a unit in the treatment arm,
+  with no lookup table, the same in batch and online, repeatable for an audit.
+- **Batch use cases:** scoring scores each unit with its arm's model and writes `experiment` and `arm` beside the
+  score (the scoring table gains two nullable columns, additive). Outcomes arrive through the label window
+  mechanism (D-111) the retraining path already uses.
+- **Online use cases:** the serving handler routes by the same hash (both versions deployed on the endpoint); this
+  works on Agent Platform and KServe alike, unlike a per-request traffic split. Responses carry the arm.
+- **Analysis:** a scheduled step computes the metric and guardrails per arm with confidence intervals. When the
+  minimum sample and duration are reached, or a guardrail fails, it opens a decision case (the retrain decision
+  machinery: named approvers, quorum, recorded reasons). Approve = the treatment version becomes the default; any
+  other outcome ends the experiment and leaves the champion.
+- **Events and lineage:** `experiment.started`, `experiment.guardrail_failed`, `experiment.decided`; the decided
+  experiment (arms, sample, result, decision) is recorded in the winning version's lineage. Enterprise adds an
+  evidence control and a Fleet View page.
+- **Refusals:** an experiment needs a candidate that passed its gates; one experiment per use case at a time; not
+  during a closed retrain loop on the same use case; forecasts and unsupervised models have no unit outcome and
+  are refused.
+
+**Delivery, when started:** phase 5a batch A/B (assignment in scoring, analysis, decision case), on `lapse-risk`
+in the book's example; phase 5b online sticky routing and a KServe canary; phase 5c online shadow and stopping
+rules (sequential testing). Open decisions: the default statistical test and interval method; whether a
+guardrail failure stops the experiment automatically or only opens a case; per-segment analysis.
+
 ---
 
 ## 9. Interfaces and contracts
@@ -1069,7 +1119,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 ## 13. Roadmap
 
-**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence; phases 1 to 3 ship together as 1.1.0 (user, 2026-10-24), except AIOps (still to analyse). Phase 4 comes after 1.1.0. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks.
+**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence; phases 1 to 3 ship together as 1.1.0 (user, 2026-10-24), except AIOps (still to analyse). Phase 4 comes after 1.1.0, phase 5 after phase 4. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks.
 
 | Item | Status |
 |---|---|
@@ -1077,6 +1127,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
 | OpenTelemetry export from the launcher | Planned: phase 4, after 1.1.0 (user, 2026-10-24) |
+| A/B testing of models (FR-57, section 8.16): sticky assignment, business metric and guardrails, analysis per arm, a person decides | Planned: phase 5, after phase 4 (user, 2026-10-26) |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
 | The closed retrain loop across environments (FR-48, section 8.13): phase 1 to 3 deliveries | Phase 1 (1.1.0): built on branch `phase-1` 2026-10-24 (`retraining.loop`, `pipewright loop`, run requests naming versions, one loop per use case; Enterprise read grant). Live-tested 2026-10-24 between ent (Kubeflow Pipelines on GKE, perimeter enforced) and ent-prod (Agent Platform Pipelines): a drift case on churn-versions in ent-prod, approved over the run requests topic, trained in ent on production's view against the test version production served (v5 for prod v2), candidate v6 validated by a scoring run in ent, the production approval promoted it (v3, the default) and a scoring run verified it: closed; `loop rollback` made v2 the default again. The live test found promotion skipping the model when the release was live already (fixed: the loop promotes its candidate alone) |
 | `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
