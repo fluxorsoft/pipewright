@@ -264,8 +264,14 @@ def cmd_model_endpoint(args) -> int:
     from pipewright.gcp import Gcp
 
     uc, env = _one(args)
-    if uc.model["serving"]["target"] != "vertex":
-        raise ConfigError("model endpoint describes Agent Platform endpoints (model.serving.target vertex)")
+    if uc.model["serving"]["target"] == "kserve":
+        from pipewright.models import kserve
+
+        text = kserve.KServe(uc, env, Gcp()).how_to_call()
+        if text is None:
+            raise ConfigError(f"{uc.name} is not deployed on KServe in {env.name}: run `pipewright deploy-model`")
+        print(text)
+        return 0
     if not _print_how_to_call(uc, env, Gcp()):
         raise ConfigError(f"{uc.name} has no endpoint in {env.name}: run `pipewright deploy-model`")
     return 0

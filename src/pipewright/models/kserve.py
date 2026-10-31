@@ -229,6 +229,31 @@ class KServe:
             raise ConfigError(f"prediction from {self.name} failed: {r.status} {message(r)}")
         return r.body
 
+    def how_to_call(self) -> str | None:
+        """Pipewright 1.2 (FR-60) on KServe (found in 1.2 QA: only Agent Platform endpoints said it): where callers
+        reach the model, the route, what a caller needs and a sample request. None when it is not deployed."""
+        from pipewright.models.deploy import sample_request
+
+        isvc = self.current()
+        if isvc is None:
+            return None
+        route = (isvc["metadata"].get("annotations") or {}).get("pipewright.dev/predict-route") or \
+            DEFAULT_ROUTES["predict"]
+        where = self.endpoints()
+        return "\n".join([
+            "How to call it:",
+            f"  service       InferenceService {self.s['namespace']}/{self.name}",
+            f"  in the cluster  POST {where['cluster']}{route}",
+            *([f"  in the VPC    POST {where['vpc']}{route}  (internal load balancer, no public address)"]
+              if where.get("vpc") else []),
+            "  caller needs  network access to the namespace or the load balancer (network policy, firewall); from "
+            "outside, the Kubernetes API's services/proxy in the namespace (RBAC), as `model predict` uses",
+            "  request       a JSON body like:",
+            *sample_request(self.uc),
+            f"  try it        pipewright model predict --env {self.env.name} --usecase {self.uc.name} "
+            "--instances '<json>'",
+        ])
+
     def endpoints(self) -> dict:
         """Where callers reach it: in the cluster, and in the VPC with exposure internal_lb."""
         out = {"cluster": f"http://{self.name}-predictor.{self.s['namespace']}.svc.cluster.local"}
@@ -271,6 +296,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
                                  f"{uc.name}'s evaluation gates")
     if running == _label(vid):
         log(f"v{vid} of {uc.model['name']} is already live on {k.name}")
+        log(k.how_to_call() or "")
         return {"version": vid, "status": "live"}
     log(f"{k.apply(body)} InferenceService {k.name}; waiting for it to be ready (pulls the image, loads the model)")
     k.wait_ready(vid, log=log)
@@ -279,6 +305,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
         k.ensure_load_balancer(port)
     log(f"live: {k.name} serves {uc.model['name']} v{vid} ({', '.join(f'{a}: {u}' for a, u in k.endpoints().items())})")
     _deployed(uc, env, gcp, vid, k)
+    log(k.how_to_call() or "")
     return {"version": vid, "status": "deployed"}
 
 

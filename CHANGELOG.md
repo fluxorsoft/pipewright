@@ -29,7 +29,8 @@ so runs use the new settings.
 ### Added
 
 - **How to call a deployed model** (FR-60): `deploy-model` ends with the endpoint ID, the predict URL, the caller's
-  permission and a sample request; `pipewright model endpoint` prints the same, read only.
+  permission and a sample request (the values in the model's feature order); `pipewright model endpoint` prints the
+  same, read only. On KServe: the in-cluster URL, the internal load balancer's address and the route.
 - **Serving gated in CI, or automatic** (FR-63): `approvals.deploy_model: ci` lists a `deploy-approve` decision for
   each new default version that passes its gates and is not served, deployed by a `pipewright-gate` run once the
   GitHub environment's reviewers approve (recorded on `model.deployed`); `on_register` lets the decisions workflow

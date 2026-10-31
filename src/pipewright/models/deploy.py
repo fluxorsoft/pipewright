@@ -318,19 +318,29 @@ def sample_instance(uc: ResolvedUseCase):
     return {f: SAMPLES.get(types.get(f, ""), "<value>") for f in names}
 
 
-def how_to_call(uc: ResolvedUseCase, env: Environment, endpoint_resource: str) -> str:
-    """Pipewright 1.2 (FR-60): the endpoint's ID, its predict URL, the role a caller needs and a sample request."""
+def sample_request(uc: ResolvedUseCase) -> list[str]:
+    """The request lines of how_to_call: an instance is the values in the model's feature order (features.json),
+    never named fields (found live: the serving handlers take rows; a named instance answered 503), or with online
+    features the entity ID."""
     import json
 
+    instance = sample_instance(uc)
+    if uc.ml.get("online_features"):
+        return [f"    {line}" for line in json.dumps({"instances": [instance]}, indent=2).splitlines()]
+    return [f"    features, in this order: {', '.join(instance)}",
+            f"    {json.dumps({'instances': [list(instance.values())]})}"]
+
+
+def how_to_call(uc: ResolvedUseCase, env: Environment, endpoint_resource: str) -> str:
+    """Pipewright 1.2 (FR-60): the endpoint's ID, its predict URL, the role a caller needs and a sample request."""
     url = f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint_resource}:predict"
-    body = json.dumps({"instances": [sample_instance(uc)]}, indent=2)
     return "\n".join([
         "How to call it:",
         f"  endpoint ID   {endpoint_resource.rsplit('/', 1)[-1]}",
         f"  predict URL   {url}",
         "  caller needs  aiplatform.endpoints.predict (roles/aiplatform.user) on the project, as its own identity",
         "  request       POST, Authorization: Bearer <access token>, a JSON body like:",
-        *(f"    {line}" for line in body.splitlines()),
+        *sample_request(uc),
         f"  try it        pipewright model predict --env {env.name} --usecase {uc.name} --instances '<json>'",
     ])
 

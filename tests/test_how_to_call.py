@@ -17,11 +17,33 @@ def test_the_endpoint_its_url_the_role_and_a_sample_request(repo):
     assert "endpoint ID   1234567890" in text
     assert f"predict URL   https://europe-west2-aiplatform.googleapis.com/v1/{RESOURCE}:predict" in text
     assert "aiplatform.endpoints.predict (roles/aiplatform.user)" in text
-    body = json.loads("\n".join(line[4:] for line in text.splitlines() if line.startswith("    ")))
+    # Found live: the serving handlers take each instance as the values in feature order, never named fields.
+    order = next(line for line in text.splitlines() if "features, in this order:" in line).split(": ", 1)[1]
+    names = order.split(", ")
+    body = json.loads(next(line for line in text.splitlines() if line.strip().startswith('{"instances"')))
     (instance,) = body["instances"]
-    assert instance and "churned" not in instance and "customer_id" not in instance
-    assert all(isinstance(v, (int, float, str, bool)) for v in instance.values())
+    assert isinstance(instance, list) and len(instance) == len(names)
+    assert "churned" not in names and "customer_id" not in names
+    assert all(isinstance(v, (int, float, str, bool)) for v in instance)
     assert "pipewright model predict --env dev --usecase churn" in text
+
+
+def test_kserve_says_how_to_call_it_too():
+    from pipewright.models import kserve
+
+    k = kserve.KServe.__new__(kserve.KServe)
+    k.uc = SimpleNamespace(name="churn", ml={"data": {"contract": {"columns": [{"name": "tenure", "type": "int"}]}},
+                                             "features": {"include": ["tenure"]}})
+    k.env, k.name = SimpleNamespace(name="dev"), "churn"
+    k.s = {"namespace": "serving-churn"}
+    k.current = lambda: {"metadata": {"annotations": {}}}
+    k.endpoints = lambda: {"cluster": "http://churn-predictor.serving-churn.svc.cluster.local",
+                           "vpc": "http://10.10.0.31"}
+    text = k.how_to_call()
+    assert "POST http://churn-predictor.serving-churn.svc.cluster.local/predictions/model" in text
+    assert "POST http://10.10.0.31/predictions/model" in text and '{"instances": [[0]]}' in text
+    k.current = lambda: None
+    assert k.how_to_call() is None
 
 
 def test_with_online_features_an_instance_is_the_entity_id():
