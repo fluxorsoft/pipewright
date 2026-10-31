@@ -155,8 +155,11 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     approvals = deep_merge(_APPROVAL_DEFAULTS, eff.get("approvals", {}))
     for key, minimum in env.policies.items():
-        if key in _APPROVAL_DEFAULTS and minimum == "manual" and approvals.get(key) == "auto":
-            problems.append(f"approvals.{key}: auto is not allowed in {env.name} (platform policy)")
+        if key in _APPROVAL_DEFAULTS and minimum == "manual" and approvals.get(key) in ("auto", "on_register"):
+            problems.append(f"approvals.{key}: {approvals.get(key)} is not allowed in {env.name} (platform policy)")
+        if key == "deploy_model" and minimum == "ci" and approvals.get(key) != "ci":     # Pipewright 1.2 (FR-63)
+            problems.append(f"approvals.deploy_model: {env.name} deploys models only through a GitHub-approved gate "
+                            "(platform policy ci): set approvals.deploy_model: ci")
 
     # Components. A bqml use case runs Pipewright's BigQuery ML steps.
     if bqml_spec:

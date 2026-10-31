@@ -7,6 +7,8 @@ approver group) and the pipewright command a gate job runs once that environment
     retrain-approve an open retrain case, once per required approver group not yet approved (or once with none)
     loop-approve    a closed retrain loop validated in test, waiting for the production approval
     loop-advance    a running loop: no person needed, the scheduled workflow advances it (`--steps`)
+    deploy-approve  approvals.deploy_model ci (Pipewright 1.2): the default version passes its gates and is not served
+    deploy-auto     approvals.deploy_model on_register (1.2): the same, deployed by the scheduled workflow, no person
 """
 
 from __future__ import annotations
@@ -36,9 +38,11 @@ class Item:
 
 
 def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
-                launchers: dict[str, str] | None = None) -> list[Item]:
+                launchers: dict[str, str] | None = None, deploy: dict | None = None) -> list[Item]:
     """The pending decisions of one use case, from its registry versions (models.registry.Version) and its cases.
-    `launchers`: {"production": url, "test": url} where known; a loop calls both, a retrain decision production's."""
+    `launchers`: {"production": url, "test": url} where known; a loop calls both, a retrain decision production's.
+    `deploy` (Pipewright 1.2, FR-63): {"mode": ci | on_register, "served": {version ids on the endpoint},
+    "canary": bool} for a use case that deploys through the workflows."""
     launchers = launchers or {}
     own = [u for u in (launchers.get("production"),) if u]
     both = [u for u in (launchers.get("production"), launchers.get("test")) if u]
@@ -53,6 +57,15 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
                         ["model", "approve", "--env", env, "--usecase", usecase, "--version", str(v.version_id),
                          "--approve"], f"v{v.version_id} passes the gates; the default is "
                                        f"v{default.version_id if default else 'none'}"))
+    unserved = deploy and default and str(default.version_id) not in deploy.get("served", set())
+    if unserved and default.gates == "pass" and (default.labels or {}).get("approval") != "pending":
+        ci = deploy.get("mode") == "ci"
+        out.append(Item("deploy-approve" if ci else "deploy-auto", usecase, env, env if ci else None,
+                        f"v{default.version_id}",
+                        ["deploy-model", "--env", env, "--usecase", usecase, "--approve",
+                         *(["--canary"] if deploy.get("canary") and deploy.get("served") else [])],
+                        f"v{default.version_id} is the default and passes its gates; the endpoint serves "
+                        + (", ".join(f"v{s}" for s in sorted(deploy.get("served") or [])) or "nothing")))
     for c in cases:
         loop = c.get("loop") or {}
         state = loop.get("state")
@@ -104,8 +117,25 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
             versions = registry.versions(uc, env, gcp.session.credentials)
         except Exception:  # noqa: BLE001 - no model yet: nothing to approve
             versions = []
-        out += pending_for(name, env.name, versions, store.list(name), _launchers(root, env))
+        out += pending_for(name, env.name, versions, store.list(name), _launchers(root, env), _deploy(uc, env, gcp))
     return out
+
+
+def _deploy(uc, env, gcp) -> dict | None:
+    """approvals.deploy_model ci or on_register (Pipewright 1.2, FR-63): the mode, the versions the endpoint serves and
+    whether new versions start as a canary."""
+    mode = (uc.approvals or {}).get("deploy_model")
+    serving = (uc.model or {}).get("serving") or {}
+    if mode not in ("ci", "on_register") or serving.get("target", "vertex") != "vertex":
+        return None
+    from pipewright.models.deploy import find_endpoint
+
+    served: set[str] = set()
+    resource = find_endpoint(uc, env, gcp)
+    if resource:
+        r = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{resource}")
+        served = {str(d.get("modelVersionId")) for d in ((r.body or {}).get("deployedModels") or [])} if r.ok else set()
+    return {"mode": mode, "served": served, "canary": bool(serving.get("canary_percent"))}
 
 
 def _launchers(root, env) -> dict[str, str]:

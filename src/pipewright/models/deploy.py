@@ -41,10 +41,11 @@ def endpoint_name(uc: ResolvedUseCase) -> str:
 
 def check_approval(uc: ResolvedUseCase, identity: str | None, approved: bool, key: str = "deploy_model") -> None:
     mode = uc.approvals.get(key, "manual")
-    if mode == "auto":
+    if mode in ("auto", "on_register"):          # on_register (Pipewright 1.2): the decisions workflow deploys
         return
     if not approved:
-        raise ConfigError(f"approvals.{key} is manual in {uc.environment}: re-run with --approve")
+        where = " (from the pipewright-gate workflow, once its reviewers approve)" if mode == "ci" else ""
+        raise ConfigError(f"approvals.{key} is {mode} in {uc.environment}: re-run with --approve{where}")
     users = [a.split(":", 1)[1] for a in uc.approvals.get("approvers", []) if a.startswith("user:")]
     if users and identity not in users:
         raise ConfigError(f"{identity or 'this identity'} is not an approver for {uc.name} "

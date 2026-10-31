@@ -851,7 +851,7 @@
       "additionalProperties": false,
       "properties": {
         "promote_model": { "$ref": "#/$defs/approval_mode" },
-        "deploy_model": { "$ref": "#/$defs/approval_mode" },
+        "deploy_model": { "enum": ["manual", "auto", "ci", "on_register"], "description": "manual (the default): someone runs deploy-model --approve; auto: no confirmation; ci (Pipewright 1.2): a GitHub gate per new default version that passes its gates, approved by the environment's reviewers; on_register (1.2): the decisions workflow deploys such a version without a person" },
         "approvers": { "type": "array", "items": { "$ref": "#/$defs/principal" } }
       }
     },

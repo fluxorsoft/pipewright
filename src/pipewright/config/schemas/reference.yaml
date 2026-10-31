@@ -373,7 +373,7 @@ model.serving.fill_missing: The endpoint fills an empty feature (request or onli
 
 approvals: Which changes need a person.
 approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.
-approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation.
+approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation; ci (Pipewright 1.2) - `pipewright decisions pending` lists a deploy-approve item for each new default version that passes its gates and is not served, and a pipewright-gate run deploys it once the GitHub environment's reviewers approve; on_register (1.2) - the pipewright-decisions workflow deploys such a version without a person.
 approvals.approvers: Who may approve, as user:<email> or group:<email>.
 
 features_store: Reserved for a later version; leave it out.

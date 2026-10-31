@@ -90,6 +90,14 @@ jobs:
             while read -r command; do
               eval "pipewright $command" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
             done
+      # approvals.deploy_model on_register (Pipewright 1.2): a new default version that passes its gates is deployed
+      # here, without a person (deploy-model checks the gates again).
+      - name: Deploy registered models
+        run: |
+          jq -r '.[] | select(.kind == "deploy-auto") | .command | @sh' "$RUNNER_TEMP/pending.json" |
+            while read -r command; do
+              eval "pipewright $command" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            done
       - name: Request gates
         run: |
           # One gate run per decision: none while one is queued, waiting for its reviewers, or running.

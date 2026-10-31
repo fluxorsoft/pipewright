@@ -141,8 +141,10 @@
         "deploy_model": {
           "enum": [
             "manual",
-            "auto"
-          ]
+            "auto",
+            "ci"
+          ],
+          "description": "manual: use cases may not deploy without a person (auto and on_register refused); ci (Pipewright 1.2): only through a GitHub-approved gate (approvals.deploy_model ci)"
         },
         "promote_model": {
           "enum": [
