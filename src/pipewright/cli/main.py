@@ -232,6 +232,7 @@ def cmd_deploy_model(args) -> int:
     if args.promote or args.undeploy_canary:
         deploy_model.check_approval(uc, gcp.identity(), args.approve)
         (deploy_model.promote if args.promote else deploy_model.undeploy_canary)(uc, env, creds)
+        _print_how_to_call(uc, env, gcp)
         return 0
     p = deploy_model.plan(uc, env, creds)
     print(f"model {p.model} default version v{p.version} -> endpoint {p.endpoint} ({p.machine}, replicas "
@@ -245,6 +246,28 @@ def cmd_deploy_model(args) -> int:
         return 0
     deploy_model.check_approval(uc, gcp.identity(), args.approve)
     deploy_model.deploy(uc, env, creds, canary=args.canary)
+    _print_how_to_call(uc, env, gcp)
+    return 0
+
+
+def _print_how_to_call(uc, env, gcp) -> bool:
+    """Pipewright 1.2 (FR-60): the endpoint ID, predict URL, caller's role and a sample request."""
+    from pipewright.models import deploy as deploy_model
+
+    resource = deploy_model.find_endpoint(uc, env, gcp)
+    if resource:
+        print(deploy_model.how_to_call(uc, env, resource))
+    return bool(resource)
+
+
+def cmd_model_endpoint(args) -> int:
+    from pipewright.gcp import Gcp
+
+    uc, env = _one(args)
+    if uc.model["serving"]["target"] != "vertex":
+        raise ConfigError("model endpoint describes Agent Platform endpoints (model.serving.target vertex)")
+    if not _print_how_to_call(uc, env, Gcp()):
+        raise ConfigError(f"{uc.name} has no endpoint in {env.name}: run `pipewright deploy-model`")
     return 0
 
 
@@ -824,6 +847,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--instances", required=True,
                     help='JSON list of instances, or a file with one (or {"instances": ...})')
     sp.set_defaults(func=cmd_model_predict)
+    sp = msub.add_parser("endpoint", help="how to call the use case's endpoint: ID, predict URL, role, a sample "
+                                          "request (read only)")
+    one(sp)
+    sp.set_defaults(func=cmd_model_endpoint)
     sp = msub.add_parser("approve", help="make a version the default (approvals.promote_model)")
     one(sp)
     sp.add_argument("--version", required=True, help="version id, e.g. 4")

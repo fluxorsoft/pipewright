@@ -276,3 +276,52 @@ def undeploy(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
         return
     endpoints[0].undeploy_all()
     log(f"undeployed all models from {endpoint_name(uc)} (the endpoint itself costs nothing)")
+
+
+# ---------------------------------------------------------------------------------- how to call it (FR-60) --
+
+SAMPLES = {"int": 0, "integer": 0, "float": 0.0, "double": 0.0, "numeric": 0.0, "bool": False, "boolean": False,
+           "date": "2026-01-31", "timestamp": "2026-01-31T00:00:00Z"}
+
+
+def sample_instance(uc: ResolvedUseCase):
+    """One instance in the shape the model takes: its features (placeholder values by contract type), or the entity
+    ID alone when the endpoint reads its features from the online store."""
+    online = uc.ml.get("online_features")
+    if online:
+        return {online["key"]: "<entity id>"}
+    data = uc.ml.get("data") or {}
+    types = {c["name"]: str(c.get("type", "")).lower() for c in (data.get("contract") or {}).get("columns") or []}
+    features = uc.ml.get("features") or {}
+    names = features.get("include")
+    if not names:                         # every contract column but the label, exclusions and personal data
+        left_out = {(data.get("label") or {}).get("column"), (data.get("split") or {}).get("time_column"),
+                    *(features.get("exclude") or []),
+                    *((uc.ml.get("data_protection") or {}).get("personal_data_columns") or [])}
+        names = [n for n in types if n not in left_out]
+    return {f: SAMPLES.get(types.get(f, ""), "<value>") for f in names}
+
+
+def how_to_call(uc: ResolvedUseCase, env: Environment, endpoint_resource: str) -> str:
+    """Pipewright 1.2 (FR-60): the endpoint's ID, its predict URL, the role a caller needs and a sample request."""
+    import json
+
+    url = f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint_resource}:predict"
+    body = json.dumps({"instances": [sample_instance(uc)]}, indent=2)
+    return "\n".join([
+        "How to call it:",
+        f"  endpoint ID   {endpoint_resource.rsplit('/', 1)[-1]}",
+        f"  predict URL   {url}",
+        "  caller needs  aiplatform.endpoints.predict (roles/aiplatform.user) on the project, as its own identity",
+        "  request       POST, Authorization: Bearer <access token>, a JSON body like:",
+        *(f"    {line}" for line in body.splitlines()),
+        f"  try it        pipewright model predict --env {env.name} --usecase {uc.name} --instances '<json>'",
+    ])
+
+
+def find_endpoint(uc: ResolvedUseCase, env: Environment, gcp) -> str | None:
+    """The use case's endpoint resource name, or None when it does not exist."""
+    api = f"https://{env.region}-aiplatform.googleapis.com/v1/projects/{env.project}/locations/{env.region}"
+    found = gcp.get(f"{api}/endpoints", filter=f'display_name="{endpoint_name(uc)}"')
+    endpoints = (found.body or {}).get("endpoints") or [] if found.ok else []
+    return endpoints[0]["name"] if endpoints else None
