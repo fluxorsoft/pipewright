@@ -148,6 +148,7 @@ def check_environment(env: Environment, gcp: Gcp, report: Report) -> None:
         _exists(gcp, report, s, "run requests topic", f"{PUBSUB}/{launcher['run_requests_topic']}", platform,
                 lambda b: b["name"].rsplit("/", 1)[-1])
     _check_event_log(env, gcp, report, s, platform)
+    _check_registry_size(env, gcp, report, s)
     check_security(env, gcp, report)
 
 
@@ -172,6 +173,22 @@ def _check_event_log(env: Environment, gcp: Gcp, report: Report, s: str, platfor
     dataset = (env.observability or {}).get("evidence_dataset")
     report.add(s, Result(OK, "event log", f"{len(subs)} subscription(s) on {topic.rsplit('/', 1)[-1]}"
                          + (f"; kept in {dataset}.events" if dataset else "")))
+
+
+def _check_registry_size(env: Environment, gcp: Gcp, report: Report, s: str) -> None:
+    """FR-87: every release pushes images and nothing removes them; say how big the docker repository is."""
+    docker = (env.artifact_registry or {}).get("docker")
+    if not docker or docker.count("/") < 2:
+        return
+    host, project, repo = docker.split("/", 2)
+    resp = gcp.get(f"https://artifactregistry.googleapis.com/v1/projects/{project}/locations/"
+                   f"{host.removesuffix('-docker.pkg.dev')}/repositories/{repo}")
+    if not resp.ok:
+        return                                     # the image checks above already say when it cannot be read
+    size = int((resp.body or {}).get("sizeBytes") or 0)
+    report.add(s, Result(INFO, "image storage", f"{docker}: {size / 1e9:.1f} GB",
+                         f"`pipewright images prune --env {env.name}` lists images no release needs"
+                         if size > 10e9 else ""))
 
 
 def check_security(env: Environment, gcp: Gcp, report: Report) -> None:

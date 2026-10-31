@@ -732,6 +732,33 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_images_prune(args) -> int:
+    from pipewright.build import prune
+    from pipewright.gcp import Gcp
+
+    root = Path(args.root)
+    env = load_environment(root, args.env)
+    if args.keep < 1:
+        raise ConfigError("--keep: at least 1")
+    sharing = []
+    for path in sorted((root / "environments").glob("*.yaml")):
+        name = path.stem
+        if name == env.name or "." in name:
+            continue
+        try:
+            other = load_environment(root, name)
+        except ConfigError:
+            continue
+        if other.artifact_registry.get("docker") == env.artifact_registry.get("docker"):
+            sharing.append(other)
+    gcp = Gcp()
+    p = prune.plan(gcp, env, args.keep, sharing)
+    if args.apply:
+        prune.apply(gcp, env, p)
+    print(prune.render(p, args.apply))
+    return 1 if p.errors else 0
+
+
 def cmd_plugins(args) -> int:
     from pipewright import plugins
 
@@ -1025,6 +1052,15 @@ def build_parser() -> argparse.ArgumentParser:
     common(sp)
     sp.add_argument("--json", action="store_true", help="machine-readable output (stable field names)")
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("images", help="the environment's container images")
+    isub = sp.add_subparsers(dest="images_command", required=True)
+    sp = isub.add_parser("prune", help="delete images no release needs (dry run unless --apply)")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--env", required=True)
+    sp.add_argument("--keep", type=int, default=3, help="also keep the newest N images of each package (default 3)")
+    sp.add_argument("--apply", action="store_true", help="delete; without it, only list what would go")
+    sp.set_defaults(func=cmd_images_prune)
 
     sp = sub.add_parser("plugins", help="list installed command plugins")
     sp.set_defaults(func=cmd_plugins)
