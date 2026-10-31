@@ -140,7 +140,8 @@
           "required": ["command"],
           "properties": {
             "command": { "type": "string", "minLength": 1 },
-            "on_release": { "type": "boolean", "description": "pipewright release runs tests.command first and stops on a non-zero exit (default false)" }
+            "on_release": { "type": "boolean", "description": "pipewright release runs tests.command first and stops on a non-zero exit (default false)" },
+            "environment": { "enum": ["pipewright", "components"], "description": "where tests.command runs: Pipewright's own interpreter (the default) or a cached virtual environment with the components' requirements" }
           }
         },
         "outputs": {

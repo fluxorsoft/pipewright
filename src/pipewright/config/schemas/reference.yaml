@@ -338,6 +338,7 @@ synthetic.sequences.columns: The columns to learn and generate (default all). Ke
 
 tests: How `pipewright test` checks the use case's code (the CI pull-request workflow runs it), and with tests.on_release `pipewright release` too.
 tests.command: The command run in the use case folder; it must exit 0.
+tests.environment: Where tests.command runs. pipewright (the default) is Pipewright's own interpreter; components is a virtual environment built from components/requirements.txt and cached by its hash, so a test that imports a component finds numpy, pandas or torch in CI too (Pipewright 1.2).
 tests.on_release: When true, `pipewright release` runs tests.command before it builds anything and stops on a non-zero exit (default false, so the release does not run the tests; Pipewright 1.2).
 
 outputs: Where the use case's tables are written.
