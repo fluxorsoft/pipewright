@@ -76,3 +76,50 @@ def test_run_failed_may_send_an_email(repo):
     (policy,) = mon.policies.values()
     assert 'event_type="run.failed"' in str(policy) and "pipeline run failed" in str(policy)
 
+
+def test_kubeflow_runs_are_watched_too(monkeypatch):
+    """Found in 1.2 QA: the watch saw Agent Platform runs only; a private-gke environment's runs are Kubeflow runs."""
+    from pipewright.adapters.kfp import run_description
+
+    labels = {"pipewright-usecase": "churn", "run-id": "r9", "pipewright-pipeline": "training", "trigger": "api"}
+    runs = [
+        {"display_name": "churn-training-r9", "state": "FAILED", "description": run_description(labels),
+         "created_at": "2026-10-31T09:50:00Z", "finished_at": "2026-10-31T09:58:00Z",
+         "error": {"message": "1 task failed"},
+         "run_details": {"task_details": [
+             {"display_name": "root", "state": "FAILED"},
+             {"display_name": "validate-data", "state": "FAILED", "error": {"message": "data contract failed:\n x"}},
+             {"display_name": "ingest-data", "state": "SUCCEEDED"}]}},
+        {"display_name": "churn-training-r8", "state": "SUCCEEDED", "description": run_description(labels),
+         "created_at": "2026-10-31T09:00:00Z", "finished_at": "2026-10-31T09:10:00Z"},
+        {"display_name": "someone-elses", "state": "FAILED", "description": "",
+         "created_at": "2026-10-31T09:00:00Z", "finished_at": "2026-10-31T09:10:00Z"},
+    ]
+    seen = {}
+
+    class Kube:
+        def get(self, path, **params):
+            seen.update(path=path, params=params)
+            return SimpleNamespace(ok=True, status=200, body={"runs": runs})
+
+    monkeypatch.setattr("pipewright.kube.KubeClient.from_manifest", classmethod(lambda cls, m, gcp: Kube()))
+    markers = set()
+
+    def write(gcp_, bucket, name, text, if_generation_match=None):
+        if name in markers:
+            raise PreconditionFailed(name)
+        markers.add(name)
+
+    monkeypatch.setattr(watch, "gcs_write", write)
+    emitted = []
+    now = datetime(2026, 10, 31, 10, 17, tzinfo=timezone.utc)
+    manifest = {"kubernetes": {"namespace": "kubeflow"}}
+    out = watch.report(None, "b", "p", "us-central1", [SimpleNamespace(usecase="churn")],
+                       lambda c, rid, d: emitted.append((rid, d)), now, manifest=manifest)
+    again = watch.report(None, "b", "p", "us-central1", [SimpleNamespace(usecase="churn")],
+                         lambda c, rid, d: emitted.append((rid, d)), now, manifest=manifest)
+    assert len(out) == 1 and again == [] and markers == {"runs/failed/churn-training-r9"}
+    rid, detail = emitted[0]
+    assert rid == "r9" and detail["failed_steps"] == ["validate-data"] and detail["state"] == "failed"
+    assert detail["error"] == "validate-data: data contract failed:" and detail["pipeline"] == "training"
+    assert seen["path"].endswith("/namespaces/kubeflow/services/ml-pipeline:8888/proxy/apis/v2beta1/runs")

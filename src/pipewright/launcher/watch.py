@@ -4,7 +4,8 @@ error lines, which Pipewright's steps keep free of data values. `monitoring.aler
 so a data contract that stops a run, or a broken release, reaches the team without a log-based alert of its own.
 
 A marker in the artifacts bucket (runs/failed/<job>) makes each run reported once, whatever the retries and
-overlapping ticks. Agent Platform runs only: a Kubeflow run keeps its errors in its steps' logs.
+overlapping ticks. Agent Platform runs are listed in Agent Platform; Kubeflow runs (private-gke) in the cluster, through
+the same Kubernetes API proxy the launcher submits them with.
 """
 
 from __future__ import annotations
@@ -68,16 +69,58 @@ def failure(job: dict) -> dict:
             "ended": job.get("endTime")}
 
 
-def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, now: datetime | None = None) -> list:
-    """Records run.failed once for each failed run of a live use case; returns what it recorded."""
+KFP_FAILED = ("FAILED", "CANCELED")
+
+
+def kfp_failed_jobs(manifest: dict, gcp, since: datetime) -> list[dict]:
+    """Kubeflow runs (orchestrator kfp, private-gke) that ended failed or cancelled after since, in the shape
+    failure() reads (found in 1.2 QA: the watch saw Agent Platform runs only). Newest first; a run created more than a
+    day before since cannot have ended after it."""
+    from pipewright.adapters.kfp import api_path, run_labels
+    from pipewright.kube import KubeClient, message
+
+    namespace = (manifest.get("kubernetes") or {}).get("namespace") or "kubeflow"
+    kube = KubeClient.from_manifest(manifest, gcp)
+    stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
+    oldest = (since - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    jobs, token = [], None
+    while True:
+        r = kube.get(f"{api_path(namespace)}/runs", page_size=100, sort_by="created_at desc",
+                     **({"page_token": token} if token else {}))
+        if not r.ok:
+            raise RuntimeError(f"cannot list Kubeflow runs: {r.status} {message(r)}")
+        runs = (r.body or {}).get("runs") or []
+        for run in runs:
+            labels = run_labels(run.get("description"))
+            if (run.get("state") in KFP_FAILED and labels.get("pipewright-usecase")
+                    and (run.get("finished_at") or "") > stamp):
+                tasks = ((run.get("run_details") or {}).get("task_details")) or []
+                jobs.append({
+                    "name": f"kubeflow/{namespace}/runs/{run.get('display_name')}",
+                    "state": "PIPELINE_STATE_" + ("CANCELLED" if run["state"] == "CANCELED" else "FAILED"),
+                    "labels": labels, "endTime": run.get("finished_at"), "error": run.get("error") or {},
+                    "jobDetail": {"taskDetails": [{"taskName": t.get("display_name"), "state": t.get("state"),
+                                                   "error": t.get("error") or {}} for t in tasks]}})
+        token = (r.body or {}).get("next_page_token")
+        if not token or not runs or (runs[-1].get("created_at") or "") < oldest:
+            return jobs
+
+
+def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, now: datetime | None = None,
+           manifest: dict | None = None) -> list:
+    """Records run.failed once for each failed run of a live use case; returns what it recorded. With a manifest,
+    the use cases on Kubeflow (orchestrator kfp) are looked up in the cluster instead of Agent Platform."""
     now = now or datetime.now(timezone.utc)
     by_label = {_label(c.usecase): c for c in contracts}
+    kubeflow = manifest is not None
+    jobs = (kfp_failed_jobs(manifest, gcp, now - LOOKBACK) if kubeflow
+            else failed_jobs(gcp, project, region, now - LOOKBACK))
     out = []
-    for job in failed_jobs(gcp, project, region, now - LOOKBACK):
-        contract = by_label.get(job["labels"]["pipewright-usecase"])
+    for job in jobs:
+        contract = by_label.get(_label(job["labels"]["pipewright-usecase"]))
         if contract is None:
             continue
-        detail = failure(full_job(gcp, job, region))
+        detail = failure(job if kubeflow else full_job(gcp, job, region))
         try:
             gcs_write(gcp, bucket, f"{MARKERS}/{detail['job_id']}", json.dumps(detail), if_generation_match=0)
         except PreconditionFailed:

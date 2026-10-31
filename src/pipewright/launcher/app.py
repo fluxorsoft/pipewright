@@ -239,15 +239,23 @@ def create_app(registry: Registry | None = None) -> Flask:
         from pipewright.launcher import watch
 
         m, r = reg().manifest, reg()
-        live = [c for c in r.live() if c.orchestrator != "kfp"]
-        if not live or not m.get("project") or not m.get("region"):
+        if not m.get("project") or not m.get("region"):
             return []
-        try:
-            return watch.report(r.gcp, r.bucket, m["project"], m["region"], live,
-                                lambda contract, rid, detail: _event("run.failed", contract, rid, **detail))
-        except Exception as e:  # noqa: BLE001 - a failed look must not stop the tick
-            log.exception("failed runs not checked")
-            return [{"error": str(e)[:300]}]
+        out = []
+        live = r.live()
+        # Agent Platform runs, then Kubeflow runs (orchestrator kfp, private-gke), each where it runs.
+        for contracts, manifest in (([c for c in live if c.orchestrator != "kfp"], None),
+                                    ([c for c in live if c.orchestrator == "kfp"], m)):
+            if not contracts:
+                continue
+            try:
+                out += watch.report(r.gcp, r.bucket, m["project"], m["region"], contracts,
+                                    lambda contract, rid, detail: _event("run.failed", contract, rid, **detail),
+                                    manifest=manifest)
+            except Exception as e:  # noqa: BLE001 - a failed look must not stop the tick
+                log.exception("failed runs not checked")
+                out.append({"error": str(e)[:300]})
+        return out
 
     # ---------------------------------------------------------------------------------- Ray clusters --
     def rays() -> RayClusters:
