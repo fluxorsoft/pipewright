@@ -76,7 +76,9 @@ def version_labels(env: Environment, creds, resource: str) -> dict[str, dict]:
                               pageSize=100)
     except Exception:  # noqa: BLE001 - labels are a nicety for the listing
         return {}
-    return {str(m.get("versionId")): m.get("labels") or {} for m in (resp.body or {}).get("models", [])}         if resp.ok else {}
+    if not resp.ok:
+        return {}
+    return {str(m.get("versionId")): m.get("labels") or {} for m in (resp.body or {}).get("models", [])}
 
 
 def _number(version_id) -> int:
