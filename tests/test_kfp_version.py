@@ -67,3 +67,17 @@ def test_the_examples_pin_the_tested_kfp():
             for p in examples.glob("*/components/requirements.txt")}
     assert pins and all(lines == [f"kfp=={TESTED_KFP}.0"] for lines in pins.values()), pins
     assert f"kfp=={TESTED_KFP}.*" in constraints()
+
+
+def test_the_package_allows_kfp_only_up_to_the_tested_version():
+    """Found releasing 1.2.0: the package allowed any kfp 2.x, a fresh install took a newer kfp than the examples
+    pin, and validate refused every new use case. The upper bound is the next minor after TESTED_KFP."""
+    import re
+    from pathlib import Path
+
+    from pipewright.checks.kfp_version import TESTED_KFP
+
+    text = (Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+    upper = re.search(r'"kfp>=[\d.]+,<([\d.]+)"', text).group(1)
+    major, minor = TESTED_KFP.split(".")
+    assert upper == f"{major}.{int(minor) + 1}"

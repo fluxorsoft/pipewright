@@ -33,7 +33,7 @@ gcp = [
     "google-cloud-aiplatform[pipelines]>=1.70,!=2.0.0",
     "google-auth>=2.30",
     "requests>=2.31",
-    "kfp>=2.9,<3",          # compile checks; keep in step with the component images
+    "kfp>=2.9,<2.18",       # compile checks: up to the kfp tested (checks/kfp_version.TESTED_KFP); raise both together
     "pyarrow>=15",          # GCS outputs: schema seeds for external tables, erasure in Parquet files
 ]
 
