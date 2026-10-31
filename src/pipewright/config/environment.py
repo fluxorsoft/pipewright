@@ -39,6 +39,7 @@ class Environment:
     kserve: dict = field(default_factory=dict)      # private-gke serving: namespaces by tenant, mirror, exposure
     manifest_ignored: tuple = ()                  # manifest keys this version does not know (R-05): ignored
     promotion_from: str | None = None
+    promotion_release: str = "warn"               # promotion.release: warn | refuse (Pipewright 1.2, FR-80)
     manifest_source: str | None = None
     source: str = ""
 
@@ -151,6 +152,7 @@ def load_environment(root: Path, name: str) -> Environment:
         schedules=manifest.get("schedules") or {}, kserve=manifest.get("kserve") or {},
         manifest_ignored=tuple(ignored),
         promotion_from=spec.get("promotion", {}).get("from"),
+        promotion_release=spec.get("promotion", {}).get("release") or "warn",
         manifest_source=manifest_source,
         source=str(path),
     )

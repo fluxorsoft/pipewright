@@ -5,8 +5,14 @@
     .github/workflows/pipewright-pr.yml           pull requests: validate, test, doctor, dry runs
     .github/workflows/pipewright-release.yml      merge to main: release changed use cases, env by env
     .github/workflows/pipewright-operate.yml      by hand: run, status, rollback, approve, deploy, canary
-    .github/workflows/pipewright-decisions.yml    every 15 minutes: pending decisions; advances retrain loops
+    .github/workflows/pipewright-decisions.yml    on a schedule: pending decisions; advances retrain loops
     .github/workflows/pipewright-gate.yml         one decision, approved by its GitHub environment's reviewers
+    .github/workflows/pipewright-promote.yml      by hand: promote to an environment with promotion.from (1.2)
+
+Environments with promotion.from (Pipewright 1.2, FR-80) get no release job: their releases come from the source
+environment through pipewright-promote, in the destination's GitHub environment, and the operate workflow has a
+promote action. The decisions workflow runs hourly in working hours (UTC) by default; --decisions-cron changes it
+(every 15 minutes uses up a private repository's free Actions minutes).
 
 Each environment is a GitHub environment with the variables PIPEWRIGHT_PIP_SPEC and, with Workload Identity
 Federation, GCP_WIF_PROVIDER and PIPEWRIGHT_SERVICE_ACCOUNT (optional: PIPEWRIGHT_PIP_INDEX,
@@ -38,6 +44,11 @@ FILES = {
     "pipewright-decisions.yml": ".github/workflows/pipewright-decisions.yml",
     "pipewright-gate.yml": ".github/workflows/pipewright-gate.yml",
 }
+PROMOTE_FILE = ".github/workflows/pipewright-promote.yml"   # only with an environment that has promotion.from
+
+# Hourly in working hours (UTC, Monday to Friday): every 15 minutes, as in 1.1, uses up a private repository's free
+# Actions minutes (Pipewright 1.2, FR-80).
+DECISIONS_CRON = "17 7-18 * * 1-5"
 
 RELEASE_JOB = """  release-@@ENV@@:
     needs: [@@NEEDS@@]
@@ -88,23 +99,50 @@ def runs_on(labels: list[str] | None) -> str:
     return "[" + ", ".join(labels) + "]"
 
 
-def render(environments: list[str], labels: list[str] | None = None) -> dict[str, str]:
-    """{relative path: content}. Environments are in promotion order (first: where PRs are checked)."""
+def _cron(value: str) -> str:
+    if not re.fullmatch(r"[0-9*/,-]+( [0-9*/,-]+){4}", value or ""):
+        raise ConfigError(f"--decisions-cron: five cron fields, e.g. {DECISIONS_CRON!r}, not {value!r}")
+    return value
+
+
+def render(environments: list[str], labels: list[str] | None = None, promotions: dict[str, str] | None = None,
+           decisions_cron: str = DECISIONS_CRON) -> dict[str, str]:
+    """{relative path: content}. Environments are in promotion order (first: where PRs are checked); promotions
+    maps an environment to its promotion.from: it gets the promote workflow instead of a release job."""
     if not environments:
         raise ConfigError("give at least one environment, e.g. --environments dev,prod")
     bad = [e for e in environments if not NAME.match(e)]
     if bad or len(set(environments)) != len(environments):
         raise ConfigError(f"environment names must be unique, lowercase letters, digits and hyphens: {environments}")
+    promotions = {e: s for e, s in (promotions or {}).items() if e in environments}
+    if environments[0] in promotions:
+        raise ConfigError(f"{environments[0]} is where pull requests are checked and releases start: it cannot have "
+                          f"promotion.from ({promotions[environments[0]]})")
     jobs, previous = [], "changes"
     for env in environments:
+        if env in promotions:
+            continue
         jobs.append(RELEASE_JOB.replace("@@ENV@@", env).replace("@@NEEDS@@", previous if previous == "changes"
                                                                       else f"changes, {previous}"))
         previous = f"release-{env}"
+    released = [e for e in environments if e not in promotions]
+    promote_cases = "\n".join(f"            {e}) SOURCE={s} ;;" for e, s in promotions.items())
     values = {"@@FIRST_ENV@@": environments[0], "@@ENV_CHOICES@@": ", ".join(environments),
-              "@@ENV_ORDER@@": " -> ".join(environments), "@@RELEASE_JOBS@@": "\n".join(jobs).rstrip(),
-              "@@RUNS_ON@@": runs_on(labels)}
+              "@@ENV_ORDER@@": " -> ".join(released), "@@RELEASE_JOBS@@": "\n".join(jobs).rstrip(),
+              "@@RUNS_ON@@": runs_on(labels), "@@DECISIONS_CRON@@": _cron(decisions_cron),
+              "@@PROMOTED_CHOICES@@": ", ".join(promotions),
+              "@@PROMOTIONS@@": ", ".join(f"{s} -> {e}" for e, s in promotions.items()),
+              "@@PROMOTE_CASES@@": promote_cases,
+              "@@PROMOTE_ACTION@@": "\n          - promote" if promotions else "",
+              "@@PROMOTE_OPERATE@@": (
+                  "            promote)         case \"$ENV\" in "
+                  + " ".join(f"{e}) SOURCE={s} ;;" for e, s in promotions.items())
+                  + " *) echo \"$ENV has no promotion.from\"; exit 1 ;; esac\n"
+                  "                             p promote --from \"$SOURCE\" --to \"$ENV\" --usecase \"$UC\" "
+                  "${VERSION:+--release \"$VERSION\"} ;;\n") if promotions else ""}
     out = {}
-    for name, path in FILES.items():
+    files = {**FILES, **({"pipewright-promote.yml": PROMOTE_FILE} if promotions else {})}
+    for name, path in files.items():
         text = _template(name)
         for key, value in values.items():
             text = text.replace(key, value)
@@ -120,14 +158,28 @@ def render(environments: list[str], labels: list[str] | None = None) -> dict[str
     return out
 
 
-def init(root: Path, environments: list[str], force: bool = False, labels: list[str] | None = None) -> list[Path]:
+def promotions(root: Path, environments: list[str]) -> dict[str, str]:
+    """{environment: promotion.from} from environments/<env>.yaml."""
+    import yaml
+
+    out = {}
+    for e in environments:
+        spec = (yaml.safe_load((Path(root) / "environments" / f"{e}.yaml").read_text(encoding="utf-8")) or {})
+        source = ((spec.get("spec") or {}).get("promotion") or {}).get("from")
+        if source:
+            out[e] = source
+    return out
+
+
+def init(root: Path, environments: list[str], force: bool = False, labels: list[str] | None = None,
+         decisions_cron: str = DECISIONS_CRON) -> list[Path]:
     root = Path(root)
     if not (root / "usecases").is_dir() and not (root / "environments").is_dir():
         raise ConfigError(f"{root} does not look like an MLOps repo (no usecases/ or environments/)")
     missing = [e for e in environments if not (root / "environments" / f"{e}.yaml").is_file()]
     if missing:
         raise ConfigError(f"no environments/{{name}}.yaml for: {', '.join(missing)}")
-    files = render(environments, labels)
+    files = render(environments, labels, promotions(root, environments), decisions_cron)
     existing = [p for p in files if (root / p).exists()]
     if existing and not force:
         raise ConfigError(f"already present (use --force to replace): {', '.join(existing)}")

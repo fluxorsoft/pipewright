@@ -30,7 +30,7 @@ on:
           - promote-canary
           - undeploy-canary
           - undeploy-model
-          - predict
+          - predict@@PROMOTE_ACTION@@
       pipeline:
         description: "run: training or inference"
         type: choice
@@ -41,7 +41,7 @@ on:
         type: string
         default: ""
       version:
-        description: "model-approve: version number; rollback: release id (empty: previous)"
+        description: "model-approve: version number; rollback and promote: release id (empty: previous; promote: the live one)"
         type: string
         default: ""
       instances:
@@ -76,6 +76,8 @@ jobs:
       INSTANCES: ${{ inputs.instances }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # promote checks out the release's own commit
       - uses: ./.github/actions/pipewright-setup
         with:
           wif_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -119,5 +121,5 @@ jobs:
             promote-canary)  p deploy-model --env "$ENV" --usecase "$UC" --promote --approve ;;
             undeploy-canary) p deploy-model --env "$ENV" --usecase "$UC" --undeploy-canary --approve ;;
             undeploy-model)  p deploy-model --env "$ENV" --usecase "$UC" --undeploy ;;
-            predict)         p model predict --env "$ENV" --usecase "$UC" --instances "$INSTANCES" ;;
+@@PROMOTE_OPERATE@@            predict)         p model predict --env "$ENV" --usecase "$UC" --instances "$INSTANCES" ;;
           esac

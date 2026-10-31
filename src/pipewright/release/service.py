@@ -101,6 +101,12 @@ def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp,
 
 def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, component_image: str | None = None,
             skip_tables: bool = False, build_dir: Path | None = None, log=print) -> ReleaseResult:
+    if env.promotion_from:                  # Pipewright 1.2 (FR-80): this environment's releases come from another
+        how = (f"{env.name}'s releases come from {env.promotion_from} (promotion.from): `pipewright promote --from "
+               f"{env.promotion_from} --to {env.name} --usecase {uc.name}` brings the tested release")
+        if env.promotion_release == "refuse":
+            raise ConfigError(f"{how}; promotion.release: refuse stops a release built here")
+        log(f"WARN  {how}; this release is built here instead")
     gcp = gcp or Gcp()
     who = gcp.identity()
     release_id, commit = release_id_for(uc.directory)

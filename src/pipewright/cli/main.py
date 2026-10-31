@@ -591,9 +591,13 @@ def cmd_ci_init(args) -> int:
     from pipewright.scaffold import ci
 
     labels = args.runs_on.split(",") if args.runs_on else None
-    for path in ci.init(Path(args.root), [e.strip() for e in args.environments.split(",") if e.strip()], args.force,
-                        labels):
+    environments = [e.strip() for e in args.environments.split(",") if e.strip()]
+    cron = args.decisions_cron or ci.DECISIONS_CRON
+    for path in ci.init(Path(args.root), environments, args.force, labels, cron):
         print(f"wrote {path}")
+    for env, source in ci.promotions(Path(args.root), environments).items():
+        print(f"{env}: no release job (promotion.from {source}); pipewright-promote brings {source}'s releases")
+    print(f"decisions: pipewright-decisions runs on cron {cron!r} (UTC)")
     print("next: in GitHub, create an environment per name with PIPEWRIGHT_PIP_SPEC (and GCP_WIF_PROVIDER + "
           "PIPEWRIGHT_SERVICE_ACCOUNT unless the runners use their own identity); add required reviewers to production")
     return 0
@@ -943,6 +947,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--environments", required=True, help="promotion order, comma separated, e.g. dev,prod")
     sp.add_argument("--force", action="store_true", help="replace existing workflow files")
     sp.add_argument("--runs-on", help="self-hosted runner labels, comma separated (default: ubuntu-latest)")
+    sp.add_argument("--decisions-cron", default=None,
+                    help="when pipewright-decisions runs, five cron fields in UTC (default: hourly, 07:17 to 18:17, "
+                         "Monday to Friday; '*/15 * * * *' was 1.1's)")
     sp.set_defaults(func=cmd_ci_init)
 
     sp = sub.add_parser("test", help="run each use case's tests.command")
@@ -984,6 +991,12 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    finally:
+        from pipewright.observability import events
+
+        if lost := events.lost_summary():          # Pipewright 1.2 (FR-80): a lost event is said, not only logged
+            print(lost)
+            events.LOST.clear()
 
 
 if __name__ == "__main__":

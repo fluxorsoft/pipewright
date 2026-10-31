@@ -23,6 +23,16 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("pipewright.events")
 
+# Events this process could not publish (Pipewright 1.2, FR-80): the CLI ends with a warning naming them, since a
+# command still succeeds when its event never reaches the event log.
+LOST: list[tuple[str, str]] = []
+MAX_LOST = 20                      # the launcher runs for days: keep the first few, never a growing list
+
+
+def _lost(event_type: str, why: str) -> None:
+    if len(LOST) < MAX_LOST:
+        LOST.append((event_type, why))
+
 
 # Human decisions (FR-56, D-121, D-122): each records how it was approved next to the identity that acted.
 DECISIONS = ("model.approved", "model.deployed", "model.promoted", "release.promoted", "release.rolled_back",
@@ -89,7 +99,19 @@ def emit(e: dict, topic: str | None = None, gcp=None, stream=None, region: str |
         r = gcp.post(publish_url(topic, region), {"messages": [message]})
         if not r.ok:
             log.warning("event %s not published to %s: %s", e["event_type"], topic, r.status)
+            _lost(e["event_type"], f"HTTP {r.status}")
         return r.ok
     except Exception as ex:  # noqa: BLE001 - events must never break a release or a launch
         log.warning("event %s not published: %s", e["event_type"], ex)
+        _lost(e["event_type"], str(ex)[:120])
         return False
+
+
+def lost_summary() -> str | None:
+    """One warning line for the events this process could not publish, or None."""
+    if not LOST:
+        return None
+    what = ", ".join(f"{t} ({why})" for t, why in LOST)
+    hint = ("; the identity needs roles/pubsub.publisher on the events topic"
+            if any("403" in why for _, why in LOST) else "")
+    return f"WARN  {len(LOST)} event(s) did not reach the event log: {what}{hint}"
