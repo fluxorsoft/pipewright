@@ -23,6 +23,7 @@ class CheckResult:
     problems: list[str]
     measured_by: str | None = None          # the challenger version whose evaluation measured this one
     filled: list[str] = field(default_factory=list)
+    worst_series: tuple | None = None       # a forecast's worst series: (series, metric, value) (FR-69)
 
 
 def merged(own: dict, challenger: dict | None) -> tuple[dict, list[str]]:
@@ -55,13 +56,22 @@ def check(uc: ResolvedUseCase, env: Environment, creds, version: str) -> CheckRe
             challenger, by = rec, v.version_id
             break
     record, filled = merged(own, challenger)
-    return CheckResult(str(version), gates.check(record, uc.ml["evaluation"]), by if filled else None, filled)
+    evaluation = uc.ml["evaluation"]
+    metric = next((g["metric"] for g in evaluation.get("gates") or [] if g.get("per_series")),
+                  evaluation.get("primary_metric"))
+    worst = gates.worst_series(record, metric, metric in set(evaluation.get("lower_is_better") or ["mae", "rmse",
+                                                                                                   "mape"]))
+    return CheckResult(str(version), gates.check(record, evaluation), by if filled else None, filled,
+                       (worst[0], metric, worst[1]) if worst else None)
 
 
 def render(uc: ResolvedUseCase, result: CheckResult) -> str:
     head = f"{uc.model['name']} v{result.version} ({uc.environment}) against today's gates: " + (
         "PASS" if not result.problems else f"FAIL ({len(result.problems)})")
     lines = [head, *(f"  FAIL  {p}" for p in result.problems)]
+    if result.worst_series:
+        name, metric, value = result.worst_series
+        lines.append(f"  worst series  {name}: {metric} {value:.4f}")
     if result.filled:
         lines.append(f"  note  {' and '.join(result.filled)} measured on v{result.measured_by}'s test rows, where "
                      f"v{result.version} was the champion")

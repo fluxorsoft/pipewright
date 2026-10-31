@@ -454,7 +454,8 @@
       "properties": {
         "metric": { "type": "string" },
         "min": { "type": "number" },
-        "max": { "type": "number" }
+        "max": { "type": "number" },
+        "per_series": { "type": "boolean", "description": "forecasts: every series (bqml.forecast.id_columns) must pass, not only the overall value (Pipewright 1.2)" }
       }
     },
     "evaluation": {

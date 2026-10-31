@@ -42,3 +42,28 @@ def test_own_measures_win():
     own = {"metrics": {"auc": 0.8}, "slices": {"x": {}}}
     record, filled = check.merged(own, CHALLENGER)
     assert record["slices"] == {"x": {}} and filled == []
+
+
+def test_a_forecast_gate_per_series_names_the_series(monkeypatch):
+    from pipewright.models import gates
+
+    evaluation = {"primary_metric": "mape", "lower_is_better": ["mape"], "champion": {"enabled": False},
+                  "gates": [{"metric": "mape", "max": 0.6, "per_series": True}], "slice_gates": []}
+    record = {"metrics": {"mape": 0.31},
+              "per_series": {"sku-1": {"rows": 7, "mape": 0.2}, "sku-7": {"rows": 7, "mape": 0.84}}}
+    assert gates.check(record, evaluation) == ["gate mape per series: sku-7 0.8400 is above the maximum 0.6"]
+    assert gates.check({"metrics": {"mape": 0.3}}, evaluation) == [
+        "gate mape per series: the evaluation record has no per-series metrics"]
+    assert gates.worst_series(record, "mape") == ("sku-7", 0.84)
+    uc = fake(monkeypatch, {"3": record})
+    uc.ml["evaluation"] = evaluation
+    text = check.render(uc, check.check(uc, None, None, "3"))
+    assert "worst series  sku-7: mape 0.8400" in text
+
+
+def test_per_series_is_for_forecasts(repo):
+    from tests.test_config_ml import ml_repo, problems
+
+    ml_repo(repo)
+    repo.usecase["spec"].setdefault("evaluation", {})["gates"] = [{"metric": "auc", "min": 0.7, "per_series": True}]
+    assert "per_series is for forecasts" in problems(repo)

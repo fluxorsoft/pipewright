@@ -196,6 +196,8 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
             problems.append(f"evaluation.gates: {g['metric']!r} {of}")
         if "min" not in g and "max" not in g:
             problems.append(f"evaluation.gates: {g['metric']} needs min or max")
+        if g.get("per_series") and task != "forecast":
+            problems.append(f"evaluation.gates: {g['metric']} per_series is for forecasts (data.label.task forecast)")
     for g in evaluation["slice_gates"]:
         if task != "binary" and g["metric"] not in metrics_known:
             problems.append(f"evaluation.slice_gates: {g['metric']!r} {of}")

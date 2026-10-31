@@ -163,6 +163,7 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
               "model": {"bigquery_model": model or None, "model_type": section["model_type"],
                         "options": section["options"], **({"forecast": forecast} if forecast else {})},
               **({"horizon_evaluated": result["horizon"]} if forecast else {}),
+              **({"per_series": result["per_series"]} if result.get("per_series") else {}),
               "sql": {k: section[k]["sha256"] for k in ("transform", "prepare") if section.get(k)},
               **({"per_class": result["per_class"]} if "per_class" in result else {}),
               **({"confusion": result["_confusion"]} if "_confusion" in result else {})}

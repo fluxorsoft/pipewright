@@ -446,6 +446,12 @@ def evaluate_forecast(jobs: Jobs, ml_config: dict, settings: dict, model: str, r
     if not result["rows"]:
         raise ValueError("the forecast matched none of the held-out rows: is data.split.time_column a regular series "
                          "(one row per series and time point)?")
+    ids = settings.get("id_columns") or []
+    if ids:                    # each series' metrics (Pipewright 1.2, FR-69): the one that fails is named
+        names = ml_config["evaluation"]["metrics"]
+        result["per_series"] = {str(r["_pw_group"]): {"rows": int(r["row_count"]), **shape_metrics(r, names)}
+                                for r in jobs.run(metrics_sql(ml_config, out_table, group_sql=series_key(ids)),
+                                                  "metrics per series")}
     return {**result, "horizon": steps}
 
 
@@ -460,13 +466,18 @@ def version_record(project: str, ml_config: dict, version: str, session=None) ->
 
 # --------------------------------------------------------------------- metrics --
 
-def metrics_sql(ml_config: dict, predictions: str, group: str | None = None) -> str:
+def series_key(columns: list[str]) -> str:
+    """One STRING per series: its id columns' values joined with '|'."""
+    return "CONCAT(" + ", '|', ".join(f"IFNULL(CAST({q(c)} AS STRING), '')" for c in columns) + ")"
+
+
+def metrics_sql(ml_config: dict, predictions: str, group: str | None = None, group_sql: str | None = None) -> str:
     data = ml_config["data"]
     task = data["label"].get("task", "binary")
     task = "regression" if task == "forecast" else task       # a forecast is measured as regression is
     threshold = float(ml_config["evaluation"].get("decision_threshold") or 0.5)
     return render(f"metrics_{task}.sql", predictions=predictions, label=ident(data["label"]["column"]),
-                  group=f"CAST({q(group)} AS STRING)" if group else "'overall'",
+                  group=group_sql or (f"CAST({q(group)} AS STRING)" if group else "'overall'"),
                   positive=str(data["label"].get("positive", 1)), threshold=threshold)
 
 

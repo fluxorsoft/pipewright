@@ -45,7 +45,7 @@ def test_explain_a_key():
     assert reference.explain("spec.training.tuning.max_trials").per_environment
     assert reference.explain("steps.train-model.cpu").type == "number or string"   # any step name
     gates = reference.explain("evaluation.gates")
-    assert gates.type == "list of mappings" and [n for n, _ in gates.children] == ["metric", "min", "max"]
+    assert gates.type == "list of mappings" and [n for n, _ in gates.children] == ["metric", "min", "max", "per_series"]
     assert "(default 7)" in dict(reference.explain("retraining").children)["cooldown_days"]
     with pytest.raises(ConfigError, match="did you mean data.split.strategy"):
         reference.explain("data.splt.strategy")

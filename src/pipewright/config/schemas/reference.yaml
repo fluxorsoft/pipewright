@@ -157,6 +157,7 @@ evaluation.gates: Minimums and maximums a model must meet. A model that fails on
 evaluation.gates.metric: The metric the gate checks.
 evaluation.gates.min: The lowest value allowed.
 evaluation.gates.max: The highest value allowed.
+evaluation.gates.per_series: For a forecast, every series (bqml.forecast.id_columns) must pass the gate, not only the overall value; the evaluation record holds each series' metrics and `pipewright model list` shows the worst (Pipewright 1.2).
 evaluation.champion: Comparison with the current champion on the same test data.
 evaluation.champion.enabled: Whether a new model must beat the champion.
 evaluation.champion.metric: The metric compared. Left out, evaluation.primary_metric.

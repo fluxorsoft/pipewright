@@ -50,6 +50,8 @@ def check(record: dict, evaluation: dict, champion_expected: bool = False) -> li
             problems.append(f"gate {m}: {_fmt(value)} is below the minimum {gate['min']}")
         if "max" in gate and value > gate["max"]:
             problems.append(f"gate {m}: {_fmt(value)} is above the maximum {gate['max']}")
+        if gate.get("per_series"):           # Pipewright 1.2 (FR-69): every series of a forecast
+            problems += _series_problems(record, gate)
 
     slices = record.get("slices") or {}
     for sg in evaluation.get("slice_gates") or []:
@@ -92,6 +94,30 @@ def check(record: dict, evaluation: dict, champion_expected: bool = False) -> li
                     problems.append(f"champion: {m} {_fmt(new)} does not beat the champion's {_fmt(old)} by "
                                     f"{margin} (champion version {champion.get('_version', '?')})")
     return problems
+
+
+def _series_problems(record: dict, gate: dict) -> list[str]:
+    m, series = gate["metric"], record.get("per_series")
+    if not series:
+        return [f"gate {m} per series: the evaluation record has no per-series metrics"]
+    out = []
+    for name, entry in sorted(series.items()):
+        v = (entry or {}).get(m)
+        if v is None:
+            continue
+        if "min" in gate and v < gate["min"]:
+            out.append(f"gate {m} per series: {name} {_fmt(v)} is below the minimum {gate['min']}")
+        if "max" in gate and v > gate["max"]:
+            out.append(f"gate {m} per series: {name} {_fmt(v)} is above the maximum {gate['max']}")
+    return out
+
+
+def worst_series(record: dict, metric: str, lower_is_better: bool = True) -> tuple[str, float] | None:
+    """The series with the worst value of metric in a forecast's record, or None without per-series metrics."""
+    values = [(k, v[metric]) for k, v in (record.get("per_series") or {}).items() if (v or {}).get(metric) is not None]
+    if not values:
+        return None
+    return (max if lower_is_better else min)(values, key=lambda kv: kv[1])
 
 
 def read_record(gcp, artifact_uri: str | None) -> dict | None:
