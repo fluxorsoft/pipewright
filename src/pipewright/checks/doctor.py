@@ -147,7 +147,31 @@ def check_environment(env: Environment, gcp: Gcp, report: Report) -> None:
     if launcher.get("run_requests_topic"):
         _exists(gcp, report, s, "run requests topic", f"{PUBSUB}/{launcher['run_requests_topic']}", platform,
                 lambda b: b["name"].rsplit("/", 1)[-1])
+    _check_event_log(env, gcp, report, s, platform)
     check_security(env, gcp, report)
+
+
+def _check_event_log(env: Environment, gcp: Gcp, report: Report, s: str, platform: str) -> None:
+    """FR-84: Pub/Sub discards what nobody subscribes to, so an events topic without a subscription keeps no
+    record of any decision (promotions, approvals, deployments, rollbacks, retrain decisions)."""
+    topic = (env.observability or {}).get("events_topic")
+    if not topic:
+        return
+    resp = gcp.get(f"{PUBSUB}/{topic}/subscriptions")
+    if not resp.ok:
+        report.add(s, Result(WARN, "event log", f"cannot list the events topic's subscriptions: {error_text(resp)}",
+                             "needs pubsub.topics.listSubscriptions (roles/pubsub.viewer)"))
+        return
+    subs = (resp.body or {}).get("subscriptions") or []
+    if not subs:
+        report.add(s, Result(FAIL, "event log", f"nothing subscribes to {topic.rsplit('/', 1)[-1]}: every lifecycle "
+                             "event, every decision included, is discarded",
+                             "keep them in BigQuery (the starter's and Enterprise's evidence dataset, manifest "
+                             "observability.evidence_dataset)" + f"; {platform}"))
+        return
+    dataset = (env.observability or {}).get("evidence_dataset")
+    report.add(s, Result(OK, "event log", f"{len(subs)} subscription(s) on {topic.rsplit('/', 1)[-1]}"
+                         + (f"; kept in {dataset}.events" if dataset else "")))
 
 
 def check_security(env: Environment, gcp: Gcp, report: Report) -> None:

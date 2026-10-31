@@ -199,7 +199,11 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
     for c in checks:
         log(f"  verified: {c}")
 
-    moved = pointer.moved_to(release_id, name, who) if pointer else new_pointer(uc.name, release_id, name, who)
+    from pipewright.observability.events import approval
+
+    how = approval()                                  # FR-84: the person behind a CI identity, on the pointer
+    moved = (pointer.moved_to(release_id, name, who, how) if pointer
+             else new_pointer(uc.name, release_id, name, who, how))
     try:
         gcs_write(gcp, env.artifacts_bucket, pointer_name(uc.name), moved.to_json(), if_generation_match=generation)
     except PreconditionFailed:
@@ -230,7 +234,9 @@ def rollback(usecase: str, env: Environment, gcp: Gcp | None = None, to: str | N
     contract.validate()
     verify(contract, gcp, gcp.session.credentials)
 
-    moved = pointer.moved_to(target["release_id"], target["contract"], gcp.identity())
+    from pipewright.observability.events import approval
+
+    moved = pointer.moved_to(target["release_id"], target["contract"], gcp.identity(), approval())
     moved.history = [h for h in moved.history if h["release_id"] != target["release_id"]] or moved.history
     try:
         gcs_write(gcp, env.artifacts_bucket, pointer_name(usecase), moved.to_json(), if_generation_match=generation)

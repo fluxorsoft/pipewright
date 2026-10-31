@@ -548,7 +548,8 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     checks = verify(contract, gcp, gcp.session.credentials)
 
     # 8. The pointer, last.
-    moved = pointer.moved_to(rid, name, who) if pointer else new_pointer(uc_dst.name, rid, name, who)
+    how = events.approval()                           # FR-84: the person behind a CI identity, on the pointer
+    moved = pointer.moved_to(rid, name, who, how) if pointer else new_pointer(uc_dst.name, rid, name, who, how)
     try:
         gcs_write(gcp, dst_env.artifacts_bucket, pointer_name(uc_dst.name), moved.to_json(),
                   if_generation_match=generation)

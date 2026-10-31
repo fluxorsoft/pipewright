@@ -67,6 +67,7 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
         out["lineage"] = None
         out["note"] = ("no lineage.json: trained before Pipewright 1.1, or by a register step that does not write "
                        "one (see the example's register.py)")
+        out.update(decisions(gcp, env, uc.name, str(version), labels.get("release")))
         return out
     out["lineage"] = record
     release_id = record.get("release")
@@ -88,7 +89,59 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
         out["snapshot"] = {**snapshot, **_rows(gcp, env, snapshot["table"], snapshot["run_id"])}
     if rows.get("table"):
         out["rows_table"] = {"table": rows["table"], **_rows(gcp, env, rows["table"], None)}
+    out.update(decisions(gcp, env, uc.name, str(version), (out.get("release") or {}).get("release_id")
+                         or labels.get("release")))
     return out
+
+
+# Decisions about a version (Pipewright 1.2, FR-84): who approved, promoted, deployed or rolled it back, and how each
+# was approved, from the environment's event log (manifest observability.evidence_dataset, table `events`).
+VERSION_EVENTS = ("model.approved", "model.deployed", "model.undeployed")
+RELEASE_EVENTS = ("release.live", "release.promoted", "release.rolled_back")
+
+
+def decisions(gcp, env: Environment, usecase: str, version: str, release: str | None) -> dict:
+    dataset = (env.observability or {}).get("evidence_dataset")
+    if not dataset:
+        return {"decisions_note": "no event log in this environment (manifest observability.evidence_dataset): who "
+                                  "approved, promoted or deployed this version was not kept"}
+    from pipewright.gcp.bigquery import query, rows
+
+    def p(name, value):
+        return {"name": name, "parameterType": {"type": "STRING"}, "parameterValue": {"value": value or ""}}
+
+    sql = (f"SELECT CAST(publish_time AS STRING) AS at, TO_JSON_STRING(data) AS event "
+           f"FROM `{env.project}.{dataset}.events` "
+           "WHERE JSON_VALUE(data, '$.usecase') = @usecase AND JSON_VALUE(data, '$.environment') = @env AND ("
+           f"(JSON_VALUE(data, '$.event_type') IN UNNEST({list(VERSION_EVENTS)}) "
+           "AND JSON_VALUE(data, '$.data.version') = @version) OR "
+           f"(JSON_VALUE(data, '$.event_type') IN UNNEST({list(RELEASE_EVENTS)}) AND JSON_VALUE(data, '$.release') = "
+           "@release)) ORDER BY publish_time LIMIT 100")
+    try:
+        found = rows(query(gcp, env.project, sql, [p("usecase", usecase), p("env", env.name), p("version", version),
+                                                   p("release", release)],
+                           kms_key=env.security.get("bigquery_kms_key")))
+    except Exception as e:  # noqa: BLE001 - no access, or the table is not there: say so
+        return {"decisions_note": f"cannot read the event log {dataset}.events: {str(e).splitlines()[0][:160]}"}
+    out = []
+    for row in found:
+        event = json.loads(row["event"] or "{}")
+        data = event.get("data") or {}
+        out.append({"at": (row["at"] or "")[:19], "event": event.get("event_type"), "by": data.get("by"),
+                    "approval": data.get("approval"), "version": data.get("version"),
+                    "release": event.get("release"), "endpoint": data.get("endpoint"),
+                    "traffic_percent": data.get("traffic_percent")})
+    return {"decisions": out}
+
+
+def _how(approval: dict | None) -> str:
+    if not approval:
+        return ""
+    if approval.get("via") == "github":
+        who = ", ".join(r.get("login", r) if isinstance(r, dict) else str(r) for r in approval.get("reviewers") or [])
+        return (f"GitHub {approval.get('actor') or ''}" + (f", reviewed by {who}" if who else "")
+                + (f", {approval['run_url']}" if approval.get("run_url") else ""))
+    return "outside CI" if approval.get("via") == "outside-ci" else str(approval.get("via") or "")
 
 
 def render(info: dict) -> str:
@@ -101,6 +154,7 @@ def render(info: dict) -> str:
     record = info.get("lineage")
     if not record:
         lines.append(f"  {info.get('note')}")
+        _render_decisions(info, lines)
         return "\n".join(lines)
     lines.append(f"  run      {record.get('run_id')}  (recorded {record.get('recorded_at')})")
     release = info.get("release") or {"release_id": record.get("release")}
@@ -138,4 +192,20 @@ def render(info: dict) -> str:
     lines.append(f"  eval     {ev.get('decision')}: {ev.get('primary_metric')} {ev.get('value')}"
                  + (f" vs champion v{ev['champion'].get('version')} {ev['champion'].get('value')}"
                     if ev.get("champion") else "") + f"  ({ev.get('record')})")
+    _render_decisions(info, lines)
     return "\n".join(lines)
+
+
+def _render_decisions(info: dict, lines: list[str]) -> None:
+    if info.get("decisions_note"):
+        lines.append(f"  decided  {info['decisions_note']}")
+    for i, d in enumerate(info.get("decisions") or []):
+        what = {"model.approved": f"v{d.get('version')} made the champion",
+                "model.deployed": f"v{d.get('version')} deployed to {d.get('endpoint')} "
+                                  f"({d.get('traffic_percent')}% of traffic)",
+                "model.undeployed": f"v{d.get('version')} undeployed", "release.live": f"release {d.get('release')} live",
+                "release.promoted": f"release {d.get('release')} promoted here",
+                "release.rolled_back": f"rolled back to release {d.get('release')}"}.get(d["event"], d["event"])
+        how = _how(d.get("approval"))
+        lines.append(f"  {'decided' if i == 0 else '       '}  {d['at']}  {what}, by {d.get('by') or '?'}"
+                     + (f" ({how})" if how else ""))

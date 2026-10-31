@@ -659,8 +659,10 @@ def cmd_status(args) -> int:
         if pointer is None:
             print(f"{name} ({env.name}): never released")
             continue
+        how = pointer.approval or {}
         print(f"{name} ({env.name}): live {pointer.release_id} since {pointer.updated_at}"
-              + (f" by {pointer.updated_by}" if pointer.updated_by else ""))
+              + (f" by {pointer.updated_by}" if pointer.updated_by else "")
+              + (f" (GitHub {how.get('actor')}, {how.get('run_url')})" if how.get("via") == "github" else ""))
         contract = release.read_contract(gcp, env, pointer.contract)
         print(f"    contract v{contract.contract_version}, pipelines: {', '.join(contract.pipeline_names)}")
         for h in pointer.history[:5]:

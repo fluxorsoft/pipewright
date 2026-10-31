@@ -198,6 +198,9 @@ class Pointer:
     updated_at: str
     updated_by: str | None = None
     history: list[dict] = field(default_factory=list)   # newest first: {release_id, contract, updated_at}
+    # How the move was approved (Pipewright 1.2, FR-84): {"via": "github", "actor", "run_url", ...} in CI, so the
+    # person behind a CI identity is on the record; {"via": "outside-ci"} otherwise. Older readers ignore it.
+    approval: dict | None = None
 
     @classmethod
     def from_json(cls, text: str) -> Pointer:
@@ -207,10 +210,14 @@ class Pointer:
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
 
-    def moved_to(self, release_id: str, contract: str, by: str | None) -> Pointer:
-        entry = {"release_id": self.release_id, "contract": self.contract, "updated_at": self.updated_at}
-        return Pointer(self.usecase, release_id, contract, now(), by, ([entry] + self.history)[:POINTER_HISTORY])
+    def moved_to(self, release_id: str, contract: str, by: str | None, approval: dict | None = None) -> Pointer:
+        entry = {"release_id": self.release_id, "contract": self.contract, "updated_at": self.updated_at,
+                 **({"updated_by": self.updated_by} if self.updated_by else {}),
+                 **({"approval": self.approval} if self.approval else {})}
+        return Pointer(self.usecase, release_id, contract, now(), by, ([entry] + self.history)[:POINTER_HISTORY],
+                       approval)
 
 
-def new_pointer(usecase: str, release_id: str, contract: str, by: str | None) -> Pointer:
-    return Pointer(usecase, release_id, contract, now(), by, [])
+def new_pointer(usecase: str, release_id: str, contract: str, by: str | None,
+                approval: dict | None = None) -> Pointer:
+    return Pointer(usecase, release_id, contract, now(), by, [], approval)
