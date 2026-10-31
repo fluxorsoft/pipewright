@@ -3,6 +3,67 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [1.2.0] - unreleased
+
+Additive: a 1.0 or 1.1 use case, manifest and release behave as before (the 1.1 examples compile to the same
+templates and resolve to the same configuration), and every new setting is off until it is set. Found by building
+the ebook's nineteen chapters on a live environment (FR-58 to FR-87).
+
+### Added
+
+- **How to call a deployed model** (FR-60): `deploy-model` ends with the endpoint ID, the predict URL, the caller's
+  permission and a sample request; `pipewright model endpoint` prints the same, read only.
+- **Serving gated in CI, or automatic** (FR-63): `approvals.deploy_model: ci` lists a `deploy-approve` decision for
+  each new default version that passes its gates and is not served, deployed by a `pipewright-gate` run once the
+  GitHub environment's reviewers approve (recorded on `model.deployed`); `on_register` lets the decisions workflow
+  deploy it without a person. Manifest `policies.deploy_model: ci` makes ci the only way in an environment.
+- **GPU limits and GPU serving** (FR-58, FR-61): manifest `policies.accelerators` (`steps` and `serving`: `types`,
+  `max_count`); `model.serving.accelerator` deploys on a GPU within it.
+- **Scale to zero** (FR-62): `model.serving.scale_to_zero` with `replicas.min: 0` (an Agent Platform preview).
+- **A base image per use case** (FR-59): `components.base_image`, within the approved base images.
+- **Re-check a version against today's gates** (FR-72): `pipewright model check --version <v>`; each evaluation
+  also measures the champion's slices and fairness on the same test rows (`_slices`, `_fairness`).
+- **Forecasts per series** (FR-69): the evaluation record holds each series' metrics; `evaluation.gates[].per_series`.
+- **A failed run is an event** (FR-67): `run.failed`, recorded once per failed or cancelled run by the launcher's
+  hourly tick, with the failed steps and their error lines; alertable in `monitoring.alerts.events`.
+- **Machine-readable fleet state** (FR-86): `--json` on `status`, `model list`, `monitor status`, `retrain list`;
+  `bqml.metrics_table` writes a BigQuery ML run's row in the container examples' metrics table.
+- **Image cleanup** (FR-87): `pipewright images prune [--keep n] [--apply]` deletes images no release needs (dry run
+  by default); `doctor` reports the image storage.
+- **Tests before a release** (FR-66): `tests.on_release`. **Tests with the components' requirements** (FR-82):
+  `tests.environment: components`.
+- **Promotion in CI** (FR-80): `ci init` writes `pipewright-promote.yml` and an operate `promote` action for an
+  environment with `promotion.from`, instead of a release job; `--decisions-cron` (default hourly in working hours);
+  `release` warns for such an environment, and `promotion.release: refuse` stops it. A lifecycle event that could
+  not be published ends the command with a warning.
+- **The kfp CI installs** (FR-81): `ci init` writes `.github/pipewright-constraints.txt` with the tested kfp, and the
+  setup action installs with it; a compiler mismatch names the kfp to install.
+- **The decision trail** (FR-84): `lineage` shows who approved, promoted and deployed a version, from the event log
+  (manifest `observability.evidence_dataset`); the release pointer records the person behind a CI identity;
+  `doctor` warns when nothing keeps the events.
+- **Exact replays** (FR-85): snapshot events carry a rows fingerprint; the example's prepare step sorts by the
+  contract's unique key before splitting.
+- **Contract before preparation** (FR-70): `bqml.contract_on: source` checks the data contract on the rows as read.
+- **Examples that show every setting** (FR-64): the examples are real YAML with readable sample values; the churn
+  example shows each default it leaves out as a `# default` line (a test keeps them true); a README per example.
+
+### Fixed
+
+- **Online serving** (FR-73, FR-76): the endpoint fills an empty feature with its training median, as batch scoring
+  does (`model.serving.fill_missing: false` to answer an error instead); a promoted model reads the destination's
+  online store, and `deploy-model` and `doctor` refuse one that would read another environment's.
+- **deploy-model is safe to repeat** (FR-74): it refuses while the endpoint has an operation in progress, and says
+  when the version is already served.
+- **Performance monitoring** (FR-78): `monitoring.performance.labels.time_column` joins each outcome to the score
+  made for its cut-off (scores carry `scored_for`); `validate` warns where the old join can mismatch.
+- **A refused retrain** (FR-79): the case records the gates' reasons, re-opens, and emits `retrain.refused`.
+- **A first version under a manual policy** (FR-83): labelled not approved until `pipewright model approve`;
+  `model list` and `doctor` say so, `deploy-model` refuses it. Scoring is unchanged.
+- **Entity columns as features** (FR-68): BigQuery ML leaves the entity's cut-off column out of the default features
+  (a DATE feature failed evaluation); `validate` warns about the key columns, and about both on the container path.
+- **Synthetic data reads labels like training** (FR-65) when its source is the entity table.
+- **alerts sync** (FR-77) deletes the Pipewright email channels no policy uses any more.
+
 ## [1.1.0] - 2026-10-26
 
 Additive: a 1.0 use case, manifest and release behave exactly as before.

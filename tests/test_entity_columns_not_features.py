@@ -18,13 +18,14 @@ def with_entity(repo, split=None):
     return repo
 
 
-def test_bigquery_ml_leaves_the_cut_off_and_the_key_out_by_default(repo):
+def test_bigquery_ml_leaves_the_cut_off_out_and_warns_about_the_key(repo):
     # The ebook's Chapter 8: customer-segments (k-means, random split) got snapshot_date as a feature, and the
-    # evaluation failed: `Invalid cast from DATE to FLOAT64`.
+    # evaluation failed: `Invalid cast from DATE to FLOAT64`. A key column trained in 1.1, so it stays (1.x
+    # stability) and validate warns.
     uc = resolve(with_entity(bqml_repo(repo)))
     include = uc.ml["features"]["include"]
-    assert "snapshot_date" not in include and "customer_id" not in include and "tenure_months" in include
-    assert not uc.warnings
+    assert "snapshot_date" not in include and "customer_id" in include and "tenure_months" in include
+    assert any("customer_id" in w and "snapshot_date" not in w and "FR-68" in w for w in uc.warnings)
 
 
 def test_the_container_path_keeps_the_default_and_warns(repo):
