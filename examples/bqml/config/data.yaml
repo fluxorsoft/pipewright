@@ -1,33 +1,31 @@
-# The data contract, as before: every column the model and checks see, wherever it comes from.
+# The data contract: every column the checks and the model see, wherever it comes from. A run's source is the entity
+# table (who, as of when, and the label); each row gets its features as they were at that time.
 data:
   contract:
     columns:
       - { name: customer_id,            type: string,  required: true }    # entity table
       - { name: snapshot_date,          type: date,    required: true }    # entity table: the cut-off
       - { name: churned,                type: integer, allowed: [0, 1] }   # entity table: the label
-      - { name: tenure_months,          type: integer }                    # customer_profile
-      - { name: monthly_charges,        type: float }                      # customer_profile
+      - { name: tenure_months,          type: integer, min: 0 }            # customer_profile
+      - { name: monthly_charges,        type: float,   min: 0 }            # customer_profile
       - { name: total_charges,          type: float }                      # customer_profile
       - { name: contract_length_months, type: integer }                    # customer_profile
       - { name: num_products,           type: integer }                    # customer_profile
       - { name: has_paperless_billing,  type: integer }                    # customer_profile
       - { name: num_support_tickets,    type: integer }                    # support_activity
       - { name: avg_monthly_usage_gb,   type: float }                      # support_activity
-  label: { column: churned }
-  split: { strategy: time, time_column: snapshot_date }
+    unique: [customer_id, snapshot_date]
+  label: { column: churned }             # task: binary (the default); multiclass and regression work the same way
+  split: { strategy: time, time_column: snapshot_date }    # the latest 20 % of rows are held out as the test set
 
-  # Features from feature tables, owned by whoever produces them (here, loaded by data/load_tables.sh into your
-  # dataset). Each table has the entity column, a feature_timestamp saying when a value became true, and one
-  # column per feature; a customer has a row each time a value changes. A run's entity row dated 2026-01-31 gets
-  # the newest values dated before 2026-01-31 00:00 UTC, never one from after it.
   features_from:
     entity: { columns: [customer_id], time_column: snapshot_date }
     sources:
-      - table: bq://${resources.bigquery_dataset}.{{table_prefix}}customer_profile
+      - table: bq://${resources.bigquery_dataset}.my_churn_bq_customer_profile
         features: [tenure_months, monthly_charges, total_charges, contract_length_months, num_products,
                    has_paperless_billing]
-      - table: bq://${resources.bigquery_dataset}.{{table_prefix}}support_activity
+      - table: bq://${resources.bigquery_dataset}.my_churn_bq_support_activity
         features: [num_support_tickets, avg_monthly_usage_gb]
 
-features:
-  exclude: [customer_id]                 # every other contract column except the label and time is a feature
+data_protection:
+  personal_data_columns: [customer_id]   # never a feature

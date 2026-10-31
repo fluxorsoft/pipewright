@@ -1,14 +1,14 @@
-# {{usecase}}: created from the Pipewright minimal example (pipewright new-usecase --from minimal).
+# my-churn-minimal: created from the Pipewright minimal example (pipewright new-usecase --from minimal).
 # Only what is required, plus one evaluation gate. Everything else has a default: `pipewright resolve --env <env>`
 # shows the result, `pipewright explain <key>` what any key means. The churn example shows every option.
 apiVersion: pipewright/v1
 kind: UseCase
 metadata:
-  name: {{usecase}}
-  owner: {{owner}}
+  name: my-churn-minimal
+  owner: my-team
 
 spec:
-  tenant: {{tenant}}                      # given to you by the platform team
+  tenant: my-tenant                      # given to you by the platform team
   include: [config/*.yaml]               # config/data.yaml: the data contract, label and split
 
   pipelines:
@@ -16,7 +16,7 @@ spec:
   components: { dir: components/, requirements: components/requirements.txt }
 
   model:
-    name: {{model_name}}
+    name: my-churn-minimal-classifier
 
   triggers:
     landing: { suffixes: [.csv], pipeline: training }   # a CSV under your landing prefix trains
@@ -25,8 +25,8 @@ spec:
   parameters:                            # the training pipeline's own parameters
     bq_dataset: ${resources.bigquery_dataset}
     model_display_name: ${model.name}
-    raw_table: {{table_prefix}}raw_customers
-    metrics_table: {{table_prefix}}model_metrics
+    raw_table: my_churn_minimal_raw_customers
+    metrics_table: my_churn_minimal_model_metrics
 
   evaluation:
     gates:
@@ -35,5 +35,5 @@ spec:
   outputs:                               # tables the pipeline writes, created by `pipewright tables sync`
     bigquery:
       tables:
-        {{table_prefix}}raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
-        {{table_prefix}}model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }
+        my_churn_minimal_raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
+        my_churn_minimal_model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }

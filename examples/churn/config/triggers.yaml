@@ -7,4 +7,4 @@ triggers:
       cron: "0 6 * * *"
       timezone: Europe/London
       pipeline: inference
-      source_uri: gs://${buckets.landing}/samples/{{usecase}}/scoring_customers.csv
+      source_uri: gs://${buckets.landing}/samples/my-churn/scoring_customers.csv

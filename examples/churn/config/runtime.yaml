@@ -2,8 +2,8 @@
 parameters:                              # passed to every pipeline that declares them
   bq_dataset: ${resources.bigquery_dataset}
   model_display_name: ${model.name}
-  raw_table: {{table_prefix}}raw_customers
-  metrics_table: {{table_prefix}}model_metrics
+  raw_table: my_churn_raw_customers
+  metrics_table: my_churn_model_metrics
 
 steps:                                   # applied to the compiled pipelines; no pipeline code change
   train-model: { cpu: 4, memory: 8G }

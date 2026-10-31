@@ -1,0 +1,17 @@
+# The churn example: the reference. It sets every key a use case can set, with its default where it has one.
+# `pipewright new-usecase` copies this folder.
+
+# The sample values these files use, which `pipewright new-usecase` replaces with the new use case's own
+# (--name, --tenant, --owner, --table-prefix, --model-name), in the files under templated only.
+sample:
+  usecase: my-churn
+  tenant: my-tenant
+  owner: my-team
+  table_prefix: my_churn_
+  model_name: my-churn-classifier
+templated:
+  - config/operations.yaml
+  - config/runtime.yaml
+  - config/tables.yaml
+  - config/triggers.yaml
+  - usecase.yaml

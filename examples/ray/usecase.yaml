@@ -1,15 +1,15 @@
-# {{usecase}}: created from the Pipewright Ray example (pipewright new-usecase --from ray).
+# my-churn-ray: created from the Pipewright Ray example (pipewright new-usecase --from ray).
 # The minimal example plus tuning on Ray: the tuning trials run in parallel on a Ray on Vertex AI cluster that
 # exists only while the tune-on-ray step of a run is running. The cluster's size is steps.tune-on-ray.ray, within
 # the limits your platform team sets; `pipewright explain steps.<name>.ray` lists the settings.
 apiVersion: pipewright/v1
 kind: UseCase
 metadata:
-  name: {{usecase}}
-  owner: {{owner}}
+  name: my-churn-ray
+  owner: my-team
 
 spec:
-  tenant: {{tenant}}                      # given to you by the platform team
+  tenant: my-tenant                      # given to you by the platform team
   include: [config/*.yaml]               # config/data.yaml: the data contract, label and split
 
   pipelines:
@@ -20,7 +20,7 @@ spec:
     ray_requirements: ray-requirements.txt        # extra packages for the cluster's nodes
 
   model:
-    name: {{model_name}}
+    name: my-churn-ray-classifier
 
   triggers:
     landing: { suffixes: [.csv], pipeline: training }   # a CSV under your landing prefix trains
@@ -29,8 +29,8 @@ spec:
   parameters:                            # the training pipeline's own parameters
     bq_dataset: ${resources.bigquery_dataset}
     model_display_name: ${model.name}
-    raw_table: {{table_prefix}}raw_customers
-    metrics_table: {{table_prefix}}model_metrics
+    raw_table: my_churn_ray_raw_customers
+    metrics_table: my_churn_ray_model_metrics
 
   steps:
     tune-on-ray:                         # the step itself only submits the job and waits: size the cluster
@@ -53,5 +53,5 @@ spec:
   outputs:                               # tables the pipeline writes, created by `pipewright tables sync`
     bigquery:
       tables:
-        {{table_prefix}}raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
-        {{table_prefix}}model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }
+        my_churn_ray_raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
+        my_churn_ray_model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }

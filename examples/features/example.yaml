@@ -10,3 +10,15 @@ code:
   - schemas/model_metrics.json
   - schemas/predictions.json
   - schemas/model_monitoring.json
+
+# The sample values these files use, which `pipewright new-usecase` replaces with the new use case's own
+# (--name, --tenant, --owner, --table-prefix, --model-name), in the files under templated only.
+sample:
+  usecase: my-churn-features
+  tenant: my-tenant
+  owner: my-team
+  table_prefix: my_churn_features_
+  model_name: my-churn-features-classifier
+templated:
+  - config/data.yaml
+  - usecase.yaml

@@ -7,3 +7,14 @@ code:
   - schemas/raw_customers.json
   - schemas/model_metrics.json
   - data/sample_customers.csv
+
+# The sample values these files use, which `pipewright new-usecase` replaces with the new use case's own
+# (--name, --tenant, --owner, --table-prefix, --model-name), in the files under templated only.
+sample:
+  usecase: my-churn-minimal
+  tenant: my-tenant
+  owner: my-team
+  table_prefix: my_churn_minimal_
+  model_name: my-churn-minimal-classifier
+templated:
+  - usecase.yaml

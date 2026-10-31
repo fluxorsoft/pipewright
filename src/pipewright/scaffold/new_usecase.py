@@ -2,6 +2,10 @@
 
 An example may take its code from another one: example.yaml names it (`code_from`) and the paths to copy (`code`),
 and the example's own files go on top. The minimal example is the churn example's training code with less config.
+
+The examples are real YAML (Pipewright 1.2, FR-64): they read and highlight on GitHub and are schema-checked like a
+team's own. example.yaml lists the sample values they use (`sample`: my-churn, my-tenant, my-team...) and the files
+that use them (`templated`); new-usecase replaces those values with the new use case's own, in those files only.
 Every YAML file written gets a first line pointing the editor at Pipewright's schemas (config/reference.py).
 """
 
@@ -32,12 +36,29 @@ def examples_dir() -> Path:
 
 
 def list_examples() -> list[str]:
-    return sorted(p.name for p in examples_dir().iterdir() if (p / "usecase.yaml.tmpl").is_file())
+    return sorted(p.name for p in examples_dir().iterdir() if (p / "usecase.yaml").is_file())
+
+
+def _meta(src: Path) -> dict:
+    path = src / EXAMPLE_FILE
+    return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}) if path.is_file() else {}
+
+
+def render(text: str, sample: dict, values: dict) -> str:
+    """The example's sample values replaced by the use case's, in one pass (so a value that equals another sample
+    value is never replaced twice); the longest first where one contains another."""
+    swap = {sample[k]: values[k] for k in sample if k in values}
+    if not swap:
+        return text
+    pattern = re.compile("|".join(re.escape(v) for v in sorted(swap, key=len, reverse=True)))
+    return pattern.sub(lambda m: swap[m.group(0)], text)
 
 
 def _copy_code(src: Path, dest: Path, ignore) -> None:
     """The paths example.yaml takes from another example."""
-    meta = yaml.safe_load((src / EXAMPLE_FILE).read_text(encoding="utf-8")) or {}
+    meta = _meta(src)
+    if not meta.get("code_from"):
+        return
     base = examples_dir() / meta["code_from"]
     for rel in meta.get("code", []):
         source, target = base / rel, dest / rel.rstrip("/")
@@ -58,7 +79,7 @@ def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "
             raise ConfigError(f"{label} {value!r} must be lowercase letters, digits and hyphens, "
                               "starting with a letter")
     src = examples_dir() / example
-    if not (src / "usecase.yaml.tmpl").is_file():
+    if not (src / "usecase.yaml").is_file():
         raise ConfigError(f"unknown example {example!r} (available: {', '.join(list_examples())})")
     dest = Path(root) / "usecases" / name
     if dest.exists():
@@ -68,22 +89,16 @@ def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "
     values = {"usecase": name, "tenant": tenant, "owner": owner, "table_prefix": prefix,
               "model_name": model_name or f"{name}-classifier"}
 
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.tmpl", ".pipewright", ".pytest_cache", EXAMPLE_FILE)
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pipewright", ".pytest_cache", EXAMPLE_FILE, "README.md")
     dest.mkdir(parents=True)
     if (src / EXAMPLE_FILE).is_file():
         _copy_code(src, dest, ignore)
     shutil.copytree(src, dest, ignore=ignore, dirs_exist_ok=True)
-    # Every *.tmpl (usecase.yaml.tmpl, config/*.yaml.tmpl, ...) is rendered without its suffix.
-    for template in sorted(src.rglob("*.tmpl")):
-        text = template.read_text(encoding="utf-8")
-        for key, value in values.items():
-            text = text.replace("{{" + key + "}}", value)
-        leftover = re.findall(r"\{\{(\w+)\}\}", text)
-        if leftover:
-            raise ConfigError(f"{template.name} has unfilled placeholders: {sorted(set(leftover))}")
-        target = dest / template.relative_to(src).with_suffix("")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+    # The files that use the example's sample values get the use case's own.
+    meta = _meta(src)
+    for rel in meta.get("templated") or []:
+        text = render((src / rel).read_text(encoding="utf-8"), meta.get("sample") or {}, values)
+        (dest / rel).write_text(text, encoding="utf-8")
     if data_yaml is not None:
         (dest / "config").mkdir(exist_ok=True)
         (dest / "config" / "data.yaml").write_text(data_yaml, encoding="utf-8")

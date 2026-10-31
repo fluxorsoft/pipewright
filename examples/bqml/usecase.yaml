@@ -1,4 +1,4 @@
-# {{usecase}}: created from the Pipewright BigQuery ML example (pipewright new-usecase --from bqml).
+# my-churn-bq: created from the Pipewright BigQuery ML example (pipewright new-usecase --from bqml).
 # The model is trained and scored in BigQuery. There is no pipeline code: Pipewright provides the training and scoring
 # pipelines for a use case with a bqml section, and runs them on your environment's orchestrator like any other.
 # Your part is the data (config/data.yaml) and, when you need them, two SQL files (sql/). data/load_tables.sh loads
@@ -6,11 +6,11 @@
 apiVersion: pipewright/v1
 kind: UseCase
 metadata:
-  name: {{usecase}}
-  owner: {{owner}}
+  name: my-churn-bq
+  owner: my-team
 
 spec:
-  tenant: {{tenant}}                      # given to you by the platform team
+  tenant: my-tenant                      # given to you by the platform team
   include: [config/*.yaml]               # config/data.yaml: the contract, label, split and the feature tables
 
   bqml:
@@ -21,25 +21,25 @@ spec:
     explain: true                        # global explanations in the evaluation record
 
   model:
-    name: {{model_name}}                 # its Model Registry ID: every approved training run is a new version
+    name: my-churn-bq-classifier                 # its Model Registry ID: every approved training run is a new version
 
   triggers:
-    api: true                            # `pipewright run --source-uri bq://<dataset>.{{table_prefix}}entities`
+    api: true                            # `pipewright run --source-uri bq://<dataset>.my_churn_bq_entities`
 
   evaluation:
     gates:
       - { metric: auc, min: 0.7 }        # a model below this is not registered
 
   inference:
-    output_table: {{table_prefix}}scores
+    output_table: my_churn_bq_scores
 
   monitoring:                            # drift of the features and the scores, against training
     drift: { enabled: true }
     prediction_drift: { enabled: true }
-    output_table: {{table_prefix}}model_monitoring
+    output_table: my_churn_bq_model_monitoring
 
   outputs:                               # tables the pipelines write, created by `pipewright tables sync`
     bigquery:
       tables:
-        {{table_prefix}}scores:           { schema: schemas/scores.json, partition: { field: scored_at, type: DAY } }
-        {{table_prefix}}model_monitoring: { schema: schemas/model_monitoring.json, partition: { field: monitored_at, type: DAY } }
+        my_churn_bq_scores:           { schema: schemas/scores.json, partition: { field: scored_at, type: DAY } }
+        my_churn_bq_model_monitoring: { schema: schemas/model_monitoring.json, partition: { field: monitored_at, type: DAY } }

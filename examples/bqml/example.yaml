@@ -4,3 +4,15 @@
 code_from: features
 code:
   - data/
+
+# The sample values these files use, which `pipewright new-usecase` replaces with the new use case's own
+# (--name, --tenant, --owner, --table-prefix, --model-name), in the files under templated only.
+sample:
+  usecase: my-churn-bq
+  tenant: my-tenant
+  owner: my-team
+  table_prefix: my_churn_bq_
+  model_name: my-churn-bq-classifier
+templated:
+  - config/data.yaml
+  - usecase.yaml

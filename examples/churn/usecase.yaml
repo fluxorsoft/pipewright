@@ -1,5 +1,5 @@
-# {{usecase}}: created from the Pipewright churn example (pipewright new-usecase --from churn).
-# This folder now belongs to {{owner}}. Reference: CONTEXT.md in the Pipewright repository.
+# my-churn: created from the Pipewright churn example (pipewright new-usecase --from churn).
+# This folder now belongs to my-team. Reference: CONTEXT.md in the Pipewright repository.
 #
 # This file says what the use case is and who governs it. Everything else is in config/, one concern per file:
 #   config/triggers.yaml    what starts a run (landing files, schedules, API)
@@ -15,14 +15,14 @@
 apiVersion: pipewright/v1
 kind: UseCase
 metadata:
-  name: {{usecase}}
-  owner: {{owner}}
+  name: my-churn
+  owner: my-team
   description: Predicts which customers are likely to cancel in the next month.
   objective: Rank customers by churn risk so the retention team can contact the riskiest first.
   labels: { product: churn, data-classification: confidential }
 
 spec:
-  tenant: {{tenant}}                      # given to you by the platform team
+  tenant: my-tenant                      # given to you by the platform team
   include: [config/*.yaml]
 
   pipelines:
@@ -32,7 +32,7 @@ spec:
   framework:  pytorch
 
   model:
-    name: {{model_name}}
+    name: my-churn-classifier
     promotion: model
     serving: { enabled: false, target: vertex, machine: n1-standard-2, canary_percent: 10 }
 

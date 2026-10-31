@@ -20,14 +20,14 @@ def test_new_usecase_from_churn_example(repo):
                                                              "model_monitoring", "churn_outcomes")}
     assert uc.parameters["raw_table"] == "churn_nimbus_raw_customers"
     assert uc.parameters["bq_dataset"] == "churn"
-    # config/*.yaml.tmpl rendered, environments/dev.yaml applied
+    # the templated config files rendered, environments/dev.yaml applied
     assert uc.ml["inference"]["output_table"] == "churn_nimbus_predictions"
     assert uc.ml["monitoring"]["performance"]["labels"]["table"] == "churn_nimbus_churn_outcomes"
     assert uc.ml["training"]["hyperparameters"]["epochs"] == 5 and uc.ml["training"]["tuning"]["max_trials"] == 2
     assert uc.triggers["schedules"] == [] and uc.ml["retraining"]["enabled"] is False
     assert uc.ml["retraining"]["source_uri"] == "gs://acme-ml-dev-landing/samples/churn-nimbus/customers.csv"
     assert set(uc.pipelines) == {"training", "inference"}
-    assert (dest / "data" / "sample_customers.csv").is_file() and not list(dest.rglob("*.tmpl"))
+    assert (dest / "data" / "sample_customers.csv").is_file() and not (dest / "example.yaml").exists()
     with pytest.raises(ConfigError, match="already exists"):
         new_usecase(repo.root, "churn-nimbus", "churn", "team-nimbus")
 

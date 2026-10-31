@@ -9,20 +9,20 @@ outputs:
   gcs: { format: parquet, external_tables: true }
   bigquery:
     tables:
-      {{table_prefix}}raw_customers:
+      my_churn_raw_customers:
         schema: schemas/raw_customers.json
         partition: { field: ingested_at, type: DAY }
-      {{table_prefix}}predictions:
+      my_churn_predictions:
         schema: schemas/predictions.json
         partition: { field: scored_at, type: DAY }
         cluster: [customer_id]
-      {{table_prefix}}model_metrics:
+      my_churn_model_metrics:
         schema: schemas/model_metrics.json
         partition: { field: evaluated_at, type: DAY }
-      {{table_prefix}}model_monitoring:
+      my_churn_model_monitoring:
         schema: schemas/model_monitoring.json
         partition: { field: monitored_at, type: DAY }
-      {{table_prefix}}churn_outcomes:
+      my_churn_churn_outcomes:
         schema: schemas/churn_outcomes.json
         description: observed churn, joined to predictions for performance monitoring
     retention_days: 400
