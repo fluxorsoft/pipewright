@@ -23,6 +23,33 @@ def submit(contract: ReleaseContract, target: PipelineTarget, parameters: dict, 
     raise NotImplementedError(f"orchestrator {contract.orchestrator!r} is not supported yet")
 
 
+def job_reasons(contract: ReleaseContract, job_id: str, gcp=None) -> list[str]:
+    """Why a finished training run's evaluation refused its model: the evaluate step's `reasons` output (Pipewright
+    1.2, FR-79). Agent Platform only; [] when the run has none or cannot be read."""
+    import json
+
+    if contract.orchestrator == "kfp":
+        return []
+    from pipewright.gcp import Gcp
+
+    gcp = gcp or Gcp()
+    r = gcp.get(f"https://{contract.region}-aiplatform.googleapis.com/v1/projects/{contract.project}/locations/"
+                f"{contract.region}/pipelineJobs/{job_id}")
+    if not r.ok:
+        return []
+    for task in ((r.body or {}).get("jobDetail") or {}).get("taskDetails") or []:
+        for key, value in ((task.get("execution") or {}).get("metadata") or {}).items():
+            if key.rsplit(":", 1)[-1] not in ("reasons", "decision_reasons"):
+                continue
+            try:
+                found = json.loads(value) if isinstance(value, str) else value
+            except ValueError:
+                found = [value]
+            if found:
+                return [str(x) for x in (found if isinstance(found, list) else [found])][:20]
+    return []
+
+
 def job_state(contract: ReleaseContract, job_id: str, manifest: dict | None = None, gcp=None) -> tuple:
     """(state, error message) of a submitted run, by its job ID; state None when there is no such run (yet)."""
     if contract.orchestrator == "kfp":

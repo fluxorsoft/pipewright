@@ -138,6 +138,10 @@ def render(case: dict) -> str:
             ended = {"registered": f"registered v{t.get('version')}", "rejected": "rejected by the evaluation gates",
                      "succeeded": "finished", "failed": f"FAILED: {t.get('error')}"}.get(t["outcome"], t["outcome"])
             lines.append(f"  ended {str(t.get('finished_at'))[:16]}: {ended}")
+            for reason in t.get("reasons") or []:                     # Pipewright 1.2 (FR-79): why the gates refused
+                lines.append(f"    {reason}")
+            if t["outcome"] == "rejected" and case.get("state") == "open":
+                lines.append("  the case is open again: approve with another --source-uri, decline, or snooze")
             if t["outcome"] == "failed":
                 lines.append(f"  retry: pipewright retrain retry --case {case['case_id']} --reason ..."
                              + ("  (transient: Pipewright retries it itself, twice)" if t.get("transient") else ""))

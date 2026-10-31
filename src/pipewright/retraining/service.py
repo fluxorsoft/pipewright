@@ -3,6 +3,7 @@
     submit(contract, pipeline, source_uri, run_key, trigger) -> {"status", "job_id", ...}   the launcher's start()
     job_state(contract, job_id) -> (state, error)                                          the orchestrator's view
     version_for_run(contract, run_id) -> version or None                                   Model Registry
+    reasons_for_job(contract, job_id) -> [reason, ...]                                     why the gates refused
     emit(event_type, contract, data, attributes)                                             lifecycle events
     verify(token) -> email                                                                   identity.verify
 """
@@ -40,10 +41,12 @@ class Decisions:
                  verify: Callable[[str], str] | None = None, clock: Callable[[], datetime] | None = None,
                  champion_info: Callable[[ReleaseContract, dict], dict] | None = None,
                  job_state: Callable[[ReleaseContract, str], tuple] | None = None,
-                 version_for_run: Callable[[ReleaseContract, str], str | None] | None = None):
+                 version_for_run: Callable[[ReleaseContract, str], str | None] | None = None,
+                 reasons_for_job: Callable[[ReleaseContract, str], list] | None = None):
         self.store, self.manifest, self.submit, self._emit = store, manifest, submit, emit
         self.verify = verify
         self.job_state, self.version_for_run = job_state, version_for_run
+        self.reasons_for_job = reasons_for_job
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.champion_info = champion_info
 
@@ -79,6 +82,22 @@ class Decisions:
 
         return self.store.update_case(case["usecase"], case["case_id"], record) or {**case, "training": training}
 
+    def _observe_during_cooldown(self, contract: ReleaseContract, obs: dict) -> None:
+        """An alert during the cooldown opens no case, but it is not lost: it is added to the approved case it
+        follows, so the approvers see what happened after their decision (Pipewright 1.2, FR-79)."""
+        pointer, _ = self.store.pointer(contract.usecase)
+        cid = pointer.get("last_case")
+        if not cid:
+            return
+
+        def add(c):
+            if any(o.get("run_id") == obs.get("run_id") for o in c.get("observations") or []):
+                return c
+            return {**c, "observations": ((c.get("observations") or []) + [{**obs, "during": "cooldown"}])[
+                -rc.OBSERVATIONS_KEPT:]}
+
+        self.store.update_case(contract.usecase, cid, add)
+
     # ----------------------------------------------------------------------------------------------- proposal --
     def propose(self, contract: ReleaseContract, body: dict) -> dict:
         """An inference run's observation (body: run_id, observation, champion)."""
@@ -112,6 +131,8 @@ class Decisions:
         out: rc.Outcome = held["out"]
         case = out.case
         if case is None:
+            if out.status.startswith("no case: cooldown"):
+                self._observe_during_cooldown(contract, obs)
             return {"status": "no-case", "detail": out.status}
         for event_type, data in out.events:
             self.emit(contract, s, case, event_type, data)
@@ -242,19 +263,30 @@ class Decisions:
         if not case or case.get("state") != "approved" or not t.get("job_id") or t.get("outcome"):
             return None
         state, error = self.job_state(contract, t["job_id"])
-        version = None
+        version, reasons = None, None
         if rc.job_outcome(state) == "succeeded" and t.get("run_id") and self.version_for_run:
             version = self.version_for_run(contract, t["run_id"])
+            if version is None and self.reasons_for_job:         # refused by the gates: say why (FR-79)
+                reasons = self.reasons_for_job(contract, t["job_id"])
         held: dict = {}
 
         def change(c):
-            held["out"] = rc.reconcile(c, state, error, version, s, now)
+            held["out"] = rc.reconcile(c, state, error, version, s, now, reasons)
             return held["out"].case
 
         updated = self.store.update_case(contract.usecase, cid, change)
         out = held.get("out")
         if not out or not out.case:
             return {"usecase": contract.usecase, "case_id": cid, "detail": out.status if out else "gone"}
+        if out.case.get("state") == "open":
+            # The gates refused the approved training: the case is current again and no cooldown holds back new
+            # cases, since no new model was registered (FR-79).
+            def reopen(current, pointer):
+                if pointer.get("open") not in (None, cid):
+                    return None, None
+                return None, {**pointer, "open": cid, "last_approved_at": None}
+
+            self.store.update(contract.usecase, reopen)
         for event_type, data in out.events:
             self.emit(contract, s, out.case, event_type, data)
         if out.submit:

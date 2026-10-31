@@ -57,6 +57,7 @@ DECISION_EVENTS = {
     "retrain.snoozed": "retrain snoozed",
     "retrain.digest": "weekly retrain digest",
     "retrain.training_failed": "retrain training failed",     # Pipewright 1.1: the approval stays; retry
+    "retrain.refused": "retrained model refused by the gates",   # Pipewright 1.2: the case is open again
     "retrain.training_retried": "retrain training resubmitted",
 }
 for _event, _title in DECISION_EVENTS.items():

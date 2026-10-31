@@ -175,7 +175,8 @@ def request_retraining(
                 client_options={"api_endpoint": f"{platform['region']}-pubsub.googleapis.com:443"})
             message_id = publisher.publish(platform["run_requests_topic"], json.dumps(body, default=str).encode(),
                                            usecase=ml_config["usecase"]).result(60)
-            return f"proposed ({', '.join(fired)}): message {message_id}"
+            # Over Pub/Sub the run cannot know the launcher's answer (a case, or none in a cooldown): it was sent.
+            return f"sent ({', '.join(fired)}): message {message_id}; the case says what the launcher did"
 
         import requests
         from pipewright_runtime import id_token
@@ -188,6 +189,8 @@ def request_retraining(
         if r.status_code != 200:
             return f"failed: launcher returned {r.status_code}: {r.text[:300]}"
         result = r.json()
+        if result.get("status") == "no-case":               # for example a cooldown: no case was proposed
+            return result.get("detail") or "no case"
         return f"proposed ({', '.join(fired)}): {result.get('detail') or result.get('status')}"
     except Exception as e:  # noqa: BLE001 - reported in the monitoring table, not raised
         logging.exception("retrain proposal failed")

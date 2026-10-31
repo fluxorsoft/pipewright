@@ -225,10 +225,12 @@ def _attempts(case: dict) -> list[dict]:
     return list(case.get("training_attempts") or [])
 
 
-def reconcile(case: dict, state: str | None, error: str, version: str | None, s: Settings, now: datetime) -> Outcome:
-    """How an approved case's training ended, as its orchestrator reports it (the launcher's tick). The approval
-    stays. succeeded: the registered version, or rejected by the gates (nothing registered); failed: the error, and
-    an automatic retry when it is transient (at most MAX_AUTO_RETRIES per case)."""
+def reconcile(case: dict, state: str | None, error: str, version: str | None, s: Settings, now: datetime,
+              reasons: list[str] | None = None) -> Outcome:
+    """How an approved case's training ended, as its orchestrator reports it (the launcher's tick). succeeded: the
+    registered version (the approval stays), or rejected by the gates (nothing registered: from Pipewright 1.2 the
+    case opens again with the gates' reasons and `retrain.refused`, so approvers decide again and no cooldown holds
+    back new cases); failed: the error, and an automatic retry when it is transient (at most MAX_AUTO_RETRIES)."""
     t = case.get("training") or {}
     cid = case["case_id"]
     if case["state"] != "approved" or not t.get("job_id") or t.get("outcome"):
@@ -250,10 +252,23 @@ def reconcile(case: dict, state: str | None, error: str, version: str | None, s:
             -ATTEMPTS_KEPT:]
         detail = {"registered": f"v{version} registered", "rejected": "the evaluation gates kept it out of the "
                   "registry", "succeeded": "finished"}[t["outcome"]]
+        if reasons:
+            t["reasons"] = list(reasons)[:20]
+            case["training_attempts"][-1]["reasons"] = t["reasons"]
+            detail += ": " + "; ".join(t["reasons"])[:400]
         _log(case, now, f"training {t['outcome']}", reason=detail, job_id=t["job_id"])
-        return Outcome(case, [("retrain.training_finished", {"job_id": t["job_id"], "outcome": t["outcome"],
-                                                             **({"version": str(version)} if version else {})})],
-                       status=f"case {cid}: training {t['outcome']} ({detail})")
+        events = [("retrain.training_finished", {"job_id": t["job_id"], "outcome": t["outcome"],
+                                                 **({"version": str(version)} if version else {}),
+                                                 **({"reasons": t["reasons"]} if t.get("reasons") else {})})]
+        if t["outcome"] == "rejected":
+            # Nothing was registered, so nothing needs a cooldown: the case opens again for the approvers (FR-79).
+            _reopen(case, now, "the approved training was refused by the evaluation gates" +
+                    (f": {'; '.join(t['reasons'])[:300]}" if t.get("reasons") else ""))
+            events.append(("retrain.refused", {"job_id": t["job_id"], "reasons": t.get("reasons") or [],
+                                               "next": f"pipewright retrain approve --case {cid} --source-uri ... "
+                                                       f"(another window), or decline"}))
+            return Outcome(case, events, status=f"case {cid}: training refused by the gates; the case is open again")
+        return Outcome(case, events, status=f"case {cid}: training {t['outcome']} ({detail})")
     transient = bool(TRANSIENT.search(error or ""))
     t.update(outcome="failed", error=(error or "no message from the orchestrator")[:500], transient=transient)
     case["training_attempts"] = (_attempts(case) + [{**attempt, "outcome": "failed", "error": t["error"],

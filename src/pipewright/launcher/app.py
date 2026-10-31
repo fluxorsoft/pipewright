@@ -145,9 +145,12 @@ def create_app(registry: Registry | None = None) -> Flask:
                             return str(v["versionId"])
                 return None
 
+            def reasons_for_job(contract, job_id):
+                return adapters.job_reasons(contract, job_id, getattr(r, "gcp", None))
+
             state["decisions"] = Decisions(CaseStore(r.gcp, r.bucket), lambda: reg().manifest, submit, emit,
                                            verify=verify, champion_info=champion_info, job_state=job_state,
-                                           version_for_run=version_for_run)
+                                           version_for_run=version_for_run, reasons_for_job=reasons_for_job)
         return state["decisions"]
 
     def loop_on(contract: ReleaseContract) -> bool:

@@ -42,16 +42,25 @@ def get_case(env: Environment, usecase: str, case_id: str | None, gcp: Gcp) -> d
     return case
 
 
+def training_outcome(case: dict) -> str:
+    """What the case's latest training did (Pipewright 1.2, FR-79): registered vN, refused, failed, running, or -."""
+    t = case.get("training") or {}
+    if not t.get("job_id"):
+        return "-"
+    return {"registered": f"registered v{t.get('version')}", "rejected": "refused", "failed": "failed",
+            "succeeded": "finished"}.get(t.get("outcome") or "", "running")
+
+
 def render_list(usecase: str, env: Environment, cases: list[dict]) -> str:
     if not cases:
         return f"{usecase} ({env.name}): no retrain cases"
     lines = [f"{usecase} ({env.name}): {len(cases)} case(s), newest first",
-             f"  {'case':<20} {'state':<9} {'opened':<20} {'triggers':<18} approvals / until"]
+             f"  {'case':<20} {'state':<9} {'opened':<20} {'triggers':<18} {'training':<14} approvals / until"]
     for c in cases:
         extra = c.get("until") if c["state"] in ("snoozed", "declined") else ", ".join(approved_groups(c)) or (
             ", ".join(a["by"] for a in c.get("approvals") or []))
         lines.append(f"  {c['case_id']:<20} {c['state']:<9} {c.get('opened_at', '')[:19]:<20} "
-                     f"{','.join(c.get('triggers') or []):<18} {extra or ''}")
+                     f"{','.join(c.get('triggers') or []):<18} {training_outcome(c):<14} {extra or ''}")
     return "\n".join(lines)
 
 
