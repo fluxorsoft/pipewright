@@ -350,6 +350,16 @@ def cmd_lineage(args) -> int:
     return 0
 
 
+def cmd_model_check(args) -> int:
+    from pipewright.gcp import Gcp
+    from pipewright.models import check
+
+    uc, env = _one(args)
+    result = check.check(uc, env, Gcp().session.credentials, args.version)
+    print(check.render(uc, result))
+    return 1 if result.problems else 0
+
+
 def cmd_model_approve(args) -> int:
     from pipewright.gcp import Gcp
     from pipewright.models import registry
@@ -914,6 +924,11 @@ def build_parser() -> argparse.ArgumentParser:
                                           "request (read only)")
     one(sp)
     sp.set_defaults(func=cmd_model_endpoint)
+    sp = msub.add_parser("check", help="a version against today's gates, slices and fairness (read only; exit 1 "
+                                       "when it fails)")
+    one(sp)
+    sp.add_argument("--version", required=True, help="version id, e.g. 4")
+    sp.set_defaults(func=cmd_model_check)
     sp = msub.add_parser("approve", help="make a version the default (approvals.promote_model)")
     one(sp)
     sp.add_argument("--version", required=True, help="version id, e.g. 4")

@@ -193,10 +193,14 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
         champion_predictions = rt.table_ref(project, ml_config, run_id, "champion")
         jobs.run(rt.predict_sql(ml_config, champion_ref, rows_table, champion_predictions, "_pw_test", jobs.labels,
                                 True, parts=rt.model_parts(jobs, champion_ref)), "champion predictions")
-        champion_metrics = (rt.evaluate_unsupervised(jobs, ml_config, champion_ref, rows_table) if unsupervised
-                            else rt.evaluate_rows(jobs, ml_config, champion_predictions))["metrics"]
-        record["champion"] = {**champion_metrics,
-                              "_version": champion.get("versionId"), "_model": champion_ref}
+        measured = (rt.evaluate_unsupervised(jobs, ml_config, champion_ref, rows_table) if unsupervised
+                    else rt.evaluate_rows(jobs, ml_config, champion_predictions))
+        record["champion"] = {**measured["metrics"],
+                              "_version": champion.get("versionId"), "_model": champion_ref,
+                              # its slices and fairness on the same rows (Pipewright 1.2, FR-72)
+                              **({"_slices": measured["slices"]} if measured.get("slices") else {}),
+                              **({"_fairness": rt.fairness(jobs, ml_config, champion_predictions)}
+                                 if ml_config["evaluation"].get("fairness") and not unsupervised else {})}
 
     # PSI baselines for scoring: the drift features on the training rows, the predictions on the test rows.
     columns = {f.name for f in jobs.client.get_table(rows_table).schema}

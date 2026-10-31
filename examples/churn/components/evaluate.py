@@ -58,6 +58,10 @@ def evaluate_model(
             champ = compute_metrics(y, cp, threshold, names)
             champ.pop("_confusion")
             champ["_version"] = champion_version
+            # The champion's slices on the same test rows (Pipewright 1.2, FR-72): a champion trained before a
+            # slice gate existed is measured here, and `pipewright model check` reads it.
+            df["_cp"] = cp
+            champ["_slices"] = slice_metrics(df, label, "_cp", ev["slices"], threshold, names, min_rows)
 
     importance = None
     if ml_config["explainability"]["enabled"]:
@@ -70,6 +74,8 @@ def evaluate_model(
     from pipewright_runtime import fairness_measures, fairness_problems
 
     fairness = fairness_measures(df, label, "_p", threshold, ml_config)
+    if champ is not None and fairness:                  # the champion's, on the same rows (FR-72)
+        champ["_fairness"] = fairness_measures(df, label, "_cp", threshold, ml_config)
     if unfair := fairness_problems(fairness, ml_config):
         decision, reasons = "reject", [*reasons, *unfair]
     full = {"metrics": scores, "confusion": confusion, "slices": slices,
