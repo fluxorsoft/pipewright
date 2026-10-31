@@ -3,7 +3,7 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [1.2.0] - unreleased
+## [1.2.0] - 2026-10-31
 
 Additive: a 1.0 or 1.1 use case, manifest and release behave as before (the 1.1 examples compile to the same
 templates and resolve to the same configuration), and every new setting is off until it is set. Found by building
