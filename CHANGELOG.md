@@ -9,6 +9,23 @@ Additive: a 1.0 or 1.1 use case, manifest and release behave as before (the 1.1 
 templates and resolve to the same configuration), and every new setting is off until it is set. Found by building
 the ebook's nineteen chapters on a live environment (FR-58 to FR-87).
 
+### Upgrading from 1.1
+
+Most of 1.2 arrives with the package. Some fixes live in the pipeline components a use case owns, which were copied
+from the churn example when it was created, so an existing use case gets them only by bringing those files up to
+date from `examples/churn/components/` (and retraining, where the fix travels with the model):
+
+| Component | Brings | Until then |
+|---|---|---|
+| `train.py`, `register.py`, `torchserve_handler.py` | an empty feature filled online as in training (FR-73); a promoted model reading the destination's online store (FR-76) | the endpoint refuses such rows; a model promoted with online features is refused by `deploy-model` and `doctor` |
+| `register.py` | a first version held back under a manual policy (FR-83) | the first version becomes the default unapproved; `validate` warns |
+| `monitor.py` | outcomes joined to the score made for their cut-off (FR-78) | joined by key only; `validate` warns once `labels.time_column` is set |
+| `evaluate.py` | the champion's slices and fairness on the same rows (FR-72) | `model check` has no champion slices to compare |
+| `prepare.py` | rows sorted by the contract's unique key before splitting, for exact replays (FR-85) | a replay reads the same rows, but may split them differently |
+
+A re-release after the upgrade gets a new release ID when the resolved configuration changed (a changed default),
+so runs use the new settings.
+
 ### Added
 
 - **How to call a deployed model** (FR-60): `deploy-model` ends with the endpoint ID, the predict URL, the caller's

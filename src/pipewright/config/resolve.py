@@ -292,14 +292,21 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     problems += accelerators.problems(steps, model["serving"], env.policies, env.name)
     extra_warnings += accelerators.warnings(model["serving"])
-    # FR-78 on the container path lives in the team's monitor step (found live: a 1.1 copy ignored the setting).
-    labels = (((ml.get("monitoring") or {}).get("performance") or {}).get("labels") or {})
-    if (not bqml_spec and labels.get("time_column") and components_dir.is_dir()
-            and not any("time_column" in p.read_text(encoding="utf-8", errors="ignore")
-                        for p in components_dir.rglob("*.py"))):
-        extra_warnings.append("monitoring.performance.labels.time_column is set, but no component reads it: a monitor "
-                              "step from Pipewright 1.1 or earlier joins outcomes by key only. Update it from the "
-                              "churn example's components/monitor.py (FR-78)")
+    # Two 1.2 fixes on the container path live in the team's own components, copied from the churn example before
+    # 1.2 (found live): validate says when the setting they serve is on but no component carries the fix.
+    if not bqml_spec and components_dir.is_dir():
+        code = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in components_dir.rglob("*.py"))
+        labels = (((ml.get("monitoring") or {}).get("performance") or {}).get("labels") or {})
+        if labels.get("time_column") and "time_column" not in code:
+            extra_warnings.append("monitoring.performance.labels.time_column is set, but no component reads it: a "
+                                  "monitor step from Pipewright 1.1 or earlier joins outcomes by key only. Update it "
+                                  "from the churn example's components/monitor.py (FR-78)")
+        if ((ml.get("registry") or {}).get("set_default") == "manual" and "Model.upload(" in code
+                and '"pending"' not in code):
+            extra_warnings.append("approvals.promote_model is manual, but no component labels a first version "
+                                  "approval=pending: a register step from Pipewright 1.1 or earlier lets a first "
+                                  "version become the default unapproved. Update it from the churn example's "
+                                  "components/register.py (FR-83)")
 
     if problems:
         raise ConfigError(problems, source=f"{path} ({env.name})")

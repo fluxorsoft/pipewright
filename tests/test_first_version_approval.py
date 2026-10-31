@@ -71,3 +71,23 @@ def test_doctor_warns_about_a_default_nobody_approved():
     (result,) = report.sections["ML"]
     assert result.status == doctor.WARN and "nobody has approved it" in result.detail
     assert "pipewright model approve --env prod --usecase demand-forecast --version 1" in result.hint
+
+
+def test_validate_warns_when_the_register_step_predates_it(repo):
+    """Found in 1.2 QA (GKE): a register step copied before 1.2 never labels approval=pending, so the first version
+    of a manual-policy use case became the default unapproved and nothing said so."""
+    from pipewright.config import load_environment, resolve_usecase
+
+    path = repo.write()
+    components = path.parent / "components"
+    (components / "register.py").write_text("registered = aiplatform.Model.upload(display_name=name)\n",
+                                            encoding="utf-8")
+    env = load_environment(repo.root, "dev")
+    uc = resolve_usecase(path, env)
+    if uc.ml["registry"]["set_default"] != "manual":
+        repo.usecase["spec"].setdefault("approvals", {})["promote_model"] = "manual"
+        uc = resolve_usecase(repo.write(), env)
+    assert any("FR-83" in w and "components/register.py" in w for w in uc.warnings)
+    (components / "register.py").write_text('registered = aiplatform.Model.upload(labels={"approval": "pending"})\n',
+                                            encoding="utf-8")
+    assert not any("FR-83" in w for w in resolve_usecase(path, env).warnings)
