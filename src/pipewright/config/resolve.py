@@ -231,6 +231,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     task = ((ml["data"].get("label") or {}).get("task")) or "binary"
     if task in ("clustering", "decomposition") and not bqml_spec:
         problems.append(f"data.label.task {task}: BigQuery ML only (bqml.model_type kmeans or pca)")
+    extra_warnings = _entity_columns_as_features(ml, ml_spec, bool(bqml_spec))
     if bqml_spec:
         _bqml_section(bqml_spec, ml, model, directory, env, tables, pipelines, triggers, steps_spec(eff),
                       f"{meta['name']}", tenant, problems)
@@ -310,8 +311,26 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
                                                   .get("datasets")) is not None else {})},
         outputs=outputs, ray_requirements=ray_requirements, synthetic_requirements=synthetic_requirements,
-        warnings=tuple(_warnings(ml)),
+        warnings=tuple(_warnings(ml) + extra_warnings),
     )
+
+
+def _entity_columns_as_features(ml: dict, ml_spec: dict, bqml: bool) -> list[str]:
+    """FR-68: the entity's cut-off and key columns (data.features_from.entity) are not facts about the customer.
+    When the features are left to the default, BigQuery ML leaves them out (a DATE feature failed its evaluation:
+    `Invalid cast from DATE to FLOAT64`); the container path keeps 1.x's default and `validate` warns."""
+    entity = ((ml["data"].get("features_from") or {}).get("entity")) or {}
+    include = ml["features"].get("include") or []
+    found = [c for c in [entity.get("time_column"), *(entity.get("columns") or [])] if c and c in include]
+    if not found or (ml_spec.get("features") or {}).get("include") is not None:
+        return []                                  # none of them, or the team listed its features itself
+    if bqml:
+        ml["features"]["include"] = [c for c in include if c not in found]
+        return []
+    return [f"features: {', '.join(found)} (data.features_from.entity: the cut-off or the key) "
+            f"{'is a feature' if len(found) == 1 else 'are features'} by default; a model then learns from the "
+            f"date or the ID. Add {'it' if len(found) == 1 else 'them'} to features.exclude, or list "
+            f"features.include (FR-68)"]
 
 
 def _warnings(ml: dict) -> list[str]:
