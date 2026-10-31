@@ -63,6 +63,9 @@ the ebook's nineteen chapters on a live environment (FR-58 to FR-87).
   (a DATE feature failed evaluation); `validate` warns about the key columns, and about both on the container path.
 - **Synthetic data reads labels like training** (FR-65) when its source is the entity table.
 - **alerts sync** (FR-77) deletes the Pipewright email channels no policy uses any more.
+- **A release after a Pipewright upgrade carries the new configuration:** with the same commit and templates, a
+  release reused the old contract even when the resolved configuration had changed (an upgraded default), so runs
+  kept the old settings. A changed configuration is now a new release ID, as a changed image or template is.
 
 ## [1.1.0] - 2026-10-26
 

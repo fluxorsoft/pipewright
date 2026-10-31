@@ -174,7 +174,7 @@ def test_a_changed_template_is_a_new_release_even_on_the_same_commit(repo, monke
 
     def compile_pinned(uc, component_image, out_dir, synthetic_images=None):
         return {"training": SimpleNamespace(name="churn-training", spec_path=spec,
-                                            parameters={"project", "region", "source_uri", "run_id"})}
+                                            parameters={"project", "region", "source_uri", "run_id", "ml_config"})}
 
     def upload(info, repository, uc, release_id, creds):
         digest = "sha256:" + __import__("hashlib").sha256(info.spec_path.read_bytes()).hexdigest()
@@ -218,3 +218,16 @@ def test_a_changed_template_is_a_new_release_even_on_the_same_commit(repo, monke
     moved = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
     assert moved.contract.release_id.startswith("abc123-") and moved.contract.pipeline_root.endswith(
         f"/pipeline-root/{uc.tenant}/{uc.name}")
+    # Found live: a Pipewright upgrade changed the resolved configuration (a default) with the same commit and
+    # templates; the old contract, with the old configuration, was reused. A changed configuration is a new release.
+    for key in list(store):
+        store.pop(key)
+    statics = {"ml_config": {"monitoring": {"drift": {"features": ["snapshot_date", "tenure"]}}}}
+    monkeypatch.setattr(service.publish, "static_parameters", lambda uc, info: statics)
+    before = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
+    assert service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append).contract.release_id == \
+        before.contract.release_id                                # a retry still reuses it
+    statics = {"ml_config": {"monitoring": {"drift": {"features": ["tenure"]}}}}
+    upgraded = service.release(uc, env, FakeGcp(), skip_tables=True, log=logs.append)
+    assert upgraded.contract.release_id != before.contract.release_id
+    assert upgraded.contract.static_parameters == statics

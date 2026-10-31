@@ -53,6 +53,13 @@ def release_id_for(directory: Path) -> tuple[str, str | None]:
     return rid, sha
 
 
+def _json(value) -> str:
+    """A value as the contract stores it, comparable whether it was just resolved or read back."""
+    import json
+
+    return json.dumps(json.loads(json.dumps(value, default=str)), sort_keys=True)
+
+
 def _token(gcp: Gcp) -> str:
     import google.auth.transport.requests
 
@@ -161,6 +168,9 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
     out_dir = build_dir or (uc.directory / ".pipewright" / "build")
     infos = publish.compile_pinned(uc, component_image, out_dir, synthetic_images)
     digests = {n: "sha256:" + hashlib.sha256(info.spec_path.read_bytes()).hexdigest() for n, info in infos.items()}
+    # The resolved configuration each run receives, as the contract stores it: a Pipewright upgrade can change it
+    # with the same commit and templates (found live: 1.2's FR-68 default), and the old contract would keep the old.
+    statics = _json({n: publish.static_parameters(uc, info) for n, info in infos.items()})
 
     def same(c: ReleaseContract) -> bool:
         released = {n: c.pipeline(n).template_digest for n in c.pipeline_names}
@@ -169,16 +179,18 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
         return (c.component_image == component_image and (c.ray or {}).get("image") == ray_image
                 and synthetic == synthetic_images and released == digests
                 and c.pipeline_root == publish.pipeline_root(env, uc)
-                and ((c.ray or {}).get("mode", "per_run") if c.ray else None) == ray_mode)
+                and ((c.ray or {}).get("mode", "per_run") if c.ray else None) == ray_mode
+                and _json({n: c.pipeline(n).static_parameters for n in c.pipeline_names}) == statics)
 
     existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
     existing = ReleaseContract.from_json(existing_text) if existing_text else None
     if existing is not None and not same(existing):
         what = "|".join([component_image, ray_image or "", *(synthetic_images or ()), publish.pipeline_root(env, uc),
                          (uc.ray or {}).get("mode", "") if uc.ray else "",
-                         *(f"{n}={d}" for n, d in sorted(digests.items()))])
+                         *(f"{n}={d}" for n, d in sorted(digests.items())), statics])
         release_id = f"{release_id}-{hashlib.sha256(what.encode()).hexdigest()[:8]}"
-        log(f"release {uc.name}: same commit, new images, templates or Ray mode: released as {release_id}")
+        log(f"release {uc.name}: same commit, new images, templates, configuration or Ray mode: released as "
+            f"{release_id}")
         existing_text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(uc.name, release_id))
         existing = ReleaseContract.from_json(existing_text) if existing_text else None
         if existing is not None and not same(existing):
