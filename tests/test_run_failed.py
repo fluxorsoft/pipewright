@@ -16,7 +16,7 @@ JOB = {
                "run-id": "r7"},
     "error": {"message": "The DAG failed because some tasks failed. The failed tasks are: [validate-data]."},
     "jobDetail": {"taskDetails": [
-        {"taskName": "root", "state": "FAILED"},
+        {"taskName": "churn-training-r7", "state": "FAILED"},     # live, the DAG's task is named after the job
         {"taskName": "ingest-data", "state": "SUCCEEDED"},
         {"taskName": "validate-data", "state": "FAILED",
          "error": {"message": "data contract failed:\n  orders: values below 1 (12 rows)"}}]},
@@ -28,8 +28,13 @@ class Fake:
         self.jobs, self.params, self.markers = jobs, [], set()
 
     def get(self, url, **params):
+        """Like the API: a list leaves out each job's taskDetails, a get of one job has them."""
+        for job in self.jobs:
+            if url.endswith(job["name"]):
+                return SimpleNamespace(ok=True, status=200, body=job)
         self.params.append(params)
-        return SimpleNamespace(ok=True, status=200, body={"pipelineJobs": self.jobs})
+        listed = [{**j, "jobDetail": {"pipelineContext": {}}} for j in self.jobs]
+        return SimpleNamespace(ok=True, status=200, body={"pipelineJobs": listed})
 
 
 def test_a_failed_run_is_reported_once(monkeypatch):

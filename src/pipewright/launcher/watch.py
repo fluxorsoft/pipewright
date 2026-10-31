@@ -44,10 +44,17 @@ def failed_jobs(gcp, project: str, region: str, since: datetime) -> list[dict]:
             return jobs
 
 
+def full_job(gcp, job: dict, region: str) -> dict:
+    """The job with its steps: a list leaves out jobDetail.taskDetails (found live), a get has them."""
+    r = gcp.get(f"https://{region}-aiplatform.googleapis.com/v1/{job['name']}")
+    return r.body if r.ok and r.body else job
+
+
 def failure(job: dict) -> dict:
     """What a run.failed event says about a job: its state, the failed steps and their first error line."""
     tasks = ((job.get("jobDetail") or {}).get("taskDetails")) or []
-    steps = [t for t in tasks if t.get("state") == "FAILED" and t.get("taskName") not in (None, "", "root")
+    root = ("root", job["name"].rsplit("/", 1)[-1])            # the DAG's own task is named after the job
+    steps = [t for t in tasks if t.get("state") == "FAILED" and t.get("taskName") not in (None, "", *root)
              and not str(t.get("taskName")).startswith("exit-handler")]
     errors = {t["taskName"]: str((t.get("error") or {}).get("message") or "").strip().splitlines()[:1]
               for t in steps}
@@ -70,7 +77,7 @@ def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, n
         contract = by_label.get(job["labels"]["pipewright-usecase"])
         if contract is None:
             continue
-        detail = failure(job)
+        detail = failure(full_job(gcp, job, region))
         try:
             gcs_write(gcp, bucket, f"{MARKERS}/{detail['job_id']}", json.dumps(detail), if_generation_match=0)
         except PreconditionFailed:
