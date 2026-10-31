@@ -479,7 +479,8 @@ GitHub instead of on someone's laptop (new in 1.1). `pipewright decisions pendin
 the GitHub environment that gates each item: the environment itself, or `<environment>-<group>` for each approver
 group of a retrain case. `pipewright ci init` writes two workflows for it:
 
-- `pipewright-decisions`, every 15 minutes: advances closed retrain loops (no person needed) and starts one
+- `pipewright-decisions`, hourly in working hours (UTC, Monday to Friday; every 15 minutes before 1.2, and
+  `ci init --decisions-cron` sets your own): advances closed retrain loops (no person needed) and starts one
   `pipewright-gate` run per pending decision, unless one is already waiting. It runs in the GitHub environment
   `<environment>-decisions` (the same variables, no reviewers).
 - `pipewright-gate`: waits for the required reviewers of the decision's GitHub environment, then reads the pending

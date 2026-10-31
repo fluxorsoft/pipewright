@@ -662,6 +662,11 @@ def cmd_ci_init(args) -> int:
     print(f"decisions: pipewright-decisions runs on cron {cron!r} (UTC)")
     print("next: in GitHub, create an environment per name with PIPEWRIGHT_PIP_SPEC (and GCP_WIF_PROVIDER + "
           "PIPEWRIGHT_SERVICE_ACCOUNT unless the runners use their own identity); add required reviewers to production")
+    # Found in 1.2 QA: without these the decisions job has no variables, and nothing said to create them.
+    print("      and <name>-decisions for each ("
+          + ", ".join(f"{e}-decisions" for e in environments)
+          + "), with the same variables and no reviewers: pipewright-decisions runs there. A gate refuses until "
+            "its environment has required reviewers (GitHub Team or Enterprise, or a public repository)")
     return 0
 
 
