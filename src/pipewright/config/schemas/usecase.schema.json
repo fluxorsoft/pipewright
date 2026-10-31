@@ -777,7 +777,8 @@
               "properties": {
                 "table": { "type": "string" },
                 "key": { "type": "string" },
-                "label": { "type": "string" }
+                "label": { "type": "string" },
+                "time_column": { "type": "string", "description": "the outcome's cut-off column: outcomes are joined to the scores made for that cut-off (the scores' scored_for), never to a later or earlier score (Pipewright 1.2)" }
               }
             },
             "metric": { "type": "string" },

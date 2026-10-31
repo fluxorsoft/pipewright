@@ -59,8 +59,26 @@ def check_batch(
         from google.cloud import bigquery
 
         labels, key = perf["labels"], perf["labels"]["key"]
-        # Latest prediction per key from this model version, joined to the observed outcome.
-        sql = f"""
+        when = labels.get("time_column")
+        if when:
+            # Pipewright 1.2 (FR-78): each outcome meets the score made for its cut-off, never a later score that
+            # already knows the outcome. Outcomes of cut-offs this version has not scored are not counted.
+            sql = f"""
+            SELECT pr.churn_probability AS prob, CAST(lb.{labels['label']} AS INT64) AS outcome
+            FROM `{project}.{bq_dataset}.{ml_config['inference']['output_table']}` AS pr
+            JOIN `{project}.{bq_dataset}.{labels['table']}` AS lb
+              ON lb.{key} = pr.{key} AND DATE(lb.{when}) = pr.scored_for
+            WHERE pr.model_version_id = @version
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY pr.{key}, pr.scored_for ORDER BY pr.scored_at DESC) = 1"""
+        else:
+            # Latest prediction per key from this model version, joined to the observed outcome (1.0 and 1.1). With a
+            # cut-off in the data that is wrong once a newer batch is scored, so the monitoring row says so.
+            data = ml_config["data"]
+            if ((data.get("features_from") or {}).get("entity") or {}).get("time_column") or \
+                    (data.get("split") or {}).get("time_column"):
+                result["notes"].append("performance joined by key only: set monitoring.performance.labels.time_column "
+                                       "so outcomes meet the scores made for their cut-off")
+            sql = f"""
             SELECT pr.churn_probability AS prob, CAST(lb.{labels['label']} AS INT64) AS outcome
             FROM `{project}.{bq_dataset}.{ml_config['inference']['output_table']}` AS pr
             JOIN `{project}.{bq_dataset}.{labels['table']}` AS lb USING ({key})

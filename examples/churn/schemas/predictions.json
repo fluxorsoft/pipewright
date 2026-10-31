@@ -5,6 +5,6 @@
   {"name": "model_resource_name", "type": "STRING", "mode": "REQUIRED"},
   {"name": "model_version_id", "type": "STRING", "mode": "NULLABLE"},
   {"name": "run_id", "type": "STRING", "mode": "REQUIRED"},
-  {"name": "scored_at", "type": "TIMESTAMP", "mode": "REQUIRED"}
+  {"name": "scored_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "scored_for", "type": "DATE", "mode": "NULLABLE"}
 ]
-

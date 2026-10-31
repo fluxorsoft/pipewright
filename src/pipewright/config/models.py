@@ -56,6 +56,7 @@ class ResolvedUseCase:
     outputs: dict = field(default_factory=dict)   # store, gcs {format, external_tables, uri}, tables {name: fields}
     ray_requirements: Path | None = None           # extra packages for the Ray image (components.ray_requirements)
     synthetic_requirements: Path | None = None     # extra packages for the synthetic image (synthetic.requirements)
+    warnings: tuple = ()                           # not problems: `validate` prints them (Pipewright 1.2)
 
     @property
     def ray(self) -> dict | None:

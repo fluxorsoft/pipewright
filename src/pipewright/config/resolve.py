@@ -310,7 +310,23 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
                                                   .get("datasets")) is not None else {})},
         outputs=outputs, ray_requirements=ray_requirements, synthetic_requirements=synthetic_requirements,
+        warnings=tuple(_warnings(ml)),
     )
+
+
+def _warnings(ml: dict) -> list[str]:
+    """What `validate` points out without refusing: settings that work but probably not as the team means."""
+    out = []
+    data = ml.get("data") or {}
+    cutoff = (((data.get("features_from") or {}).get("entity") or {}).get("time_column")
+              or (data.get("split") or {}).get("time_column"))
+    perf = (ml.get("monitoring") or {}).get("performance") or {}
+    # Only data with a cut-off is scored again for later cut-offs; without one, the key is the only join there is.
+    if cutoff and perf.get("enabled") and perf.get("labels") and not perf["labels"].get("time_column"):
+        out.append("monitoring.performance joins outcomes to each key's latest score, by key only: once a newer "
+                   "batch is scored, outcomes meet the wrong scores. Set monitoring.performance.labels.time_column "
+                   "(the outcome's cut-off) and write scored_for with each score (FR-78)")
+    return out
 
 
 def _online_features(ml: dict, env: Environment, tenant: str, problems: list[str]) -> dict | None:

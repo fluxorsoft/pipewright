@@ -58,6 +58,12 @@ def score_batch(
         "run_id": run_id,
         "scored_at": datetime.now(timezone.utc),
     })
+    # The cut-off each score is for (Pipewright 1.2, FR-78): monitoring.performance joins outcomes to the score made
+    # for their cut-off (labels.time_column), never to a later score that already knows the outcome.
+    when = (((ml_config["data"].get("features_from") or {}).get("entity") or {}).get("time_column")
+            or (ml_config["data"].get("split") or {}).get("time_column"))
+    if when and when in df.columns:
+        out["scored_for"] = pd.to_datetime(df[when]).dt.date.to_numpy()
     where = write_table(ml_config["inference"]["output_table"], out, ml_config, project, bq_dataset, run_id)
     logging.info("scored %d rows with version %s -> %s", len(out), model_version, where)
     return len(out)

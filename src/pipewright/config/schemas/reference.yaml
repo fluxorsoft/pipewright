@@ -201,6 +201,7 @@ monitoring.performance.enabled: Whether performance is checked.
 monitoring.performance.labels: Where the observed outcomes are.
 monitoring.performance.labels.table: The table of observed outcomes.
 monitoring.performance.labels.key: The column that joins outcomes to predictions.
+monitoring.performance.labels.time_column: The outcome's cut-off column (Pipewright 1.2). With it, each outcome is joined to the score made for that cut-off (the scores table's scored_for), never to a later score that already knows the outcome. Without it, outcomes meet each key's latest score, and validate warns.
 monitoring.performance.labels.label: The column holding the observed outcome.
 monitoring.performance.metric: The metric computed on observed outcomes.
 monitoring.performance.min: The value below which an alert is raised.
