@@ -78,13 +78,14 @@ def test_prune_keeps_what_releases_pin_and_the_newest(monkeypatch):
     assert kept[digest(50)] == "not a package releases use"
     assert sorted(i.digest for i in p.delete) == sorted(digest(n) for n in (1, 2, 3, 4, 6, 7))
     text = prune.render(p, applied=False)
-    assert "would free 5.4 GB; run again with --apply to delete" in text and gcp.deleted == []
+    assert "would free up to 5.4 GB (less where layers are shared); run again with --apply" in text
+    assert gcp.deleted == []
 
     prune.apply(gcp, env(), p)
     assert len(gcp.deleted) == 6 and all(params == {"force": "true"} for _, params in gcp.deleted)
     assert any(url.endswith(f"/repositories/ml-images/packages/churn-components/versions/{digest(1)}")
                for url, _ in gcp.deleted)
-    assert "freed 5.4 GB" in prune.render(p, applied=True)
+    assert "freed up to 5.4 GB" in prune.render(p, applied=True)
 
 
 def test_an_environment_sharing_the_repository_keeps_its_images(monkeypatch):

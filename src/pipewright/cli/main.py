@@ -319,11 +319,16 @@ def cmd_model_predict(args) -> int:
 
 
 def cmd_model_list(args) -> int:
+    import contextlib
+
     from pipewright.gcp import Gcp
     from pipewright.models import registry
 
     uc, env = _one(args)
-    rows = registry.versions(uc, env, Gcp().session.credentials)
+    if args.json:                            # the Agent Platform SDK prints progress to stdout: keep it off the JSON
+        _quiet_agent_platform_sdk()
+    with contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext():
+        rows = registry.versions(uc, env, Gcp().session.credentials)
     if args.json:                            # Pipewright 1.2 (FR-86): stable field names
         print(json.dumps({"usecase": uc.name, "environment": env.name, "model": uc.model["name"],
                           "versions": [{"version": v.version_id, "default": v.default, "aliases": v.aliases,

@@ -144,7 +144,9 @@ def _gb(n: int) -> str:
 
 
 def render(p: PrunePlan, applied: bool) -> str:
-    lines = [f"Images in {p.repository}: {len(p.keep) + len(p.delete)} ({_gb(p.size(p.keep) + p.size(p.delete))})"]
+    # Image sizes count shared layers once per image; the repository stores each layer once (doctor's figure).
+    lines = [f"Images in {p.repository}: {len(p.keep) + len(p.delete)} ({_gb(p.size(p.keep) + p.size(p.delete))} "
+             "counting shared layers in every image)"]
     for i in p.keep:
         lines.append(f"  KEEP    {i.package}@{i.digest[:19]}  {_gb(i.size)}  {i.uploaded[:10]}  "
                      f"({p.reasons.get(i.digest)})")
@@ -154,6 +156,6 @@ def render(p: PrunePlan, applied: bool) -> str:
             lines.append(f"  {verb} {i.package}@{i.digest[:19]}  {_gb(i.size)}  {i.uploaded[:10]}")
     for e in p.errors:
         lines.append(f"  FAIL    {e}")
-    lines.append(f"{'freed' if applied else 'would free'} {_gb(p.size(p.delete))}"
+    lines.append(f"{'freed' if applied else 'would free'} up to {_gb(p.size(p.delete))} (less where layers are shared)"
                  + ("" if applied else "; run again with --apply to delete"))
     return "\n".join(lines)
