@@ -121,6 +121,7 @@ class AlertsPlan:
     update: list[str] = field(default_factory=list)
     delete: list[str] = field(default_factory=list)                 # policy names (resource)
     unchanged: list[str] = field(default_factory=list)
+    channels_delete: dict = field(default_factory=dict)             # email -> Pipewright channel no policy uses
     errors: list[str] = field(default_factory=list)
 
 
@@ -209,7 +210,37 @@ def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run:
             r = gcp.delete(f"{MON}/{name}")
             if not r.ok and r.status != 404:
                 plan.errors.append(f"delete {name}: {error_text(r)}")
+    _unused_channels(gcp, base, uc, live_channels, plan, dry_run)
     return plan
+
+
+def _unused_channels(gcp: Gcp, base: str, uc: ResolvedUseCase, live_channels: list[dict], plan: AlertsPlan,
+                     dry_run: bool) -> None:
+    """Pipewright 1.2 (FR-77): an email channel Pipewright created that no alert policy in the project uses once this
+    use case's policies are in place is deleted (an address that left notify). Channels Pipewright did not create are
+    never touched; the delete is not forced, so a channel a policy started using meanwhile stays."""
+    if plan.errors:
+        return
+    try:
+        policies = _list(gcp, f"{base}/alertPolicies", "alertPolicies")
+    except RuntimeError as e:
+        plan.errors.append(f"unused email channels not checked: {e}")
+        return
+    ours = lambda p: ((p.get("userLabels") or {}).get("pipewright-usecase") == _label(uc.name)  # noqa: E731
+                      and (p.get("userLabels") or {}).get("pipewright-environment") == _label(uc.environment))
+    # in a dry run this use case's policies are not changed yet: count the channels they would use instead
+    used = {c for p in policies if not (dry_run and ours(p)) for c in p.get("notificationChannels", [])}
+    used |= set(plan.channels.values()) if dry_run else set()
+    for c in live_channels:
+        if (c.get("userLabels") or {}).get("pipewright-managed") != "true" or c["name"] in used:
+            continue
+        email = (c.get("labels") or {}).get("email_address") or c["name"]
+        if not dry_run:
+            r = gcp.delete(f"{MON}/{c['name']}")
+            if not r.ok and r.status != 404:
+                plan.errors.append(f"delete email channel {email}: {error_text(r)}")
+                continue
+        plan.channels_delete[email] = c["name"]
 
 
 def prune(env: Environment, repo_usecases: set[str], gcp: Gcp | None = None, dry_run: bool = False,
@@ -286,6 +317,8 @@ def render(uc: ResolvedUseCase, plan: AlertsPlan, dry_run: bool) -> str:
     for n in plan.delete:
         status = "PLAN" if dry_run else "DONE"
         lines.append(f"  {status}  {n.rsplit('/', 1)[-1]}: {verb('delete')} (no longer configured)")
+    for e in sorted(plan.channels_delete):
+        lines.append(f"  {'PLAN' if dry_run else 'DONE'}  email channel {e}: {verb('delete')} (no policy uses it)")
     for err in plan.errors:
         lines.append(f"  FAIL  {err}")
     return "\n".join(lines)

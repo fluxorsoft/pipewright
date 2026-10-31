@@ -31,8 +31,8 @@ class FakeMonitoring:
             return R(200, {"notificationChannels": list(self.channels.values())})
         flt = params.get("filter", "")
         found = [p for p in self.policies.values()
-                 if f'"{p["userLabels"]["pipewright-usecase"]}"' in flt and
-                 f'"{p["userLabels"]["pipewright-environment"]}"' in flt]
+                 if not flt or (f'"{p["userLabels"]["pipewright-usecase"]}"' in flt and
+                                f'"{p["userLabels"]["pipewright-environment"]}"' in flt)]
         return R(200, {"alertPolicies": copy.deepcopy(found)})
 
     def post(self, url, body):
@@ -51,6 +51,7 @@ class FakeMonitoring:
     def delete(self, url):
         self.calls.append(("DELETE", url))
         self.policies.pop(url.split("/v3/", 1)[1], None)
+        self.channels.pop(url.split("/v3/", 1)[1], None)
         return R(200)
 
 
@@ -130,3 +131,22 @@ def test_bad_addresses_and_events_rejected(repo):
         uc_for(repo, notify=["not-an-email"])
     with pytest.raises(ConfigError, match="is not one of"):
         uc_for(repo, notify=["a@b.co"], events=["drift"])
+
+
+def test_an_address_that_left_notify_loses_its_channel(repo):
+    # FR-77 (Pipewright 1.2), the ebook's Chapter 14: a test address swapped for the team's left its channel behind.
+    mon = FakeMonitoring()
+    first = uc_for(repo, notify=["tester@example.com"], events=["monitoring.alert"])
+    env = load_environment(repo.root, "dev")
+    alerts.sync(first, env, mon)
+    other = "projects/acme-ml-dev/notificationChannels/zzz-platform"     # not Pipewright's: never touched
+    mon.channels[other] = {"name": other, "type": "email", "labels": {"email_address": "ops@example.com"}}
+    swapped = uc_for(repo, notify=["ml-team@example.com"], events=["monitoring.alert"])
+    dry = alerts.sync(swapped, env, mon, dry_run=True)
+    assert list(dry.channels_delete) == ["tester@example.com"] and len(mon.channels) == 2
+    assert "email channel tester@example.com: would delete (no policy uses it)" in alerts.render(swapped, dry, True)
+    plan = alerts.sync(swapped, env, mon)
+    assert list(plan.channels_delete) == ["tester@example.com"] and not plan.errors
+    left = sorted(c["labels"]["email_address"] for c in mon.channels.values())
+    assert left == ["ml-team@example.com", "ops@example.com"]
+    assert not alerts.sync(swapped, env, mon).channels_delete
