@@ -28,6 +28,19 @@ def test_bigquery_ml_leaves_the_cut_off_out_and_warns_about_the_key(repo):
     assert any("customer_id" in w and "snapshot_date" not in w and "FR-68" in w for w in uc.warnings)
 
 
+def test_the_cut_off_leaves_the_default_drift_features_too(repo):
+    # Found live: drift on, the features left to the default; evaluation profiled snapshot_date for the drift
+    # baseline and failed the same way.
+    bqml_repo(repo)
+    spec = with_entity(repo).usecase["spec"]
+    spec["monitoring"] = {"drift": {"enabled": True}, "output_table": "monitoring"}
+    spec["outputs"]["bigquery"]["tables"]["monitoring"] = "schemas/scores.json"
+    drift = resolve(repo).ml["monitoring"]["drift"]["features"]
+    assert "snapshot_date" not in drift and "tenure_months" in drift
+    repo.usecase["spec"]["monitoring"]["drift"]["features"] = ["tenure_months"]     # listed: left alone
+    assert resolve(repo).ml["monitoring"]["drift"]["features"] == ["tenure_months"]
+
+
 def test_the_container_path_keeps_the_default_and_warns(repo):
     ml_repo(repo)
     uc = resolve_container(with_entity(repo))

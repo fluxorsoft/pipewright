@@ -338,6 +338,12 @@ def _entity_columns_as_features(ml: dict, ml_spec: dict, bqml: bool) -> list[str
         return []                                  # none of them, or the team listed its features itself
     if bqml and entity.get("time_column") in found:
         ml["features"]["include"] = [c for c in include if c != entity["time_column"]]
+        # The drift features default to the features (config/ml.py), copied before this: the cut-off leaves both,
+        # or evaluation fails profiling it for the drift baseline (found live).
+        drift = (ml.get("monitoring") or {}).get("drift") or {}
+        if (((ml_spec.get("monitoring") or {}).get("drift") or {}).get("features") is None
+                and entity["time_column"] in (drift.get("features") or [])):
+            drift["features"] = [c for c in drift["features"] if c != entity["time_column"]]
         found = [c for c in found if c != entity["time_column"]]
         if not found:
             return []
