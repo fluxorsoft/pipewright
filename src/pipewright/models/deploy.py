@@ -32,6 +32,7 @@ class DeployPlan:
     other_versions: list[str]
     gate_problems: list = None          # problems with the default version's evaluation record
     labels: dict = None                 # the default version's registry labels (BigQuery ML: run and model)
+    store_problem: str | None = None    # online features: the model would read another environment's store (FR-76)
 
 
 def endpoint_name(uc: ResolvedUseCase) -> str:
@@ -48,6 +49,57 @@ def check_approval(uc: ResolvedUseCase, identity: str | None, approved: bool, ke
     if users and identity not in users:
         raise ConfigError(f"{identity or 'this identity'} is not an approver for {uc.name} "
                           f"(approvers: {', '.join(uc.approvals['approvers'])})")
+
+
+def model_env_vars(model) -> dict:
+    """The serving container's environment variables of a registry model version (aiplatform.Model)."""
+    spec = getattr(getattr(model, "gca_resource", None), "container_spec", None)
+    return {e.name: e.value for e in (getattr(spec, "env", None) or [])}
+
+
+def online_store_problem(uc: ResolvedUseCase, env: Environment, gcp, model) -> str | None:
+    """FR-76: with online features, the model must read this environment's online store, not the one of the
+    environment it was trained or promoted from."""
+    expected = uc.ml.get("online_features")
+    if not expected:
+        return None
+    from pipewright.models import online
+
+    serving_json = None
+    uri = getattr(model, "uri", None) or ""
+    if uri.startswith("gs://"):
+        import json
+
+        from pipewright.gcp.storage import gcs_read
+
+        bucket, _, prefix = uri[len("gs://"):].partition("/")
+        text, _ = gcs_read(gcp, bucket, f"{prefix.rstrip('/')}/serving.json")
+        serving_json = json.loads(text) if text else None
+    return online.check(expected, model_env_vars(model), serving_json, env.name)
+
+
+def operations_in_progress(gcp, env: Environment, endpoint_resource: str) -> list[str]:
+    """Unfinished operations on an endpoint (a deploy, an undeploy, a traffic change), as short descriptions."""
+    resp = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint_resource}/operations",
+                   filter="done=false")
+    out = []
+    for op in ((resp.body or {}).get("operations") or []) if resp.ok else []:
+        if op.get("done"):
+            continue
+        meta = op.get("metadata") or {}
+        kind = (meta.get("@type") or "").rsplit(".", 1)[-1].replace("OperationMetadata", "") or "an operation"
+        started = ((meta.get("genericMetadata") or {}).get("createTime") or "")[:19].replace("T", " ")
+        out.append(f"{kind}" + (f" started {started} UTC" if started else ""))
+    return out
+
+
+def refuse_if_busy(gcp, env: Environment, endpoint, name: str) -> None:
+    """FR-74: one change to an endpoint at a time. A second deploy started while the first runs would deploy the
+    same version twice, or be refused half-way by Agent Platform when the traffic split changes under it."""
+    busy = operations_in_progress(gcp, env, endpoint.resource_name)
+    if busy:
+        raise ConfigError(f"{name} is busy: {', '.join(busy)}. Wait for it to finish (deploys take 10 to 20 "
+                          "minutes), then run the command again: it does nothing if the version is already live")
 
 
 def _aiplatform(env: Environment, creds):
@@ -82,7 +134,8 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
                       serving["replicas"], bool(current),
                       [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems,
-                      dict(getattr(default, "labels", None) or {}))
+                      dict(getattr(default, "labels", None) or {}),
+                      online_store_problem(uc, env, Gcp(creds), default))
 
 
 def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, log=print) -> None:
@@ -93,12 +146,18 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                                              "then deploy"],
                           source=f"v{p.version} of {p.model} is not served: the default version does not pass "
                                  f"{uc.name}'s evaluation gates")
+    if p.store_problem:
+        raise ConfigError(p.store_problem, source=f"v{p.version} of {p.model} is not served")
     if p.already_deployed:
-        log(f"v{p.version} of {p.model} is already live on {p.endpoint}")
+        log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return
     registered = ai.Model.list(filter=f'display_name="{p.model}"')[0]
     model = ai.Model(model_name=f"{registered.resource_name}@default")
     endpoints = ai.Endpoint.list(filter=f'display_name="{p.endpoint}"')
+    if endpoints:
+        from pipewright.gcp import Gcp
+
+        refuse_if_busy(Gcp(creds), env, endpoints[0], p.endpoint)
     endpoint = endpoints[0] if endpoints else ai.Endpoint.create(
         display_name=p.endpoint, labels={"pipewright-usecase": uc.name, "pipewright-tenant": uc.tenant},
         encryption_spec_key_name=env.security.get("kms_key"))
@@ -169,6 +228,9 @@ def _canary_state(uc: ResolvedUseCase, env: Environment, creds):
     if not endpoints:
         raise ConfigError(f"{endpoint_name(uc)} does not exist: nothing to promote")
     endpoint = endpoints[0]
+    from pipewright.gcp import Gcp
+
+    refuse_if_busy(Gcp(creds), env, endpoint, endpoint_name(uc))
     deployed = endpoint.list_models()
     if len(deployed) < 2:
         raise ConfigError(f"{endpoint_name(uc)} has no canary (it serves {len(deployed)} model)")

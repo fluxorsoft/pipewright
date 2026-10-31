@@ -358,6 +358,7 @@ model.serving.replicas: How many replicas serve.
 model.serving.replicas.min: The fewest replicas.
 model.serving.replicas.max: The most replicas, reached under load.
 model.serving.canary_percent: The share of traffic a new version gets with `deploy-model --canary`.
+model.serving.fill_missing: The endpoint fills an empty feature (request or online) with the median the model was trained with, as batch scoring does (Pipewright 1.2, default true). Set false to answer an error naming the feature instead.
 
 approvals: Which changes need a person.
 approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.

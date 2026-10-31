@@ -237,6 +237,8 @@ def cmd_deploy_model(args) -> int:
           + ("  [already live]" if p.already_deployed else "")
           + (f"; replaces {', '.join(p.other_versions)}" if p.other_versions else ""))
     print("evaluation gates: " + ("pass" if not p.gate_problems else "FAIL\n  " + "\n  ".join(p.gate_problems)))
+    if uc.ml.get("online_features"):
+        print("online store: " + ("FAIL\n  " + p.store_problem if p.store_problem else "this environment's"))
     if args.dry_run:
         return 0
     deploy_model.check_approval(uc, gcp.identity(), args.approve)

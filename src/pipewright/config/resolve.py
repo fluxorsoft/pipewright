@@ -226,6 +226,8 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         online = _online_features(ml, env, tenant, problems)
         if online:
             ml["online_features"] = online
+    if model["serving"].get("fill_missing") is False:    # FR-73: only when set; the default (fill) is not written
+        ml["serving"] = {"fill_missing": False}
     task = ((ml["data"].get("label") or {}).get("task")) or "binary"
     if task in ("clustering", "decomposition") and not bqml_spec:
         problems.append(f"data.label.task {task}: BigQuery ML only (bqml.model_type kmeans or pca)")

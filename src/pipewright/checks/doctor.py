@@ -459,6 +459,37 @@ def _check_online_features(uc: ResolvedUseCase, gcp: Gcp, report: Report) -> Non
         report.add(s, Result(OK if age <= ONLINE_STALE_HOURS else WARN, f"view {view['view']}",
                              f"last sync {finished[0][:16]} ({age:.0f} h ago); {len(view['features'])} features",
                              "" if age <= ONLINE_STALE_HOURS else "values older than the view's sync schedule"))
+    _check_champion_store(uc, gcp, report, s, api)
+
+
+def _check_champion_store(uc: ResolvedUseCase, gcp: Gcp, report: Report, s: str, api: str) -> None:
+    """FR-76: the champion reads this environment's online store, not the one it was trained or promoted from."""
+    import json
+
+    from pipewright.gcp.storage import gcs_read
+    from pipewright.models import online
+
+    parent = f"projects/{uc.platform['project']}/locations/{uc.platform['region']}"
+    found = gcp.get(f"{api}/{parent}/models", filter=f'display_name="{uc.model["name"]}"')
+    models = (found.body or {}).get("models", []) if found.ok else []
+    if not models:
+        report.add(s, Result(INFO, "champion's online store", "no model registered yet"))
+        return
+    default = gcp.get(f"{api}/{models[0]['name']}@default")
+    if not default.ok:
+        report.add(s, Result(WARN, "champion's online store", f"cannot read the default version: HTTP {default.status}"))
+        return
+    body = default.body or {}
+    env_vars = {e.get("name"): e.get("value") for e in (body.get("containerSpec") or {}).get("env") or []}
+    uri = body.get("artifactUri") or ""
+    serving_json = None
+    if uri.startswith("gs://"):
+        bucket, _, prefix = uri[len("gs://"):].partition("/")
+        text, _ = gcs_read(gcp, bucket, f"{prefix.rstrip('/')}/serving.json")
+        serving_json = json.loads(text) if text else None
+    problem = online.check(uc.ml["online_features"], env_vars, serving_json, uc.environment)
+    report.add(s, Result(FAIL, "champion's online store", problem, "") if problem else
+               Result(OK, "champion's online store", f"v{body.get('versionId')} reads this environment's store"))
 
 
 def _check_feature_tables(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:

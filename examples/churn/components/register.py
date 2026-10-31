@@ -92,10 +92,16 @@ def register_model(
     alias = re.sub(r"[^a-z0-9-]", "-", f"run-{run_id}".lower())[:127]
     primary = ml_config["evaluation"]["primary_metric"]
     value = evaluation["metrics"].get(primary)
+    online = ml_config.get("online_features")
     registered = aiplatform.Model.upload(
         display_name=model_display_name,
         artifact_uri=model.uri,
         serving_container_image_uri=SERVING_IMAGE,
+        # The environment's online lookup on the container, which the handler prefers over serving.json, so a
+        # promoted copy can be given the destination's (Pipewright 1.2, FR-76).
+        serving_container_environment_variables=(
+            {"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
+            if online else None),
         parent_model=existing[0].resource_name if existing else None,
         is_default_version=make_default,
         version_aliases=[alias],

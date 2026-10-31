@@ -83,7 +83,7 @@ ONLINE = {"store": STORE, "key": "customer_id",
                     {"view": "support", "features": {"s_tickets": "num_support_tickets"}}]}
 
 
-def test_the_handler_builds_rows_in_feature_order_and_never_defaults():
+def test_the_handler_builds_rows_in_feature_order_and_never_invents_a_value():
     h = handler()
     calls = []
 
@@ -94,11 +94,46 @@ def test_the_handler_builds_rows_in_feature_order_and_never_defaults():
     assert h.online_row({"customer_id": "c-1"}, ONLINE, ["s_tickets", "tenure_months"], "t", fetcher) == [3.0, 12.0]
     assert h.online_row("c-2", ONLINE, ["tenure_months"], "t", fetcher) == [12.0]
     assert calls[-1] == ("support", "c-2")
-    with pytest.raises(ValueError, match="no value of s_tickets"):
+    with pytest.raises(ValueError, match="no usable value of s_tickets"):      # no medians: a model before 1.2
         h.online_row("c-3", ONLINE, ["s_tickets"], "t", lambda *a: {})
     with pytest.raises(ValueError, match="an instance is an entity ID"):
         h.online_row([1, 2], ONLINE, ["s_tickets"], "t", fetcher)
     assert h._value({"int64Value": "7"}) == 7.0 and h._value({}) is None
+
+
+# FR-73: an empty value online is filled with the training median, as batch scoring fills it.
+def test_an_empty_online_value_takes_the_training_median():
+    h = handler()
+    # The ebook's Chapter 13: a one-order customer has no rhythm in the online store.
+    row = h.online_row("12350", ONLINE, ["tenure_months", "s_tickets"], "t",
+                       lambda store, view, key, token: {"profile": {"tenure_months": 6.0}, "support": {}}[view],
+                       medians={"s_tickets": 1.0, "tenure_months": 24.0})
+    assert row == [6.0, 1.0]
+    with pytest.raises(ValueError, match="no usable value of s_tickets and the model has no median"):
+        h.online_row("12350", ONLINE, ["s_tickets"], "t", lambda *a: {}, medians={})
+
+
+def test_request_rows_are_filled_or_answered_per_instance():
+    h = handler()
+    tensors = []
+    h.torch.tensor = lambda rows, dtype=None: tensors.append(rows) or rows
+    h.torch.float32 = "float32"
+    obj = h.TabularChurnHandler()
+    obj._features, obj._medians = ["recency_days", "avg_days_between_orders"], {"avg_days_between_orders": 47.5}
+    obj._preprocess_rows([[301, None], [30, "65.6"], [12, float("nan")], [1, 2, 3]])
+    assert tensors[-1][:3] == [[301.0, 47.5], [30.0, 65.6], [12.0, 47.5]]
+    assert "takes 2" in obj._errors[3] and set(obj._errors) == {3}
+    obj._medians = None                                                     # fill_missing false
+    obj._preprocess_rows([[301, None]])
+    assert "no usable value of avg_days_between_orders" in obj._errors[0]
+
+
+def test_a_model_from_before_1_2_serves_rows_as_before():
+    h = handler()
+    h.torch.tensor, h.torch.float32 = (lambda rows, dtype=None: rows), "float32"
+    obj = h.TabularChurnHandler()
+    obj._features, obj._medians = None, None                                # no features.json, no serving.json
+    assert obj._preprocess_rows([[1, 2]]) == [[1, 2]] and obj._errors == {}
 
 
 def test_a_bare_entity_id_is_not_json():

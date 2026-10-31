@@ -322,8 +322,12 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     files = copy_model_files(gcp, chosen["artifactUri"], dest_uri, log)
 
     dst_model = _find_model(gcp, dst_env, name)
+    from pipewright.models import online
+
+    # FR-76: the destination's own online lookup, never the source's (serving.json in the files names the source's).
+    spec = online.container_spec(chosen.get("containerSpec"), uc_dst.ml.get("online_features"))
     body = {"model": {
-        "displayName": name, "artifactUri": dest_uri, "containerSpec": chosen.get("containerSpec") or {},
+        "displayName": name, "artifactUri": dest_uri, "containerSpec": spec,
         "versionAliases": [f"promoted-{src_env.name}-v{version}"[:128]],
         "versionDescription": f"promoted from {src_env.name} v{version} (release {release_id})",
         "labels": {"usecase": uc_dst.name[:63], "status": "candidate", "release": publish._tag(release_id)[:63],
