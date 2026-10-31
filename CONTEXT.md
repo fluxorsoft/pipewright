@@ -1156,7 +1156,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | First open-source release: `1.0.0` stable (D-86), rehearsed with a throwaway pre-release tag; wheel and launcher image; STABILITY.md (the stable surface and the deprecation policy); every 0.4 reference moved to 1.0 | Released 2026-10-17; re-cut 2026-10-18 with synthetic data |
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
-| OpenTelemetry export from the launcher | Planned: phase 4, after 1.1.0 (user, 2026-10-24) |
+| OpenTelemetry export from the launcher | Planned: phase 5 (user, 2026-10-31; was phase 4) |
 | GPU limits for pipeline steps (FR-58): accelerator types and counts per environment for `steps.<name>.gpu`, as Ray already has | Planned: phase 4, to review (user, 2026-10-27) |
 | A base image per use case (FR-59): `components.base_image`, within the image allow-list, for example CUDA for GPU training | Planned: phase 4, to review (user, 2026-10-27) |
 | How to call a deployed model (FR-60): `deploy-model` prints the endpoint ID, the predict URL, the caller's role and a sample request | Planned: phase 4 (user, 2026-10-27) |
