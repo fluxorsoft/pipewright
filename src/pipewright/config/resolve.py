@@ -297,6 +297,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         labels=meta.get("labels", {}), contacts=meta.get("contacts", []), source=str(path),
         description=meta.get("description", ""), objective=meta.get("objective", ""), ml=ml,
         tests_command=(eff.get("tests") or {}).get("command"), sources=assembled.sources,
+        tests_on_release=bool((eff.get("tests") or {}).get("on_release")),
         platform={"project": env.project, "region": env.region, "launcher_url": env.launcher.get("url"),
                   "bigquery_dataset": resources.get("bigquery_dataset"), "tenant": tenant,
                   "events_topic": env.observability.get("events_topic"),

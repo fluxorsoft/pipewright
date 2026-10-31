@@ -336,8 +336,9 @@ synthetic.sequences.key: The column that refers to the entity table's key.
 synthetic.sequences.order_by: The column the events are ordered by within each entity (usually a timestamp).
 synthetic.sequences.columns: The columns to learn and generate (default all). Keys and personal data among them are never learned as values.
 
-tests: How `pipewright test` and the release check the use case's code.
+tests: How `pipewright test` checks the use case's code (the CI pull-request workflow runs it), and with tests.on_release `pipewright release` too.
 tests.command: The command run in the use case folder; it must exit 0.
+tests.on_release: When true, `pipewright release` runs tests.command before it builds anything and stops on a non-zero exit (default false: the release does not run the tests; Pipewright 1.2).
 
 outputs: Where the use case's tables are written.
 outputs.store: bigquery (tables), gcs (Parquet files plus BigQuery external tables) or both, for example while moving to a lake.

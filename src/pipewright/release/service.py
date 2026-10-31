@@ -108,6 +108,13 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
 
     pointer, generation = read_pointer(gcp, env, uc.name)
 
+    if uc.tests_on_release:                 # tests.on_release (Pipewright 1.2, FR-66): before anything changes
+        from pipewright.testing import runner
+
+        code = runner.run(uc, log=log)
+        if code:
+            raise ConfigError(f"tests.command failed (exit {code}): nothing was built or released")
+
     if not skip_tables:
         results = tables_sync.sync(uc, env, gcp)
         log(tables_sync.render(results, uc, dry_run=False))

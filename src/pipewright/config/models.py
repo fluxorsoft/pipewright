@@ -50,6 +50,7 @@ class ResolvedUseCase:
     objective: str = ""
     ml: dict = field(default_factory=dict)     # resolved ML sections, passed to pipelines as `ml_config`
     tests_command: str | None = None
+    tests_on_release: bool = False      # tests.on_release (Pipewright 1.2, FR-66)
     sources: list = field(default_factory=list)
     platform: dict = field(default_factory=dict)  # launcher_url, project, region, bigquery_dataset, events_topic,
     #                                               run_requests_topic, kms_key
@@ -136,6 +137,7 @@ class ResolvedUseCase:
             },
             "model": self.model,
             "approvals": self.approvals,
-            "tests": {"command": self.tests_command} if self.tests_command else None,
+            "tests": {"command": self.tests_command, **({"on_release": True} if self.tests_on_release else {})}
+            if self.tests_command else None,
             "labels": self.labels,
         }
