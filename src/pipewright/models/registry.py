@@ -67,6 +67,18 @@ def gate_problems(uc: ResolvedUseCase, creds, resource: str, version, earlier_ve
     return gates.verify(Gcp(creds), artifact_uri(resource, str(version), uc), uc.ml["evaluation"], earlier_versions)
 
 
+def version_labels(env: Environment, creds, resource: str) -> dict[str, dict]:
+    """{version: labels}: the SDK's version listing leaves labels out; the REST listing has them."""
+    from pipewright.gcp import Gcp
+
+    try:
+        resp = Gcp(creds).get(f"https://{env.region}-aiplatform.googleapis.com/v1/{resource}:listVersions",
+                              pageSize=100)
+    except Exception:  # noqa: BLE001 - labels are a nicety for the listing
+        return {}
+    return {str(m.get("versionId")): m.get("labels") or {} for m in (resp.body or {}).get("models", [])}         if resp.ok else {}
+
+
 def _number(version_id) -> int:
     return int(version_id) if str(version_id).isdigit() else 0
 
@@ -76,11 +88,12 @@ def versions(uc: ResolvedUseCase, env: Environment, creds, check_gates: bool = T
 
     resource = _resource(uc, env, creds)
     out = []
+    labelled = version_labels(env, creds, resource)
     for v in ModelRegistry(model=resource).list_versions():
         aliases = list(v.version_aliases or [])
         out.append(Version(str(v.version_id), "default" in aliases, [a for a in aliases if a != "default"],
                            v.version_description or "", str(v.version_create_time)[:19],
-                           dict(getattr(v, "labels", None) or {})))
+                           labelled.get(str(v.version_id)) or dict(getattr(v, "labels", None) or {})))
     out.sort(key=lambda v: _number(v.version_id), reverse=True)
     oldest = min((_number(v.version_id) for v in out), default=0)
     for v in out[:limit] if check_gates and gates.needs_record(uc.ml["evaluation"]) else []:
@@ -99,8 +112,41 @@ def render(uc: ResolvedUseCase, rows: list[Version]) -> str:
     for v in rows:
         status = "DEFAULT" if v.default else v.labels.get("status", "")
         gate = f"  [gates {v.gates}]" if v.gates else ""
-        lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}{gate}")
+        unapproved = "  (not approved: `pipewright model approve`)" if v.default and pending_approval(v.labels) else ""
+        lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}{gate}{unapproved}")
     return "\n".join(lines)
+
+
+# FR-83 (Pipewright 1.2): Model Registry makes a model's first version its default by itself. Under a manual policy
+# (registry.set_default manual, from approvals.promote_model manual) the register step labels that version
+# approval=pending: it is the default, but nobody approved it. `pipewright model approve` records the approval;
+# until then `model list` says so, `doctor` warns and `deploy-model` refuses it. Scoring is unchanged.
+APPROVAL_LABEL = "approval"
+
+
+def pending_approval(labels: dict | None) -> bool:
+    return (labels or {}).get(APPROVAL_LABEL) == "pending"
+
+
+def _approve_first_version(uc: ResolvedUseCase, env: Environment, creds, resource: str, version: str,
+                           identity: str | None, log=print) -> None:
+    import io
+
+    from pipewright.gcp import Gcp
+    from pipewright.observability import events
+
+    gcp = Gcp(creds)
+    url = f"https://{env.region}-aiplatform.googleapis.com/v1/{resource}@{version}"
+    current = gcp.get(url)
+    labels = {**((current.body or {}).get("labels") or {}), APPROVAL_LABEL: "approved"}
+    resp = gcp.patch(url, {"labels": labels}, updateMask="labels")
+    if not resp.ok:
+        raise ConfigError(f"recording the approval of v{version}: HTTP {resp.status}")
+    events.emit(events.event("model.approved", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
+                             version=version, previous=None, by=identity, first_version=True),
+                env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
+    log(f"{uc.model['name']}: v{version}, the first version and already the default, is approved"
+        + (f" by {identity}" if identity else ""))
 
 
 def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity: str | None, approved: bool,
@@ -115,6 +161,9 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
     if version not in known:
         raise ConfigError(f"{uc.model['name']} has no version {version} (versions: {', '.join(sorted(known))})")
     if "default" in (known[version].version_aliases or []):
+        if pending_approval(version_labels(env, creds, resource).get(version)):
+            _approve_first_version(uc, env, creds, resource, version, identity, log)
+            return
         log(f"v{version} of {uc.model['name']} is already the default")
         return
     previous = next((k for k, v in known.items() if "default" in (v.version_aliases or [])), None)

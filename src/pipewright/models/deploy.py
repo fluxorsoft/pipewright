@@ -148,6 +148,13 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                                  f"{uc.name}'s evaluation gates")
     if p.store_problem:
         raise ConfigError(p.store_problem, source=f"v{p.version} of {p.model} is not served")
+    from pipewright.models.registry import pending_approval
+
+    if pending_approval(p.labels):
+        raise ConfigError(f"approve it first: pipewright model approve --env {env.name} --usecase {uc.name} "
+                          f"--version {p.version} --approve",
+                          source=f"v{p.version} of {p.model} is not served: it became the default as the model's "
+                                 "first version, and nobody has approved it (approvals.promote_model manual)")
     if p.already_deployed:
         log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return

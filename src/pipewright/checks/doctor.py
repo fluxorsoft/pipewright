@@ -363,6 +363,25 @@ def _launcher_service(env: Environment, gcp: Gcp) -> str | None:
     return None
 
 
+def _check_champion_approval(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, s: str) -> None:
+    """FR-83: under a manual policy, a first version that became the default by itself waits for a person."""
+    from pipewright.models.registry import pending_approval
+
+    api = f"https://{env.region}-aiplatform.googleapis.com/v1"
+    found = gcp.get(f"{api}/projects/{env.project}/locations/{env.region}/models",
+                    filter=f'display_name="{uc.model["name"]}"')
+    models = (found.body or {}).get("models", []) if found.ok else []
+    if not models:
+        return
+    default = gcp.get(f"{api}/{models[0]['name']}@default")
+    if default.ok and pending_approval((default.body or {}).get("labels")):
+        version = (default.body or {}).get("versionId")
+        report.add(s, Result(WARN, "champion approval", f"v{version} is the default as the model's first version, "
+                             "and nobody has approved it: deploy-model refuses it until then",
+                             f"pipewright model approve --env {env.name} --usecase {uc.name} --version {version} "
+                             "--approve"))
+
+
 def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
     s = f"ML lifecycle of {uc.name}"
     ml = uc.ml
@@ -375,6 +394,7 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
     if ml["registry"]["set_default"] == "manual":
         report.add(s, Result(INFO, "registry", "new versions are candidates: `pipewright model approve` makes one "
                              "the default"))
+        _check_champion_approval(uc, env, gcp, report, s)
     erasure = ml["data_protection"].get("erasure")
     if erasure:
         covered = [n for n, t in uc.tables.items() if any(f["name"] == erasure["key_column"] for f in t.fields)]

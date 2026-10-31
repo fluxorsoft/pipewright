@@ -272,7 +272,10 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
     # A model's first version is the registry's default from the start: the champion, as the container path labels it
     # (evidence EV-06 then reads it as a first version, not as a default without an approval).
     if default or str((rt.default_version(project, region, registry_id) or {}).get("versionId")) == str(version):
-        rt.label_version(project, region, registry_id, version, {"status": "champion"})
+        # Under a manual policy a first version is the default with nobody's approval (Pipewright 1.2, FR-83):
+        # `pipewright model approve` records it.
+        pending = {} if default else {"approval": "pending"}
+        rt.label_version(project, region, registry_id, version, {"status": "champion", **pending})
         default = True
     primary = ml_config["evaluation"]["primary_metric"]
     emit_event("model.registered", ml_config, run_id, model=registry_id, version=version, default=default,

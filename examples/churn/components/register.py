@@ -109,6 +109,10 @@ def register_model(
         encryption_spec_key_name=ml_config["platform"].get("kms_key"),   # CMEK in private environments
         labels={"run_id": alias[:63], "pipeline": "training", "usecase": ml_config["usecase"][:63],
                 "status": "champion" if make_default else "candidate",
+                # A first version is the default by itself; under a manual policy nobody has approved it yet
+                # (Pipewright 1.2, FR-83): `pipewright model approve` records the approval.
+                **({"approval": "pending"} if not existing and ml_config["registry"]["set_default"] == "manual"
+                   else {}),
                 # the release that trained it: `pipewright promote` promotes a model only with that release
                 **({"release": re.sub(r"[^a-z0-9-]", "-", os.environ["PIPEWRIGHT_RELEASE"].lower())[:63]}
                    if os.environ.get("PIPEWRIGHT_RELEASE") else {})},
