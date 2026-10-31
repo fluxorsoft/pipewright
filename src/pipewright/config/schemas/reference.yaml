@@ -186,7 +186,7 @@ inference.output_table: The table predictions are written to.
 inference.decision_threshold: The score above which a prediction is positive. Left out, evaluation.decision_threshold.
 
 monitoring: Checks run on each inference, for drift, prediction drift and performance against observed outcomes.
-monitoring.alerts.events: The events that send an email.
+monitoring.alerts.events: The events that send an email. run.failed (Pipewright 1.2) emails a run that ended failed or cancelled, found by the launcher within the hour.
 monitoring.alerts.severity: The severity of the alert policies.
 monitoring.drift: Whether the scored data has moved away from the training data, feature by feature.
 monitoring.drift.enabled: Whether drift is checked.

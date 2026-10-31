@@ -44,6 +44,9 @@ EVENTS = {
                            ["decision", "primary_metric", "primary_value", "champion_version"]),
     "model.registered": ('jsonPayload.pipewright_event.event_type="model.registered"', "model registered",
                          ["model", "version", "default", "primary_value"]),
+    # from the launcher's hourly tick (Pipewright 1.2, FR-67)
+    "run.failed": ('jsonPayload.pipewright_event.event_type="run.failed"', "pipeline run failed",
+                   ["pipeline", "job_id", "state", "failed_steps", "error"]),
 }
 
 # Retrain decision events (pipewright.retraining): emailed to retraining.decisions.notify.

@@ -17,7 +17,8 @@ Routes:
                      retrain.decision on /pubsub/run, with the person's "id_token": a private launcher accepts no
                      direct calls, so a decision no approver group has to make arrives there)
   POST /retraining/tick      {"digest"?}: snooze and decline expiry, escalation, the weekly digest (Cloud Scheduler);
-                     also removes Ray clusters whose run ended or whose deadline passed
+                     also removes Ray clusters whose run ended or whose deadline passed, and records run.failed
+                     for each run that ended failed or cancelled (Pipewright 1.2)
   POST /ray/clusters {"action": "create" | "delete", "usecase", "run_id", "step"}: a Ray step's cluster, from the use
                      case's runner identity (also as kind ray.cluster on /pubsub/run, with the runner's "id_token")
   GET  /health   live use cases and their releases (Cloud Run reserves paths ending in "z", e.g. /healthz)
@@ -231,7 +232,22 @@ def create_app(registry: Registry | None = None) -> Flask:
         results = decisions().tick(reg().live(), digest=digest)
         m = reg().manifest
         ray = rays().reap(m["project"], m["region"]) if m.get("project") and m.get("region") else []
-        return jsonify(results=results, ray=ray), 200
+        return jsonify(results=results, ray=ray, failed=failed_runs()), 200
+
+    def failed_runs() -> list:
+        """run.failed for each failed run since the last look (Pipewright 1.2, FR-67)."""
+        from pipewright.launcher import watch
+
+        m, r = reg().manifest, reg()
+        live = [c for c in r.live() if c.orchestrator != "kfp"]
+        if not live or not m.get("project") or not m.get("region"):
+            return []
+        try:
+            return watch.report(r.gcp, r.bucket, m["project"], m["region"], live,
+                                lambda contract, rid, detail: _event("run.failed", contract, rid, **detail))
+        except Exception as e:  # noqa: BLE001 - a failed look must not stop the tick
+            log.exception("failed runs not checked")
+            return [{"error": str(e)[:300]}]
 
     # ---------------------------------------------------------------------------------- Ray clusters --
     def rays() -> RayClusters:

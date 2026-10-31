@@ -747,7 +747,7 @@
             "notify": { "type": "array", "items": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" },
                         "description": "email addresses, including distribution lists" },
             "events": { "type": "array", "minItems": 1, "items": { "enum": ["monitoring.alert", "retrain.requested",
-                        "training.rejected", "training.evaluated", "model.registered"] } },
+                        "training.rejected", "training.evaluated", "model.registered", "run.failed"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         },
@@ -908,7 +908,7 @@
             "notify": { "type": "array", "items": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" },
                         "description": "email addresses, including distribution lists" },
             "events": { "type": "array", "minItems": 1, "items": { "enum": ["monitoring.alert", "retrain.requested",
-                        "training.rejected", "training.evaluated", "model.registered"] } },
+                        "training.rejected", "training.evaluated", "model.registered", "run.failed"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         } }
