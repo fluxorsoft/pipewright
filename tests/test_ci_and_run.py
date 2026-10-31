@@ -82,7 +82,8 @@ def test_render_rejects_bad_environments():
 def test_init_writes_files_once(repo):
     repo.write()
     written = ci.init(repo.root, ["dev"])
-    assert {p.relative_to(repo.root).as_posix() for p in written} == set(ci.FILES.values())
+    assert {p.relative_to(repo.root).as_posix() for p in written} == {*ci.FILES.values(),
+                                                                       ".github/pipewright-constraints.txt"}
     with pytest.raises(ConfigError, match="already present"):
         ci.init(repo.root, ["dev"])
     ci.init(repo.root, ["dev"], force=True)

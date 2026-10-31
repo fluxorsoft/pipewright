@@ -53,10 +53,16 @@ runs:
         venv="${RUNNER_TEMP}/pipewright-venv"
         python3 -m venv "$venv"
         echo "$venv/bin" >> "$GITHUB_PATH"
+        # The kfp Pipewright was tested with (written by `pipewright ci init`): a newer kfp would not match the
+        # components' requirements.txt, and every release would stop at the compile check.
+        constraints=()
+        if [ -f .github/pipewright-constraints.txt ]; then
+          constraints=(-c .github/pipewright-constraints.txt)
+        fi
         if [ -n "$PIP_INDEX" ]; then
           "$venv/bin/pip" install keyrings.google-artifactregistry-auth
-          "$venv/bin/pip" install --extra-index-url "$PIP_INDEX" "$PIP_SPEC"
+          "$venv/bin/pip" install "${constraints[@]}" --extra-index-url "$PIP_INDEX" "$PIP_SPEC"
         else
-          "$venv/bin/pip" install "$PIP_SPEC"
+          "$venv/bin/pip" install "${constraints[@]}" "$PIP_SPEC"
         fi
         "$venv/bin/pipewright" --version
