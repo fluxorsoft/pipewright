@@ -95,8 +95,10 @@ def test_write_snapshot_tags_the_rows_and_records_them(monkeypatch):
     rt.write_snapshot(pd.DataFrame({"customer_id": ["a", "b"]}), cfg, "p", "d", "r9", "bq://p.d.signups")
     table, df = written[0]
     assert table == "raw" and set(df["run_id"]) == {"r9"} and set(df["source_uri"]) == {"bq://p.d.signups"}
-    assert events[0] == ("data.snapshot.written", {"table": "raw", "rows": 2, "source_uri": "bq://p.d.signups",
-                                                   "locations": ["bq://p.d.raw"]})
+    name, fields_ = events[0]
+    assert name == "data.snapshot.written" and fields_["fingerprint"].startswith("sha256:")      # 1.2: FR-85
+    assert {k: v for k, v in fields_.items() if k != "fingerprint"} == {
+        "table": "raw", "rows": 2, "source_uri": "bq://p.d.signups", "locations": ["bq://p.d.raw"]}
     cfg["outputs"]["tables"]["raw"] = fields[:1]
     with pytest.raises(ValueError, match="needs the columns run_id, source_uri, ingested_at"):
         rt.write_snapshot(pd.DataFrame({"customer_id": ["a"]}), cfg, "p", "d", "r9", "bq://p.d.signups")

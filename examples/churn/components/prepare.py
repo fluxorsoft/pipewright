@@ -29,7 +29,13 @@ def prepare_data(
     logging.basicConfig(level=logging.INFO)
     data, features = ml_config["data"], ml_config["features"]["include"]
     label = data["label"]["column"]
-    df = pd.read_parquet(raw_data.path).dropna(subset=[label]).reset_index(drop=True)
+    df = pd.read_parquet(raw_data.path).dropna(subset=[label])
+    # Rows arrive from BigQuery in no fixed order, and training shuffles them from the order it receives. Sorted by
+    # the contract's unique key, a run and its replay train on the same sequence (Pipewright 1.2, FR-85).
+    key = [c for c in (data.get("contract") or {}).get("unique") or [] if c in df.columns]
+    if key:
+        df = df.sort_values(key, kind="stable")
+    df = df.reset_index(drop=True)
     train, val, test = split_frame(df, data["split"], label)
     medians = numeric_features(train, features).median().to_dict()
     train, val, test = (impute(x, features, medians) for x in (train, val, test))

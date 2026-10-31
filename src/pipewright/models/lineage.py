@@ -91,7 +91,36 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
         out["rows_table"] = {"table": rows["table"], **_rows(gcp, env, rows["table"], None)}
     out.update(decisions(gcp, env, uc.name, str(version), (out.get("release") or {}).get("release_id")
                          or labels.get("release")))
+    if snapshot:
+        out.update(fingerprints(gcp, env, record.get("run_id"), (record.get("data") or {}).get("replay_of")))
     return out
+
+
+def fingerprints(gcp, env: Environment, run_id: str | None, replay_of: str | None) -> dict:
+    """FR-85: the run's rows fingerprint from the event log and, for a replay, the original run's, compared."""
+    dataset = (env.observability or {}).get("evidence_dataset")
+    if not dataset or not run_id:
+        return {}
+    from pipewright.gcp.bigquery import query, rows
+
+    runs = [r for r in (run_id, replay_of) if r]
+    sql = (f"SELECT JSON_VALUE(data, '$.run_id') AS run, JSON_VALUE(data, '$.data.fingerprint') AS fingerprint "
+           f"FROM `{env.project}.{dataset}.events` WHERE JSON_VALUE(data, '$.event_type') IN "
+           "('data.snapshot.written', 'data.snapshot.replayed') AND JSON_VALUE(data, '$.run_id') IN UNNEST(@runs) "
+           "AND JSON_VALUE(data, '$.data.fingerprint') IS NOT NULL")
+    try:
+        found = rows(query(gcp, env.project, sql, [{"name": "runs", "parameterType": {
+            "type": "ARRAY", "arrayType": {"type": "STRING"}}, "parameterValue": {
+            "arrayValues": [{"value": r} for r in runs]}}], kms_key=env.security.get("bigquery_kms_key")))
+    except Exception:  # noqa: BLE001 - lineage still shows everything else
+        return {}
+    by_run = {r["run"]: r["fingerprint"] for r in found}
+    current = by_run.get(run_id)
+    out = {"rows": current}
+    if replay_of:
+        original = by_run.get(replay_of)
+        out.update(original=original, identical=None if not (current and original) else current == original)
+    return {"fingerprint": out} if current or replay_of else {}
 
 
 # Decisions about a version (Pipewright 1.2, FR-84): who approved, promoted, deployed or rolled it back, and how each
@@ -176,6 +205,12 @@ def render(info: dict) -> str:
         s = info["snapshot"]
         lines.append(f"  rows     snapshot {s['table']} run {s['run_id']}: "
                      + (s["error"] if s.get("error") else f"{s.get('rows')} rows, read {s.get('read_at')}"))
+    fp = info.get("fingerprint") or {}
+    if fp.get("rows") or "original" in fp:
+        same = fp.get("identical")
+        verdict = {True: "identical", None: "not recorded", False: "DIFFERENT (rows erased or changed since)"}[same]
+        lines.append(f"           fingerprint {fp.get('rows') or 'not recorded'}"
+                     + ("" if "original" not in fp else f"; the original run's rows: {verdict}"))
     if info.get("rows_table"):
         t = info["rows_table"]
         lines.append(f"  rows     {t['table']}: " + (t["error"] if t.get("error") else f"{t.get('rows')} rows"))
@@ -203,7 +238,8 @@ def _render_decisions(info: dict, lines: list[str]) -> None:
         what = {"model.approved": f"v{d.get('version')} made the champion",
                 "model.deployed": f"v{d.get('version')} deployed to {d.get('endpoint')} "
                                   f"({d.get('traffic_percent')}% of traffic)",
-                "model.undeployed": f"v{d.get('version')} undeployed", "release.live": f"release {d.get('release')} live",
+                "model.undeployed": f"v{d.get('version')} undeployed",
+                "release.live": f"release {d.get('release')} live",
                 "release.promoted": f"release {d.get('release')} promoted here",
                 "release.rolled_back": f"rolled back to release {d.get('release')}"}.get(d["event"], d["event"])
         how = _how(d.get("approval"))

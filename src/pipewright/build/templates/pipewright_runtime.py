@@ -278,7 +278,8 @@ def _read_snapshot(source_uri: str, project: str, ml_config: dict, run_id: str |
         raise ValueError("replaying a snapshot needs the BigQuery store (outputs.store bigquery or both)")
     ref = snapshot_table_ref(ml_config, project)
     client = bigquery_client(project, ml_config)
-    columns = [f.name for f in client.get_table(ref).schema if f.name not in SNAPSHOT_COLUMNS]
+    schema = client.get_table(ref).schema
+    columns = [f.name for f in schema if f.name not in SNAPSHOT_COLUMNS]
     job = client.query(f"SELECT {', '.join(_q(c) for c in columns)} FROM `{ref}` WHERE `run_id` = @run_id",
                        job_config=bigquery.QueryJobConfig(query_parameters=[
                            bigquery.ScalarQueryParameter("run_id", "STRING", replayed)]))
@@ -290,9 +291,47 @@ def _read_snapshot(source_uri: str, project: str, ml_config: dict, run_id: str |
             import pandas as pd
 
             df[col] = pd.to_datetime(df[col]).dt.strftime("%Y-%m-%d")
+    # FR-85: equal to the original run's data.snapshot.written fingerprint when the rows are the same rows.
+    types = [{"name": f.name, "type": getattr(f, "field_type", "STRING")} for f in schema]
+    fingerprint = rows_fingerprint(df, types, _snapshot_key(ml_config))
     emit_event("data.snapshot.replayed", ml_config, run_id, replayed_run=replayed, table=ref, rows=len(df),
-               query_job=job.job_id)
+               query_job=job.job_id, fingerprint=fingerprint)
     return df
+
+
+def rows_fingerprint(df, fields: list[dict], key: list[str] | None = None) -> str:
+    """A digest of rows that does not depend on their order or on how BigQuery hands types back (Pipewright 1.2,
+    FR-85): each value is written by its schema type (DATE as YYYY-MM-DD, TIMESTAMP in UTC, numbers with 15
+    significant digits, empty as empty), rows are sorted (by `key` first), and the lines are hashed. The snapshot's
+    own columns (run_id, source_uri, ingested_at) are left out, so a run and its replay compare equal."""
+    import hashlib
+
+    import pandas as pd
+
+    cols = [f for f in fields if f.get("name") in df.columns and f.get("name") not in SNAPSHOT_COLUMNS]
+    out = pd.DataFrame(index=df.index)
+    for f in cols:
+        col, kind = df[f["name"]], str(f.get("type", "STRING")).upper()
+        if kind == "DATE":
+            text = pd.to_datetime(col, errors="coerce").dt.strftime("%Y-%m-%d")
+        elif kind in ("TIMESTAMP", "DATETIME"):
+            text = pd.to_datetime(col, errors="coerce", utc=True).dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
+        elif kind in ("INTEGER", "INT64", "FLOAT", "FLOAT64", "NUMERIC", "BIGNUMERIC"):
+            text = pd.to_numeric(col, errors="coerce").map(lambda v: "" if pd.isna(v) else format(float(v), ".15g"))
+        else:
+            text = col.map(lambda v: "" if v is None or (isinstance(v, float) and v != v) else str(v))
+        out[f["name"]] = text.fillna("")
+    order = [c for c in (key or []) if c in out.columns] + [c for c in out.columns if c not in (key or [])]
+    lines = out.sort_values(order, kind="stable").astype(str).agg("\x1f".join, axis=1) if len(out) else []
+    digest = hashlib.sha256()
+    digest.update(("\x1f".join(order) + "\n").encode("utf-8"))
+    for line in lines:
+        digest.update((line + "\n").encode("utf-8"))
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _snapshot_key(ml_config: dict) -> list[str]:
+    return list(((ml_config.get("data") or {}).get("contract") or {}).get("unique") or [])
 
 
 def write_snapshot(rows, ml_config: dict, project: str, dataset: str, run_id: str, source_uri: str) -> list[str]:
@@ -308,10 +347,11 @@ def write_snapshot(rows, ml_config: dict, project: str, dataset: str, run_id: st
     if missing:
         raise ValueError(f"data.snapshot_table {table}: its schema needs the columns {', '.join(missing)}")
     df = (rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))).copy()
+    fingerprint = rows_fingerprint(df, fields, _snapshot_key(ml_config))     # FR-85: what a replay compares with
     df["run_id"], df["source_uri"], df["ingested_at"] = run_id, source_uri, datetime.now(timezone.utc)
     where = write_table(table, df, ml_config, project, dataset, run_id)
     emit_event("data.snapshot.written", ml_config, run_id, table=table, rows=len(df), source_uri=source_uri,
-               locations=where)
+               locations=where, fingerprint=fingerprint)
     return where
 
 

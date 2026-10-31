@@ -23,7 +23,8 @@ def test_an_unfinished_deploy_is_reported_with_when_it_started():
     gcp, seen = gcp_with([{"name": "op1", "metadata": {
         "@type": "type.googleapis.com/google.cloud.aiplatform.v1.DeployModelOperationMetadata",
         "genericMetadata": {"createTime": "2026-10-30T20:36:40.123Z"}}}])
-    assert deploy.operations_in_progress(gcp, ENV, ENDPOINT.resource_name) == ["DeployModel started 2026-10-30 20:36:40 UTC"]
+    assert deploy.operations_in_progress(gcp, ENV, ENDPOINT.resource_name) == [
+        "DeployModel started 2026-10-30 20:36:40 UTC"]
     assert seen["url"].endswith("/endpoints/42/operations") and seen["params"] == {"filter": "done=false"}
 
 

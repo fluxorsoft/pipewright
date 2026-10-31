@@ -501,7 +501,8 @@ def _check_champion_store(uc: ResolvedUseCase, gcp: Gcp, report: Report, s: str,
         return
     default = gcp.get(f"{api}/{models[0]['name']}@default")
     if not default.ok:
-        report.add(s, Result(WARN, "champion's online store", f"cannot read the default version: HTTP {default.status}"))
+        report.add(s, Result(WARN, "champion's online store",
+                             f"cannot read the default version: HTTP {default.status}"))
         return
     body = default.body or {}
     env_vars = {e.get("name"): e.get("value") for e in (body.get("containerSpec") or {}).get("env") or []}

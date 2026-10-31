@@ -198,7 +198,8 @@ class TabularChurnHandler(BaseHandler):
                     if len(row) != len(features):
                         raise ValueError(f"an instance has {len(row)} values, the model takes {len(features)} "
                                          f"({', '.join(features)})")
-                    prepared.append(fill_row(dict(zip(features, row)), features, getattr(self, "_medians", None),
+                    values = dict(zip(features, row))       # noqa: B905 - Python 3.9 in the serving image; lengths checked above
+                    prepared.append(fill_row(values, features, getattr(self, "_medians", None),
                                              where="the instance"))
                 except ValueError as err:
                     self._errors[i] = str(err)

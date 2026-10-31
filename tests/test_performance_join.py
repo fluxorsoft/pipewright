@@ -19,7 +19,7 @@ def monitor(monkeypatch):
     for p in (COMPONENTS, RUNTIME):
         monkeypatch.syspath_prepend(str(p))
     sys.modules.pop("monitor", None)
-    import monitor as module                                     # noqa: PLC0415 - the example's component
+    import monitor as module  # noqa: PLC0415 - the example's component
     return module
 
 
