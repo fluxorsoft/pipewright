@@ -73,7 +73,8 @@
           "properties": {
             "dir": { "type": "string", "minLength": 1 },
             "requirements": { "type": "string", "minLength": 1 },
-            "ray_requirements": { "type": "string", "minLength": 1 }
+            "ray_requirements": { "type": "string", "minLength": 1 },
+            "base_image": { "type": "string", "minLength": 1, "description": "the component image's base instead of the environment's (e.g. a CUDA image for GPU training), within its approved base images (Pipewright 1.2)" }
           }
         },
         "framework": { "enum": ["pytorch"] },

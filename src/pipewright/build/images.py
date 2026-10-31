@@ -196,6 +196,7 @@ def build_and_push(uc: ResolvedUseCase, repository: str, release_id: str, token:
     docker_login(repository.split("/", 1)[0], token)
     with tempfile.TemporaryDirectory(prefix="pipewright-build-") as tmp:
         ctx = build_context(uc, Path(tmp))
+        base_image = base_image or getattr(uc, "base_image", None)       # components.base_image (FR-59)
         if images_policy and images_policy.get("default_base_image") and not base_image:
             base_image = images_policy["default_base_image"]
         return _build_and_push(ctx, repository, f"{uc.name}-components", uc, release_id, base_image, verbose, gcp,

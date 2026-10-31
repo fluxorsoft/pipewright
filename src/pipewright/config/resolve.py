@@ -303,6 +303,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         description=meta.get("description", ""), objective=meta.get("objective", ""), ml=ml,
         tests_command=(eff.get("tests") or {}).get("command"), sources=assembled.sources,
         tests_on_release=bool((eff.get("tests") or {}).get("on_release")),
+        base_image=eff["components"].get("base_image"),
         tests_environment=(eff.get("tests") or {}).get("environment") or "pipewright",
         platform={"project": env.project, "region": env.region, "launcher_url": env.launcher.get("url"),
                   "bigquery_dataset": resources.get("bigquery_dataset"), "tenant": tenant,

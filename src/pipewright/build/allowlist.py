@@ -104,7 +104,7 @@ def with_index(text: str, pol: dict) -> str:
 
 def usecase_bases(uc, env, pol: dict) -> dict[str, str]:
     """The base image of each image a release of the use case builds."""
-    out = {"component image": component_base(pol)}
+    out = {"component image": getattr(uc, "base_image", None) or component_base(pol)}
     if getattr(uc, "ray", None):
         from pipewright.ray_clusters import settings as ray_settings
 

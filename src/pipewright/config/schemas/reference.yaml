@@ -26,6 +26,7 @@ pipelines.inference.function: The name of the inference pipeline function in tha
 components: Where the pipeline components' code lives. It is built into the component image every step runs in.
 components.dir: The folder of component code, relative to the use case folder.
 components.requirements: The requirements file installed into the component image.
+components.base_image: The component image's base instead of the environment's default (Pipewright 1.2), for example a CUDA image for GPU training. It must match the environment's approved base images (policies.images.base_images), and the release records it by digest. It needs Python 3.11 with pip on the path (python3, pip), as the default python:3.11-slim has; pin it by digest.
 components.ray_requirements: Extra packages for the use case's Ray image (the clusters' nodes), such as torch. The image is built at release on the platform's Ray base image, with the component code.
 framework: The ML framework of the component image.
 

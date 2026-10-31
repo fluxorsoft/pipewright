@@ -57,6 +57,7 @@ class ResolvedUseCase:
     #                                               run_requests_topic, kms_key
     outputs: dict = field(default_factory=dict)   # store, gcs {format, external_tables, uri}, tables {name: fields}
     ray_requirements: Path | None = None           # extra packages for the Ray image (components.ray_requirements)
+    base_image: str | None = None                  # components.base_image (Pipewright 1.2, FR-59)
     synthetic_requirements: Path | None = None     # extra packages for the synthetic image (synthetic.requirements)
     warnings: tuple = ()                           # not problems: `validate` prints them (Pipewright 1.2)
 
@@ -113,7 +114,8 @@ class ResolvedUseCase:
             "resources": self.resources,
             "pipelines": {n: ({"provided_by": "pipewright (synthetic.enabled)"} if n == "synthetic" and self.synthetic
                               else {"file": rel(p.file), "function": p.function}) for n, p in self.pipelines.items()},
-            "components": {"dir": rel(self.components_dir), "requirements": rel(self.requirements)},
+            "components": {"dir": rel(self.components_dir), "requirements": rel(self.requirements),
+                           **({"base_image": self.base_image} if self.base_image else {})},
             "framework": self.framework,
             "triggers": self.triggers,
             "parameters": self.parameters,
