@@ -24,6 +24,11 @@ from pipewright.bqml import (
 
 # The scoring output table: these columns, and any of the scored rows' columns the table also has.
 OUTPUT_COLUMNS = {"run_id": "STRING", "model_version_id": "STRING", "scored_at": "TIMESTAMP"}
+# bqml.metrics_table (Pipewright 1.2, FR-86): the row each training run writes, as the container examples' record
+# step does (bqml_steps.metrics_row; a test keeps the two in step)
+METRICS_COLUMNS = ("run_id", "source_uri", "model_display_name", "decision", "train_rows", "test_rows",
+                   "evaluated_at", "primary_metric", "primary_value", "champion_version", "champion_value",
+                   "decision_reasons", "metrics_json", "environment")
 TASK_OUTPUT_COLUMNS = {
     "binary": {"predicted_label": "STRING", "score": "FLOAT64"},      # score: probability of the positive class
     "multiclass": {"predicted_label": "STRING", "score": "FLOAT64"},  # score: probability of predicted_label
@@ -125,6 +130,18 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
     if resolved["transform"] and re.search(r"\bTRANSFORM\s*\(", resolved["transform"]["sql"], re.I):
         problems.append(f"{where}.transform: {spec['transform']} holds the TRANSFORM clause's expressions only, "
                         "without TRANSFORM ( ... )")
+
+    metrics = spec.get("metrics_table")          # Pipewright 1.2 (FR-86): only when set
+    if metrics:
+        if metrics not in tables:
+            problems.append(f"{where}.metrics_table {metrics!r} is not in outputs.bigquery.tables")
+        else:
+            have = {f["name"] for f in tables[metrics].fields}
+            missing = [c for c in METRICS_COLUMNS if c not in have]
+            if missing:
+                problems.append(f"{where}.metrics_table {metrics}: the schema lacks {', '.join(missing)} (the row "
+                                "each training run writes; the churn example's model_metrics.json has them)")
+        resolved["metrics_table"] = metrics
 
     output = ml["inference"].get("output_table")
     if has_inference and not output:

@@ -763,3 +763,22 @@ def proposal(ml_config: dict, run_id: str, fired: list[str], summary: dict, data
     }
     return {"kind": "retrain.proposal", "usecase": ml_config["usecase"], "run_id": run_id,
             "observation": observation, "champion": {"version": model_version, "resource_name": resource}}
+
+
+def metrics_row(ml_config: dict, run_id: str, rows_table: str, record: dict, now: str) -> dict:
+    """bqml.metrics_table (Pipewright 1.2, FR-86): the row a training run writes, approved or refused, with the
+    container examples' record step's column names (pipewright.bqml.config.METRICS_COLUMNS). The source is the
+    run's rows table, the rows this evaluation measured."""
+    import json
+
+    primary = ml_config["evaluation"]["primary_metric"]
+    champion = record.get("champion") or {}
+    return {"run_id": run_id, "source_uri": f"bq://{rows_table}",
+            "model_display_name": ml_config.get("model_name") or ml_config["bqml"].get("registry_id"),
+            "decision": record["decision"], "train_rows": (record.get("training_stats") or {}).get("rows"),
+            "test_rows": (record.get("rows") or {}).get("test"), "evaluated_at": now,
+            "primary_metric": primary, "primary_value": record["metrics"].get(primary),
+            "champion_version": champion.get("_version"), "champion_value": champion.get(primary),
+            "decision_reasons": json.dumps(record.get("reasons") or []),
+            "metrics_json": json.dumps({"metrics": record["metrics"], "champion": champion or None}, default=str),
+            "environment": ml_config.get("environment")}

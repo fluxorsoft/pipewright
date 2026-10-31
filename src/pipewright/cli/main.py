@@ -323,7 +323,16 @@ def cmd_model_list(args) -> int:
     from pipewright.models import registry
 
     uc, env = _one(args)
-    print(registry.render(uc, registry.versions(uc, env, Gcp().session.credentials)))
+    rows = registry.versions(uc, env, Gcp().session.credentials)
+    if args.json:                            # Pipewright 1.2 (FR-86): stable field names
+        print(json.dumps({"usecase": uc.name, "environment": env.name, "model": uc.model["name"],
+                          "versions": [{"version": v.version_id, "default": v.default, "aliases": v.aliases,
+                                        "description": v.description, "created": v.created, "labels": v.labels,
+                                        "gates": v.gates or None,
+                                        "approved": not registry.pending_approval(v.labels)} for v in rows]},
+                         indent=2, default=str))
+        return 0
+    print(registry.render(uc, rows))
     return 0
 
 
@@ -365,7 +374,18 @@ def cmd_monitor_status(args) -> int:
     from pipewright.monitoring import status
 
     uc, env = _one(args)
-    print(status.render(uc, status.recent(uc, env, args.limit)))
+    runs = status.recent(uc, env, args.limit)
+    if args.json:                            # Pipewright 1.2 (FR-86): the monitoring rows as recorded
+        cases = []
+        if uc.ml["retraining"]["mode"] != "off":
+            from pipewright.gcp import Gcp
+            from pipewright.retraining import client
+
+            cases = [c for c in client.store(env, Gcp()).list(uc.name) if c["state"] != "approved"][:5]
+        print(json.dumps({"usecase": uc.name, "environment": env.name, "runs": runs, "open_cases": cases},
+                         indent=2, default=str))
+        return 0
+    print(status.render(uc, runs))
     if uc.ml["retraining"]["mode"] != "off":
         from pipewright.gcp import Gcp
         from pipewright.retraining import client
@@ -390,7 +410,11 @@ def cmd_retrain_list(args) -> int:
     from pipewright.retraining import client
 
     env = _retrain_env(args)
-    print(client.render_list(args.usecase, env, client.store(env, Gcp()).list(args.usecase)[: args.limit]))
+    cases = client.store(env, Gcp()).list(args.usecase)[: args.limit]
+    if args.json:                            # Pipewright 1.2 (FR-86): the cases as stored
+        print(json.dumps({"usecase": args.usecase, "environment": env.name, "cases": cases}, indent=2, default=str))
+        return 0
+    print(client.render_list(args.usecase, env, cases))
     return 0
 
 
@@ -681,8 +705,17 @@ def cmd_status(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
     gcp = Gcp()
+    found = []
     for name in _selected(root, args.usecase, args.env):
         pointer, _ = release.read_pointer(gcp, env, name)
+        if args.json:                        # Pipewright 1.2 (FR-86): the pointer, and the live contract's summary
+            contract = release.read_contract(gcp, env, pointer.contract) if pointer else None
+            found.append({"usecase": name, "environment": env.name, "released": pointer is not None,
+                          **({"release": pointer.release_id, "since": pointer.updated_at, "by": pointer.updated_by,
+                              "approval": pointer.approval, "contract_version": contract.contract_version,
+                              "pipelines": list(contract.pipeline_names),
+                              "history": pointer.history} if pointer else {})})
+            continue
         if pointer is None:
             print(f"{name} ({env.name}): never released")
             continue
@@ -694,6 +727,8 @@ def cmd_status(args) -> int:
         print(f"    contract v{contract.contract_version}, pipelines: {', '.join(contract.pipeline_names)}")
         for h in pointer.history[:5]:
             print(f"    previous {h['release_id']}  ({h['updated_at']})")
+    if args.json:
+        print(json.dumps(found, indent=2, default=str))
     return 0
 
 
@@ -841,6 +876,7 @@ def build_parser() -> argparse.ArgumentParser:
     msub = sp.add_subparsers(dest="model_command", required=True)
     sp = msub.add_parser("list", help="versions, newest first; DEFAULT is the champion")
     one(sp)
+    sp.add_argument("--json", action="store_true", help="machine-readable output (stable field names)")
     sp.set_defaults(func=cmd_model_list)
     sp = msub.add_parser("predict", help="send instances to the use case's endpoint (Agent Platform or KServe)")
     one(sp)
@@ -871,6 +907,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = msub2.add_parser("status", help="recent monitoring rows and the latest PSI per feature")
     one(sp)
     sp.add_argument("--limit", type=int, default=10, help="how many recent runs (default 10)")
+    sp.add_argument("--json", action="store_true", help="machine-readable output (stable field names)")
     sp.set_defaults(func=cmd_monitor_status)
 
     def retrain_target(sp, case_required: bool = False):
@@ -916,6 +953,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = rsub.add_parser("list", help="cases, newest first")
     retrain_target(sp)
     sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--json", action="store_true", help="machine-readable output (stable field names)")
     sp.set_defaults(func=cmd_retrain_list)
     sp = rsub.add_parser("show", help="the decision pack: is it real, is it the data, what would retraining use")
     retrain_target(sp)
@@ -985,6 +1023,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("status", help="which release is live per use case")
     common(sp)
+    sp.add_argument("--json", action="store_true", help="machine-readable output (stable field names)")
     sp.set_defaults(func=cmd_status)
 
     sp = sub.add_parser("plugins", help="list installed command plugins")

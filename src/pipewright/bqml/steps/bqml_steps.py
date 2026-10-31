@@ -226,6 +226,14 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
                        f"(champion version {record['champion']['_version']})")
     record.update({"decision": decision, "reasons": reasons, "run_id": run_id, "bytes_billed": jobs.billed})
     uri = rt.write_record(project, rt.record_uri(ml_config, run_id), record)
+    if section.get("metrics_table"):         # Pipewright 1.2 (FR-86): the run in the metrics table, as containers do
+        from datetime import datetime, timezone
+
+        from pipewright_runtime import write_table
+
+        write_table(section["metrics_table"], [rt.metrics_row(ml_config, run_id, rows_table, record,
+                                                              datetime.now(timezone.utc).isoformat())],
+                    ml_config, project, ml_config["platform"]["bigquery_dataset"], run_id)
     emit_event("training.evaluated", ml_config, run_id, decision=decision, reasons=reasons, primary_metric=primary,
                primary_value=record["metrics"].get(primary), record=uri,
                champion_value=(record.get("champion") or {}).get(primary),
