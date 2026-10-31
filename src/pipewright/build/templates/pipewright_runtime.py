@@ -187,6 +187,19 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None, ru
     raise ValueError(f"{source_uri!r}: source_uri must start with gs:// or bq://")
 
 
+def needs_labels(source_uri: str, project: str, ml_config: dict) -> bool:
+    """True when a source read outside training's ingest step (the synthetic pipeline's) should take its labels from
+    data.label_source, as training does: the use case has one and the bq:// table lacks the label column, so it is the
+    entity table rather than rows labelled already (Pipewright 1.2, FR-65). A source holding the label is read as
+    in 1.x."""
+    data = (ml_config or {}).get("data") or {}
+    label = (data.get("label") or {}).get("column")
+    if not data.get("label_source") or not label or not source_uri.startswith("bq://"):
+        return False
+    table = bigquery_client(project, ml_config).get_table(bq_table(source_uri, project))
+    return label not in {f.name for f in table.schema}
+
+
 # ---------------------------------------------------- labels and snapshots --
 # A label source (data.label_source) turns events into labels: a row is 1 when the label table has an event for its
 # key at or after the row's cut-off and before cut-off + window_days, else 0. A row whose window ends after the

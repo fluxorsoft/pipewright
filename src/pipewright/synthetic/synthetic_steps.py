@@ -38,7 +38,9 @@ def prepare_synthetic(project: str, source_uri: str, run_id: str, ml_config: dic
     syn = ml_config["synthetic"]
     if syn.get("mode") == "relational":
         return _prepare_tables(project, source_uri or syn["source_uri"], run_id, ml_config, train.path, holdout.path)
-    df = rt.read_source(source_uri or syn["source_uri"], project, ml_config, run_id)
+    uri = source_uri or syn["source_uri"]
+    # the entity table itself gets its labels as training's ingest step gives them (FR-65)
+    df = rt.read_source(uri, project, ml_config, run_id, labels=rt.needs_labels(uri, project, ml_config))
     contract = [c["name"] for c in ml_config["data"]["contract"]["columns"]]
     missing = [c for c in contract if c not in df.columns]
     if missing:

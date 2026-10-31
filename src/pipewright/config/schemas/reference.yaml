@@ -271,7 +271,7 @@ synthetic: Synthetic data generation. Off unless enabled; with it off nothing is
 synthetic.enabled: Switches synthetic data on for this use case. May differ per environment (for example on in production-grade environments only).
 synthetic.purpose: Sets the default gates. test-data stays in the organisation; sharing leaves it and has stricter privacy gates.
 synthetic.tier: learned (an engine learns from real data inside this environment, in the synthetic pipeline) or contract (rows from the data contract and rules alone, no real data, from `pipewright synthetic generate`).
-synthetic.source_uri: The data the engine learns from, bq:// or gs://, read point in time like training (with data.features_from, the entity table).
+synthetic.source_uri: The data the engine learns from, bq:// or gs://, read point in time like training (with data.features_from, the entity table; with data.label_source and a table without the label column, its labels come from the label window, as in training: Pipewright 1.2).
 synthetic.output_table: The table in outputs.bigquery.tables that receives the synthetic rows. Its schema holds the contract's columns and a run_id column.
 synthetic.rows: "How many rows to generate. Default: as many as the source has. May differ per environment."
 synthetic.holdout_fraction: Real rows kept back from the engine, to test utility and privacy against.
