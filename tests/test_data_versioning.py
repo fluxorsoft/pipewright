@@ -47,6 +47,19 @@ def test_label_source_is_checked(repo):
     assert "data.label_source.key: 'churned' is the label" in problems(repo)
 
 
+@pytest.mark.parametrize("window", ["missing", None, "", 0, -5, "20", 2.5])
+def test_the_label_window_has_no_default(repo, window):
+    """A forgotten window never trains on someone else's value: missing, empty, zero or not a whole number fails."""
+    ml_repo(repo)
+    labels = {**LABELS, "key": ["customer_id"]}
+    if window == "missing":
+        del labels["window_days"]
+    else:
+        labels["window_days"] = window
+    repo.usecase["spec"]["data"]["label_source"] = labels
+    assert "window_days" in problems(repo)
+
+
 def test_read_source_applies_labels_only_when_asked(monkeypatch):
     called = []
     monkeypatch.setattr(rt, "bigquery_client", lambda *a, **k: FakeClient())
