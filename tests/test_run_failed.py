@@ -86,9 +86,17 @@ def test_kubeflow_runs_are_watched_too(monkeypatch):
         {"display_name": "churn-training-r9", "state": "FAILED", "description": run_description(labels),
          "created_at": "2026-10-31T09:50:00Z", "finished_at": "2026-10-31T09:58:00Z",
          "error": {"message": "1 task failed"},
+         "pipeline_spec": {"root": {"dag": {"tasks": {"ingest-data": {}, "validate-data": {}, "condition-1": {}}}},
+                           "components": {"comp-condition-1": {"dag": {"tasks": {"train-model": {}}}}}},
+         # As live (1.2 QA): the DAG, executors, drivers and "(0)" attempts are listed as failed too, without text.
          "run_details": {"task_details": [
-             {"display_name": "root", "state": "FAILED"},
+             {"display_name": "root", "state": "FAILED"}, {"display_name": "root(0)", "state": "FAILED"},
+             {"display_name": "churn-training-x7k2q", "state": "FAILED"},
+             {"display_name": "executor", "state": "FAILED"},
+             {"display_name": "validate-data(0)", "state": "FAILED"},
+             {"display_name": "condition-1", "state": "FAILED"},
              {"display_name": "validate-data", "state": "FAILED", "error": {"message": "data contract failed:\n x"}},
+             {"display_name": "train-model", "state": "FAILED"},
              {"display_name": "ingest-data", "state": "SUCCEEDED"}]}},
         {"display_name": "churn-training-r8", "state": "SUCCEEDED", "description": run_description(labels),
          "created_at": "2026-10-31T09:00:00Z", "finished_at": "2026-10-31T09:10:00Z"},
@@ -120,6 +128,7 @@ def test_kubeflow_runs_are_watched_too(monkeypatch):
                          lambda c, rid, d: emitted.append((rid, d)), now, manifest=manifest)
     assert len(out) == 1 and again == [] and markers == {"runs/failed/churn-training-r9"}
     rid, detail = emitted[0]
-    assert rid == "r9" and detail["failed_steps"] == ["validate-data"] and detail["state"] == "failed"
-    assert detail["error"] == "validate-data: data contract failed:" and detail["pipeline"] == "training"
+    assert rid == "r9" and detail["failed_steps"] == ["train-model", "validate-data"] and detail["state"] == "failed"
+    assert detail["error"] == ("train-model: failed: Kubeflow keeps the error in the step's pod logs; "
+                               "validate-data: data contract failed:") and detail["pipeline"] == "training"
     assert seen["path"].endswith("/namespaces/kubeflow/services/ml-pipeline:8888/proxy/apis/v2beta1/runs")

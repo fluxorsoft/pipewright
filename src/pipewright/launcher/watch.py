@@ -94,16 +94,30 @@ def kfp_failed_jobs(manifest: dict, gcp, since: datetime) -> list[dict]:
             labels = run_labels(run.get("description"))
             if (run.get("state") in KFP_FAILED and labels.get("pipewright-usecase")
                     and (run.get("finished_at") or "") > stamp):
-                tasks = ((run.get("run_details") or {}).get("task_details")) or []
+                # Found live: Kubeflow also lists the DAG, its drivers, executors and "(0)" attempts as failed, and
+                # keeps no error text: only the pipeline's own steps count, and the error is in their pods' logs.
+                steps = _kfp_steps(run.get("pipeline_spec") or {})
+                tasks = [t for t in ((run.get("run_details") or {}).get("task_details")) or []
+                         if t.get("display_name") in steps]
                 jobs.append({
                     "name": f"kubeflow/{namespace}/runs/{run.get('display_name')}",
                     "state": "PIPELINE_STATE_" + ("CANCELLED" if run["state"] == "CANCELED" else "FAILED"),
                     "labels": labels, "endTime": run.get("finished_at"), "error": run.get("error") or {},
-                    "jobDetail": {"taskDetails": [{"taskName": t.get("display_name"), "state": t.get("state"),
-                                                   "error": t.get("error") or {}} for t in tasks]}})
+                    "jobDetail": {"taskDetails": [
+                        {"taskName": t["display_name"], "state": t.get("state"),
+                         "error": t.get("error") or {"message": "failed: Kubeflow keeps the error in the step's pod "
+                                                                "logs"}} for t in tasks]}})
         token = (r.body or {}).get("next_page_token")
         if not token or not runs or (runs[-1].get("created_at") or "") < oldest:
             return jobs
+
+
+def _kfp_steps(spec: dict) -> set[str]:
+    """The pipeline's own steps: the task names of its DAGs, without the compiler's condition-* wrappers."""
+    spec = spec.get("pipeline_spec") or spec
+    dags = [spec.get("root") or {}, *(spec.get("components") or {}).values()]
+    return {name for d in dags for name in ((d.get("dag") or {}).get("tasks") or {})
+            if not name.startswith("condition-")}
 
 
 def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, now: datetime | None = None,
