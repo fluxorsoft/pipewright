@@ -11,7 +11,7 @@ the ebook's nineteen chapters on a live environment (FR-58 to FR-87).
 
 ### Upgrading from 1.1
 
-Most of 1.2 arrives with the package. Some fixes live in the pipeline components a use case owns, which were copied
+Most of 1.2.0 arrives with the package. Some fixes live in the pipeline components a use case owns, which were copied
 from the churn example when it was created, so an existing use case gets them only by bringing those files up to
 date from `examples/churn/components/` (and retraining, where the fix travels with the model):
 

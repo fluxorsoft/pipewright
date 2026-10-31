@@ -1,5 +1,5 @@
 """FR-68: the entity's cut-off and key columns are never a feature by default in BigQuery ML; the container path
-keeps 1.x's default and validate warns (Pipewright 1.2)."""
+keeps 1.x's default and validate warns (Pipewright 1.2.0)."""
 from tests.test_bqml_config import bqml_repo, resolve
 from tests.test_config_ml import ml_repo
 from tests.test_config_ml import resolve as resolve_container

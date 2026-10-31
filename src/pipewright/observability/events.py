@@ -7,7 +7,7 @@ pipewright_runtime.emit_event.
 
 Event types: run.submitted, run.duplicate, release.live, release.rolled_back, model.registered, model.approved,
 model.deployed, training.evaluated, monitoring.recorded, monitoring.alert, retrain.requested, data.erased, run.failed
-(Pipewright 1.2: a run that ended failed or cancelled, from the launcher's tick); retrain
+(Pipewright 1.2.0: a run that ended failed or cancelled, from the launcher's tick); retrain
 decisions (pipewright.retraining): retrain.proposed, retrain.approval, retrain.approved, retrain.declined,
 retrain.snoozed, retrain.reopened, retrain.escalated, retrain.digest.
 """
@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("pipewright.events")
 
-# Events this process could not publish (Pipewright 1.2, FR-80): the CLI ends with a warning naming them, since a
+# Events this process could not publish (Pipewright 1.2.0, FR-80): the CLI ends with a warning naming them, since a
 # command still succeeds when its event never reaches the event log.
 LOST: list[tuple[str, str]] = []
 MAX_LOST = 20                      # the launcher runs for days: keep the first few, never a growing list

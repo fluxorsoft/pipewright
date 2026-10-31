@@ -39,7 +39,7 @@ class Environment:
     kserve: dict = field(default_factory=dict)      # private-gke serving: namespaces by tenant, mirror, exposure
     manifest_ignored: tuple = ()                  # manifest keys this version does not know (R-05): ignored
     promotion_from: str | None = None
-    promotion_release: str = "warn"               # promotion.release: warn | refuse (Pipewright 1.2, FR-80)
+    promotion_release: str = "warn"               # promotion.release: warn | refuse (Pipewright 1.2.0, FR-80)
     manifest_source: str | None = None
     source: str = ""
 

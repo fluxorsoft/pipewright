@@ -1,4 +1,4 @@
-"""FR-59 (Pipewright 1.2): components.base_image, a base per use case within the approved base images."""
+"""FR-59 (Pipewright 1.2.0): components.base_image, a base per use case within the approved base images."""
 from pipewright.build import allowlist
 from pipewright.config import load_environment, resolve_usecase
 

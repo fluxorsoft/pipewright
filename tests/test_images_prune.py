@@ -1,4 +1,4 @@
-"""FR-87 (Pipewright 1.2): `pipewright images prune` deletes old images, never one a release may still need, and
+"""FR-87 (Pipewright 1.2.0): `pipewright images prune` deletes old images, never one a release may still need, and
 never one in a package no release uses. Dry run unless --apply."""
 import json
 from types import SimpleNamespace

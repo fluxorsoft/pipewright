@@ -94,7 +94,7 @@ def test_the_handler_builds_rows_in_feature_order_and_never_invents_a_value():
     assert h.online_row({"customer_id": "c-1"}, ONLINE, ["s_tickets", "tenure_months"], "t", fetcher) == [3.0, 12.0]
     assert h.online_row("c-2", ONLINE, ["tenure_months"], "t", fetcher) == [12.0]
     assert calls[-1] == ("support", "c-2")
-    with pytest.raises(ValueError, match="no usable value of s_tickets"):      # no medians: a model before 1.2
+    with pytest.raises(ValueError, match="no usable value of s_tickets"):      # no medians: a model before 1.2.0
         h.online_row("c-3", ONLINE, ["s_tickets"], "t", lambda *a: {})
     with pytest.raises(ValueError, match="an instance is an entity ID"):
         h.online_row([1, 2], ONLINE, ["s_tickets"], "t", fetcher)

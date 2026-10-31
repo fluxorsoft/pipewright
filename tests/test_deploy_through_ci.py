@@ -1,4 +1,4 @@
-"""FR-63 (Pipewright 1.2): approvals.deploy_model ci (a GitHub-approved gate per new default version) and on_register
+"""FR-63 (Pipewright 1.2.0): approvals.deploy_model ci (a GitHub-approved gate per new default version) and on_register
 (deployed by the decisions workflow). manual stays the default; the platform may require ci."""
 import pytest
 import yaml

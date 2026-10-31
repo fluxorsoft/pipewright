@@ -1,4 +1,4 @@
-"""FR-86 (Pipewright 1.2): machine-readable fleet state (--json on status, model list, monitor status, retrain list)
+"""FR-86 (Pipewright 1.2.0): machine-readable fleet state (--json on status, model list, monitor status, retrain list)
 and BigQuery ML runs in a metrics table (bqml.metrics_table), with the container examples' column names."""
 import json
 import sys

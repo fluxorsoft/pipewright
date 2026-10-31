@@ -190,7 +190,7 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None, ru
 def needs_labels(source_uri: str, project: str, ml_config: dict) -> bool:
     """True when a source read outside training's ingest step (the synthetic pipeline's) should take its labels from
     data.label_source, as training does: the use case has one and the bq:// table lacks the label column, so it is the
-    entity table rather than rows labelled already (Pipewright 1.2, FR-65). A source holding the label is read as
+    entity table rather than rows labelled already (Pipewright 1.2.0, FR-65). A source holding the label is read as
     in 1.x."""
     data = (ml_config or {}).get("data") or {}
     label = (data.get("label") or {}).get("column")
@@ -313,7 +313,7 @@ def _read_snapshot(source_uri: str, project: str, ml_config: dict, run_id: str |
 
 
 def rows_fingerprint(df, fields: list[dict], key: list[str] | None = None) -> str:
-    """A digest of rows that does not depend on their order or on how BigQuery hands types back (Pipewright 1.2,
+    """A digest of rows that does not depend on their order or on how BigQuery hands types back (Pipewright 1.2.0,
     FR-85): each value is written by its schema type (DATE as YYYY-MM-DD, TIMESTAMP in UTC, numbers with 15
     significant digits, empty as empty), rows are sorted (by `key` first), and the lines are hashed. The snapshot's
     own columns (run_id, source_uri, ingested_at) are left out, so a run and its replay compare equal."""

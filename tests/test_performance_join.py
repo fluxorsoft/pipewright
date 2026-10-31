@@ -1,4 +1,4 @@
-"""FR-78: performance monitoring joins each outcome to the score made for its cut-off (Pipewright 1.2)."""
+"""FR-78: performance monitoring joins each outcome to the score made for its cut-off (Pipewright 1.2.0)."""
 import json
 import sys
 from pathlib import Path

@@ -1,5 +1,5 @@
 """FR-83: under a manual policy, a first version that became the default by itself is not the champion until a person
-approves it (Pipewright 1.2). Scoring is unchanged; model list, doctor and deploy-model say so."""
+approves it (Pipewright 1.2.0). Scoring is unchanged; model list, doctor and deploy-model say so."""
 from types import SimpleNamespace
 
 import pytest
@@ -74,7 +74,7 @@ def test_doctor_warns_about_a_default_nobody_approved():
 
 
 def test_validate_warns_when_the_register_step_predates_it(repo):
-    """Found in 1.2 QA (GKE): a register step copied before 1.2 never labels approval=pending, so the first version
+    """Found in 1.2.0 QA (GKE): a register step copied before 1.2.0 never labels approval=pending, so the first version
     of a manual-policy use case became the default unapproved and nothing said so."""
     from pipewright.config import load_environment, resolve_usecase
 

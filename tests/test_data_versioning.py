@@ -109,7 +109,7 @@ def test_write_snapshot_tags_the_rows_and_records_them(monkeypatch):
     table, df = written[0]
     assert table == "raw" and set(df["run_id"]) == {"r9"} and set(df["source_uri"]) == {"bq://p.d.signups"}
     name, fields_ = events[0]
-    assert name == "data.snapshot.written" and fields_["fingerprint"].startswith("sha256:")      # 1.2: FR-85
+    assert name == "data.snapshot.written" and fields_["fingerprint"].startswith("sha256:")      # 1.2.0: FR-85
     assert {k: v for k, v in fields_.items() if k != "fingerprint"} == {
         "table": "raw", "rows": 2, "source_uri": "bq://p.d.signups", "locations": ["bq://p.d.raw"]}
     cfg["outputs"]["tables"]["raw"] = fields[:1]

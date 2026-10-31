@@ -3,7 +3,7 @@
 An example may take its code from another one: example.yaml names it (`code_from`) and the paths to copy (`code`),
 and the example's own files go on top. The minimal example is the churn example's training code with less config.
 
-The examples are real YAML (Pipewright 1.2, FR-64): they read and highlight on GitHub and are schema-checked like a
+The examples are real YAML (Pipewright 1.2.0, FR-64): they read and highlight on GitHub and are schema-checked like a
 team's own. example.yaml lists the sample values they use (`sample`: my-churn, my-tenant, my-team...) and the files
 that use them (`templated`); new-usecase replaces those values with the new use case's own, in those files only.
 Every YAML file written gets a first line pointing the editor at Pipewright's schemas (config/reference.py).

@@ -50,16 +50,16 @@ class ResolvedUseCase:
     objective: str = ""
     ml: dict = field(default_factory=dict)     # resolved ML sections, passed to pipelines as `ml_config`
     tests_command: str | None = None
-    tests_on_release: bool = False      # tests.on_release (Pipewright 1.2, FR-66)
-    tests_environment: str = "pipewright"   # tests.environment: pipewright | components (Pipewright 1.2, FR-82)
+    tests_on_release: bool = False      # tests.on_release (Pipewright 1.2.0, FR-66)
+    tests_environment: str = "pipewright"   # tests.environment: pipewright | components (Pipewright 1.2.0, FR-82)
     sources: list = field(default_factory=list)
     platform: dict = field(default_factory=dict)  # launcher_url, project, region, bigquery_dataset, events_topic,
     #                                               run_requests_topic, kms_key
     outputs: dict = field(default_factory=dict)   # store, gcs {format, external_tables, uri}, tables {name: fields}
     ray_requirements: Path | None = None           # extra packages for the Ray image (components.ray_requirements)
-    base_image: str | None = None                  # components.base_image (Pipewright 1.2, FR-59)
+    base_image: str | None = None                  # components.base_image (Pipewright 1.2.0, FR-59)
     synthetic_requirements: Path | None = None     # extra packages for the synthetic image (synthetic.requirements)
-    warnings: tuple = ()                           # not problems: `validate` prints them (Pipewright 1.2)
+    warnings: tuple = ()                           # not problems: `validate` prints them (Pipewright 1.2.0)
 
     @property
     def ray(self) -> dict | None:

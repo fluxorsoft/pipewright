@@ -18,7 +18,7 @@ Routes:
                      direct calls, so a decision no approver group has to make arrives there)
   POST /retraining/tick      {"digest"?}: snooze and decline expiry, escalation, the weekly digest (Cloud Scheduler);
                      also removes Ray clusters whose run ended or whose deadline passed, and records run.failed
-                     for each run that ended failed or cancelled (Pipewright 1.2)
+                     for each run that ended failed or cancelled (Pipewright 1.2.0)
   POST /ray/clusters {"action": "create" | "delete", "usecase", "run_id", "step"}: a Ray step's cluster, from the use
                      case's runner identity (also as kind ray.cluster on /pubsub/run, with the runner's "id_token")
   GET  /health   live use cases and their releases (Cloud Run reserves paths ending in "z", e.g. /healthz)
@@ -235,7 +235,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         return jsonify(results=results, ray=ray, failed=failed_runs()), 200
 
     def failed_runs() -> list:
-        """run.failed for each failed run since the last look (Pipewright 1.2, FR-67)."""
+        """run.failed for each failed run since the last look (Pipewright 1.2.0, FR-67)."""
         from pipewright.launcher import watch
 
         m, r = reg().manifest, reg()

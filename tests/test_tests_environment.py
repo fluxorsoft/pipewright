@@ -1,5 +1,5 @@
 """FR-82: tests.environment: components runs tests.command in a virtual environment built from the components'
-requirements, cached by their hash (Pipewright 1.2). The default stays Pipewright's own interpreter."""
+requirements, cached by their hash (Pipewright 1.2.0). The default stays Pipewright's own interpreter."""
 import sys
 
 from pipewright.config import load_environment, resolve_usecase

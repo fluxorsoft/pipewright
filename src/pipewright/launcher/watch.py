@@ -1,4 +1,4 @@
-"""Failed runs (Pipewright 1.2, FR-67): the launcher's hourly tick (/retraining/tick) finds the pipeline runs it
+"""Failed runs (Pipewright 1.2.0, FR-67): the launcher's hourly tick (/retraining/tick) finds the pipeline runs it
 started that ended failed or cancelled, and records one `run.failed` event for each: the failed steps and their
 error lines, which Pipewright's steps keep free of data values. `monitoring.alerts.events: [run.failed]` emails it,
 so a data contract that stops a run, or a broken release, reaches the team without a log-based alert of its own.
@@ -74,7 +74,7 @@ KFP_FAILED = ("FAILED", "CANCELED")
 
 def kfp_failed_jobs(manifest: dict, gcp, since: datetime) -> list[dict]:
     """Kubeflow runs (orchestrator kfp, private-gke) that ended failed or cancelled after since, in the shape
-    failure() reads (found in 1.2 QA: the watch saw Agent Platform runs only). Newest first; a run created more than a
+    failure() reads (found in 1.2.0 QA: the watch saw Agent Platform runs only). Newest first; a run created more than a
     day before since cannot have ended after it."""
     from pipewright.adapters.kfp import api_path, run_labels
     from pipewright.kube import KubeClient, message

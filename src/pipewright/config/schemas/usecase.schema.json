@@ -74,7 +74,7 @@
             "dir": { "type": "string", "minLength": 1 },
             "requirements": { "type": "string", "minLength": 1 },
             "ray_requirements": { "type": "string", "minLength": 1 },
-            "base_image": { "type": "string", "minLength": 1, "description": "the component image's base instead of the environment's (e.g. a CUDA image for GPU training), within its approved base images (Pipewright 1.2)" }
+            "base_image": { "type": "string", "minLength": 1, "description": "the component image's base instead of the environment's (e.g. a CUDA image for GPU training), within its approved base images (Pipewright 1.2.0)" }
           }
         },
         "framework": { "enum": ["pytorch"] },
@@ -456,7 +456,7 @@
         "metric": { "type": "string" },
         "min": { "type": "number" },
         "max": { "type": "number" },
-        "per_series": { "type": "boolean", "description": "forecasts: every series (bqml.forecast.id_columns) must pass, not only the overall value (Pipewright 1.2)" }
+        "per_series": { "type": "boolean", "description": "forecasts: every series (bqml.forecast.id_columns) must pass, not only the overall value (Pipewright 1.2.0)" }
       }
     },
     "evaluation": {
@@ -786,7 +786,7 @@
                 "table": { "type": "string" },
                 "key": { "type": "string" },
                 "label": { "type": "string" },
-                "time_column": { "type": "string", "description": "the outcome's cut-off column: outcomes are joined to the scores made for that cut-off (the scores' scored_for), never to a later or earlier score (Pipewright 1.2)" }
+                "time_column": { "type": "string", "description": "the outcome's cut-off column: outcomes are joined to the scores made for that cut-off (the scores' scored_for), never to a later or earlier score (Pipewright 1.2.0)" }
               }
             },
             "metric": { "type": "string" },
@@ -836,14 +836,14 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["type"],
-          "description": "a GPU per replica (Pipewright 1.2), within the environment's policies.accelerators.serving; machine must take it (e.g. g2-standard-8 with NVIDIA_L4)",
+          "description": "a GPU per replica (Pipewright 1.2.0), within the environment's policies.accelerators.serving; machine must take it (e.g. g2-standard-8 with NVIDIA_L4)",
           "properties": {
             "type": { "type": "string", "minLength": 1 },
             "count": { "type": "integer", "minimum": 1 }
           }
         },
-        "scale_to_zero": { "type": "boolean", "description": "with replicas.min 0: an idle endpoint runs no replica, and the first request after a quiet spell waits for one to start (Pipewright 1.2; Agent Platform preview)" },
-        "fill_missing": { "type": "boolean", "description": "the endpoint fills an empty feature with its training median, as batch scoring does (Pipewright 1.2, default true); false: it answers an error naming the feature" }
+        "scale_to_zero": { "type": "boolean", "description": "with replicas.min 0: an idle endpoint runs no replica, and the first request after a quiet spell waits for one to start (Pipewright 1.2.0; Agent Platform preview)" },
+        "fill_missing": { "type": "boolean", "description": "the endpoint fills an empty feature with its training median, as batch scoring does (Pipewright 1.2.0, default true); false: it answers an error naming the feature" }
       }
     },
     "approvals": {
@@ -851,7 +851,7 @@
       "additionalProperties": false,
       "properties": {
         "promote_model": { "$ref": "#/$defs/approval_mode" },
-        "deploy_model": { "enum": ["manual", "auto", "ci", "on_register"], "description": "manual (the default): someone runs deploy-model --approve; auto: no confirmation; ci (Pipewright 1.2): a GitHub gate per new default version that passes its gates, approved by the environment's reviewers; on_register (1.2): the decisions workflow deploys such a version without a person" },
+        "deploy_model": { "enum": ["manual", "auto", "ci", "on_register"], "description": "manual (the default): someone runs deploy-model --approve; auto: no confirmation; ci (Pipewright 1.2.0): a GitHub gate per new default version that passes its gates, approved by the environment's reviewers; on_register (1.2.0): the decisions workflow deploys such a version without a person" },
         "approvers": { "type": "array", "items": { "$ref": "#/$defs/principal" } }
       }
     },

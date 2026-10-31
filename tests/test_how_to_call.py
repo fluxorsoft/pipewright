@@ -1,4 +1,4 @@
-"""FR-60 (Pipewright 1.2): deploy-model and `pipewright model endpoint` say how to call the deployed model."""
+"""FR-60 (Pipewright 1.2.0): deploy-model and `pipewright model endpoint` say how to call the deployed model."""
 import json
 from types import SimpleNamespace
 

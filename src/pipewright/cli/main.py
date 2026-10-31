@@ -251,7 +251,7 @@ def cmd_deploy_model(args) -> int:
 
 
 def _print_how_to_call(uc, env, gcp) -> bool:
-    """Pipewright 1.2 (FR-60): the endpoint ID, predict URL, caller's role and a sample request."""
+    """Pipewright 1.2.0 (FR-60): the endpoint ID, predict URL, caller's role and a sample request."""
     from pipewright.models import deploy as deploy_model
 
     resource = deploy_model.find_endpoint(uc, env, gcp)
@@ -335,7 +335,7 @@ def cmd_model_list(args) -> int:
         _quiet_agent_platform_sdk()
     with contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext():
         rows = registry.versions(uc, env, Gcp().session.credentials)
-    if args.json:                            # Pipewright 1.2 (FR-86): stable field names
+    if args.json:                            # Pipewright 1.2.0 (FR-86): stable field names
         print(json.dumps({"usecase": uc.name, "environment": env.name, "model": uc.model["name"],
                           "versions": [{"version": v.version_id, "default": v.default, "aliases": v.aliases,
                                         "description": v.description, "created": v.created, "labels": v.labels,
@@ -396,7 +396,7 @@ def cmd_monitor_status(args) -> int:
 
     uc, env = _one(args)
     runs = status.recent(uc, env, args.limit)
-    if args.json:                            # Pipewright 1.2 (FR-86): the monitoring rows as recorded
+    if args.json:                            # Pipewright 1.2.0 (FR-86): the monitoring rows as recorded
         cases = []
         if uc.ml["retraining"]["mode"] != "off":
             from pipewright.gcp import Gcp
@@ -432,7 +432,7 @@ def cmd_retrain_list(args) -> int:
 
     env = _retrain_env(args)
     cases = client.store(env, Gcp()).list(args.usecase)[: args.limit]
-    if args.json:                            # Pipewright 1.2 (FR-86): the cases as stored
+    if args.json:                            # Pipewright 1.2.0 (FR-86): the cases as stored
         print(json.dumps({"usecase": args.usecase, "environment": env.name, "cases": cases}, indent=2, default=str))
         return 0
     print(client.render_list(args.usecase, env, cases))
@@ -668,7 +668,7 @@ def cmd_ci_init(args) -> int:
     print(f"decisions: pipewright-decisions runs on cron {cron!r} (UTC)")
     print("next: in GitHub, create an environment per name with PIPEWRIGHT_PIP_SPEC (and GCP_WIF_PROVIDER + "
           "PIPEWRIGHT_SERVICE_ACCOUNT unless the runners use their own identity); add required reviewers to production")
-    # Found in 1.2 QA: without these the decisions job has no variables, and nothing said to create them.
+    # Found in 1.2.0 QA: without these the decisions job has no variables, and nothing said to create them.
     print("      and <name>-decisions for each ("
           + ", ".join(f"{e}-decisions" for e in environments)
           + "), with the same variables and no reviewers: pipewright-decisions runs there. A gate refuses until "
@@ -737,7 +737,7 @@ def cmd_status(args) -> int:
     found = []
     for name in _selected(root, args.usecase, args.env):
         pointer, _ = release.read_pointer(gcp, env, name)
-        if args.json:                        # Pipewright 1.2 (FR-86): the pointer, and the live contract's summary
+        if args.json:                        # Pipewright 1.2.0 (FR-86): the pointer, and the live contract's summary
             contract = release.read_contract(gcp, env, pointer.contract) if pointer else None
             found.append({"usecase": name, "environment": env.name, "released": pointer is not None,
                           **({"release": pointer.release_id, "since": pointer.updated_at, "by": pointer.updated_by,
@@ -1132,7 +1132,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         from pipewright.observability import events
 
-        if lost := events.lost_summary():          # Pipewright 1.2 (FR-80): a lost event is said, not only logged
+        if lost := events.lost_summary():          # Pipewright 1.2.0 (FR-80): a lost event is said, not only logged
             print(lost)
             events.LOST.clear()
 

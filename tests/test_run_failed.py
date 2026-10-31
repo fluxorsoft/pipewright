@@ -1,4 +1,4 @@
-"""FR-67: a failed run is an event and an alert (Pipewright 1.2). The launcher's tick records run.failed once per
+"""FR-67: a failed run is an event and an alert (Pipewright 1.2.0). The launcher's tick records run.failed once per
 failed or cancelled run of a live use case; monitoring.alerts.events may name it."""
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -78,7 +78,7 @@ def test_run_failed_may_send_an_email(repo):
 
 
 def test_kubeflow_runs_are_watched_too(monkeypatch):
-    """Found in 1.2 QA: the watch saw Agent Platform runs only; a private-gke environment's runs are Kubeflow runs."""
+    """Found in 1.2.0 QA: the watch saw Agent Platform runs only; a private-gke environment's runs are Kubeflow runs."""
     from pipewright.adapters.kfp import run_description
 
     labels = {"pipewright-usecase": "churn", "run-id": "r9", "pipewright-pipeline": "training", "trigger": "api"}
@@ -88,7 +88,7 @@ def test_kubeflow_runs_are_watched_too(monkeypatch):
          "error": {"message": "1 task failed"},
          "pipeline_spec": {"root": {"dag": {"tasks": {"ingest-data": {}, "validate-data": {}, "condition-1": {}}}},
                            "components": {"comp-condition-1": {"dag": {"tasks": {"train-model": {}}}}}},
-         # As live (1.2 QA): the DAG, executors, drivers and "(0)" attempts are listed as failed too, without text.
+         # As live (1.2.0 QA): the DAG, executors, drivers and "(0)" attempts are listed as failed too, without text.
          "run_details": {"task_details": [
              {"display_name": "root", "state": "FAILED"}, {"display_name": "root(0)", "state": "FAILED"},
              {"display_name": "churn-training-x7k2q", "state": "FAILED"},

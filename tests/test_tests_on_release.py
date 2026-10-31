@@ -1,4 +1,4 @@
-"""FR-66: tests.on_release makes `pipewright release` run tests.command before it builds anything (Pipewright 1.2).
+"""FR-66: tests.on_release makes `pipewright release` run tests.command before it builds anything (Pipewright 1.2.0).
 Off by default: a 1.x use case releases without running its tests, as before."""
 from types import SimpleNamespace
 

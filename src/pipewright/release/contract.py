@@ -198,7 +198,7 @@ class Pointer:
     updated_at: str
     updated_by: str | None = None
     history: list[dict] = field(default_factory=list)   # newest first: {release_id, contract, updated_at}
-    # How the move was approved (Pipewright 1.2, FR-84): {"via": "github", "actor", "run_url", ...} in CI, so the
+    # How the move was approved (Pipewright 1.2.0, FR-84): {"via": "github", "actor", "run_url", ...} in CI, so the
     # person behind a CI identity is on the record; {"via": "outside-ci"} otherwise. Older readers ignore it.
     approval: dict | None = None
 

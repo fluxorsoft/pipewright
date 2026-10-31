@@ -51,5 +51,5 @@ def test_lineage_says_whether_a_replay_read_the_original_rows(monkeypatch):
     text = lineage.render({"model": "m", "version": "2", "environment": "test", "snapshot": {
         "table": "t", "run_id": "r2", "rows": 3, "read_at": "x"}, "lineage": {"run_id": "r2"}, **out})
     assert "fingerprint sha256:bb; the original run's rows: DIFFERENT" in text
-    del answers["r1"]                                                            # before Pipewright 1.2
+    del answers["r1"]                                                            # before Pipewright 1.2.0
     assert lineage.fingerprints(None, env, "r2", "r1")["fingerprint"]["identical"] is None

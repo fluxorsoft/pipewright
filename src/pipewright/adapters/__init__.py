@@ -25,7 +25,7 @@ def submit(contract: ReleaseContract, target: PipelineTarget, parameters: dict, 
 
 def job_reasons(contract: ReleaseContract, job_id: str, gcp=None) -> list[str]:
     """Why a finished training run's evaluation refused its model: the evaluate step's `reasons` output (Pipewright
-    1.2, FR-79). Agent Platform only; [] when the run has none or cannot be read."""
+    1.2.0, FR-79). Agent Platform only; [] when the run has none or cannot be read."""
     import json
 
     if contract.orchestrator == "kfp":

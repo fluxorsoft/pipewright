@@ -1,6 +1,6 @@
 """pipewright test: runs each use case's tests.command in its folder (the team's own unit tests).
 
-tests.environment (Pipewright 1.2, FR-82): `pipewright` (the default, as in 1.x) runs the command with Pipewright's
+tests.environment (Pipewright 1.2.0, FR-82): `pipewright` (the default, as in 1.x) runs the command with Pipewright's
 own interpreter; `components` runs it in a virtual environment built from components/requirements.txt (numpy,
 pandas, torch...), cached by the requirements' hash, so a test that imports a component passes in CI as on a laptop.
 """

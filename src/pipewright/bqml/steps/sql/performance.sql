@@ -1,6 +1,6 @@
 -- Performance against observed outcomes: the latest score of each key from this model version, with its outcome from
 -- monitoring.performance.labels, in the shape the metrics templates read (the label column and the _pw_ outputs).
--- With labels.time_column, the score made for each outcome's cut-off instead (Pipewright 1.2, FR-78).
+-- With labels.time_column, the score made for each outcome's cut-off instead (Pipewright 1.2.0, FR-78).
 CREATE OR REPLACE TABLE `{out_table}`
 OPTIONS (labels = [{labels}], expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL {keep_days} DAY))
 AS

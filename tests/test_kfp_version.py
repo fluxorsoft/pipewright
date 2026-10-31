@@ -51,7 +51,7 @@ def test_validate_reports_mismatch(repo, capsys):
 
 
 def test_a_newer_compiler_points_at_the_tested_kfp(repo):
-    # FR-81 (Pipewright 1.2), the ebook's Chapter 16: a fresh install resolved kfp 2.18 against a 2.17 pin.
+    # FR-81 (Pipewright 1.2.0), the ebook's Chapter 16: a fresh install resolved kfp 2.18 against a 2.17 pin.
     result = check(uc_with(repo, "kfp==2.17.0\n"), "2.18.0")
     assert not result.ok and 'pin `kfp==2.18.*`, or install the kfp Pipewright was tested with: pip install ' \
         '"kfp==2.17.*"' in result.message

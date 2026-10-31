@@ -108,7 +108,7 @@ def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp,
 
 def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, component_image: str | None = None,
             skip_tables: bool = False, build_dir: Path | None = None, log=print) -> ReleaseResult:
-    if env.promotion_from:                  # Pipewright 1.2 (FR-80): this environment's releases come from another
+    if env.promotion_from:                  # Pipewright 1.2.0 (FR-80): this environment's releases come from another
         how = (f"{env.name}'s releases come from {env.promotion_from} (promotion.from): `pipewright promote --from "
                f"{env.promotion_from} --to {env.name} --usecase {uc.name}` brings the tested release")
         if env.promotion_release == "refuse":
@@ -121,7 +121,7 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
 
     pointer, generation = read_pointer(gcp, env, uc.name)
 
-    if uc.tests_on_release:                 # tests.on_release (Pipewright 1.2, FR-66): before anything changes
+    if uc.tests_on_release:                 # tests.on_release (Pipewright 1.2.0, FR-66): before anything changes
         from pipewright.testing import runner
 
         code = runner.run(uc, log=log)
@@ -169,7 +169,7 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
     infos = publish.compile_pinned(uc, component_image, out_dir, synthetic_images)
     digests = {n: "sha256:" + hashlib.sha256(info.spec_path.read_bytes()).hexdigest() for n, info in infos.items()}
     # The resolved configuration each run receives, as the contract stores it: a Pipewright upgrade can change it
-    # with the same commit and templates (found live: 1.2's FR-68 default), and the old contract would keep the old.
+    # with the same commit and templates (found live: 1.2.0's FR-68 default), and the old contract would keep the old.
     statics = _json({n: publish.static_parameters(uc, info) for n, info in infos.items()})
 
     def same(c: ReleaseContract) -> bool:

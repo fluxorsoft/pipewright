@@ -228,7 +228,7 @@ def _attempts(case: dict) -> list[dict]:
 def reconcile(case: dict, state: str | None, error: str, version: str | None, s: Settings, now: datetime,
               reasons: list[str] | None = None) -> Outcome:
     """How an approved case's training ended, as its orchestrator reports it (the launcher's tick). succeeded: the
-    registered version (the approval stays), or rejected by the gates (nothing registered: from Pipewright 1.2 the
+    registered version (the approval stays), or rejected by the gates (nothing registered: from Pipewright 1.2.0 the
     case opens again with the gates' reasons and `retrain.refused`, so approvers decide again and no cooldown holds
     back new cases); failed: the error, and an automatic retry when it is transient (at most MAX_AUTO_RETRIES)."""
     t = case.get("training") or {}

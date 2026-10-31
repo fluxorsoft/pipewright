@@ -1,4 +1,4 @@
-"""Pipewright 1.2: GPU limits for steps (FR-58), GPU serving (FR-61) and scale to zero (FR-62), each within what the
+"""Pipewright 1.2.0: GPU limits for steps (FR-58), GPU serving (FR-61) and scale to zero (FR-62), each within what the
 environment's manifest allows, and off unless set."""
 import pytest
 

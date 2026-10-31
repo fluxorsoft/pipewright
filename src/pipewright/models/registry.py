@@ -119,7 +119,7 @@ def render(uc: ResolvedUseCase, rows: list[Version]) -> str:
     return "\n".join(lines)
 
 
-# FR-83 (Pipewright 1.2): Model Registry makes a model's first version its default by itself. Under a manual policy
+# FR-83 (Pipewright 1.2.0): Model Registry makes a model's first version its default by itself. Under a manual policy
 # (registry.set_default manual, from approvals.promote_model manual) the register step labels that version
 # approval=pending: it is the default, but nobody approved it. `pipewright model approve` records the approval;
 # until then `model list` says so, `doctor` warns and `deploy-model` refuses it. Scoring is unchanged.

@@ -1,4 +1,4 @@
-"""FR-80 (Pipewright 1.2): an environment with promotion.from gets its releases through `pipewright promote`, not a
+"""FR-80 (Pipewright 1.2.0): an environment with promotion.from gets its releases through `pipewright promote`, not a
 release built there. ci init writes a promote workflow and an operate action instead of a release job, the
 decisions workflow's cadence is an option, and `release` warns (or with promotion.release: refuse, refuses)."""
 import shutil

@@ -7,8 +7,8 @@ approver group) and the pipewright command a gate job runs once that environment
     retrain-approve an open retrain case, once per required approver group not yet approved (or once with none)
     loop-approve    a closed retrain loop validated in test, waiting for the production approval
     loop-advance    a running loop: no person needed, the scheduled workflow advances it (`--steps`)
-    deploy-approve  approvals.deploy_model ci (Pipewright 1.2): the default version passes its gates and is not served
-    deploy-auto     approvals.deploy_model on_register (1.2): the same, deployed by the scheduled workflow, no person
+    deploy-approve  approvals.deploy_model ci (Pipewright 1.2.0): the default version passes its gates and is not served
+    deploy-auto     approvals.deploy_model on_register (1.2.0): the same, deployed by the scheduled workflow, no person
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
                 launchers: dict[str, str] | None = None, deploy: dict | None = None) -> list[Item]:
     """The pending decisions of one use case, from its registry versions (models.registry.Version) and its cases.
     `launchers`: {"production": url, "test": url} where known; a loop calls both, a retrain decision production's.
-    `deploy` (Pipewright 1.2, FR-63): {"mode": ci | on_register, "served": {version ids on the endpoint},
+    `deploy` (Pipewright 1.2.0, FR-63): {"mode": ci | on_register, "served": {version ids on the endpoint},
     "canary": bool} for a use case that deploys through the workflows."""
     launchers = launchers or {}
     own = [u for u in (launchers.get("production"),) if u]
@@ -122,8 +122,8 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
 
 
 def _deploy(uc, env, gcp) -> dict | None:
-    """approvals.deploy_model ci or on_register (Pipewright 1.2, FR-63): the mode, the versions the endpoint serves and
-    whether new versions start as a canary."""
+    """approvals.deploy_model ci or on_register (Pipewright 1.2.0, FR-63): the mode, the versions the endpoint serves
+    and whether new versions start as a canary."""
     mode = (uc.approvals or {}).get("deploy_model")
     serving = (uc.model or {}).get("serving") or {}
     if mode not in ("ci", "on_register") or serving.get("target", "vertex") != "vertex":

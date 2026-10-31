@@ -61,7 +61,7 @@ def check_batch(
         labels, key = perf["labels"], perf["labels"]["key"]
         when = labels.get("time_column")
         if when:
-            # Pipewright 1.2 (FR-78): each outcome meets the score made for its cut-off, never a later score that
+            # Pipewright 1.2.0 (FR-78): each outcome meets the score made for its cut-off, never a later score that
             # already knows the outcome. Outcomes of cut-offs this version has not scored are not counted.
             sql = f"""
             SELECT pr.churn_probability AS prob, CAST(lb.{labels['label']} AS INT64) AS outcome

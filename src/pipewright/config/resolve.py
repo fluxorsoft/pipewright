@@ -157,7 +157,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     for key, minimum in env.policies.items():
         if key in _APPROVAL_DEFAULTS and minimum == "manual" and approvals.get(key) in ("auto", "on_register"):
             problems.append(f"approvals.{key}: {approvals.get(key)} is not allowed in {env.name} (platform policy)")
-        if key == "deploy_model" and minimum == "ci" and approvals.get(key) != "ci":     # Pipewright 1.2 (FR-63)
+        if key == "deploy_model" and minimum == "ci" and approvals.get(key) != "ci":     # Pipewright 1.2.0 (FR-63)
             problems.append(f"approvals.deploy_model: {env.name} deploys models only through a GitHub-approved gate "
                             "(platform policy ci): set approvals.deploy_model: ci")
 
@@ -288,12 +288,12 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                "mode": (f.get("mode") or "NULLABLE").upper()} for f in t.fields]
                           for n, t in tables.items()}}
 
-    from pipewright.config import accelerators  # Pipewright 1.2: FR-58, FR-61, FR-62
+    from pipewright.config import accelerators  # Pipewright 1.2.0: FR-58, FR-61, FR-62
 
     problems += accelerators.problems(steps, model["serving"], env.policies, env.name)
     extra_warnings += accelerators.warnings(model["serving"])
-    # Two 1.2 fixes on the container path live in the team's own components, copied from the churn example before
-    # 1.2 (found live): validate says when the setting they serve is on but no component carries the fix.
+    # Two 1.2.0 fixes on the container path live in the team's own components, copied from the churn example before
+    # 1.2.0 (found live): validate says when the setting they serve is on but no component carries the fix.
     if not bqml_spec and components_dir.is_dir():
         code = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in components_dir.rglob("*.py"))
         labels = (((ml.get("monitoring") or {}).get("performance") or {}).get("labels") or {})

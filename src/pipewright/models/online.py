@@ -1,7 +1,7 @@
 """Online features on a served model (FR-51, FR-76): which online store a model reads, and from where.
 
 The training step packages the lookup in `serving.json` with the store of the environment it trained in. A promoted
-model is the same files, so `serving.json` names the source environment's store. From Pipewright 1.2 the store is
+model is the same files, so `serving.json` names the source environment's store. From Pipewright 1.2.0 the store is
 never taken from the files when it can be helped: the model's serving container carries the environment's own
 lookup in PIPEWRIGHT_ONLINE_FEATURES (set by the register step and replaced by `pipewright promote`), and the
 handler prefers it. `deploy-model` and `doctor` refuse a model whose store is in another project than the
@@ -62,11 +62,11 @@ def check(expected: dict | None, env_vars: dict, serving_json: dict | None, envi
     store, source = packaged_store(env_vars, serving_json)
     if store is None:
         return (f"the model carries no online lookup ({source}): train it with model.serving.features online, or "
-                "promote it with Pipewright 1.2 or later")
+                "promote it with Pipewright 1.2.0 or later")
     if store != expected.get("store"):
         where = ("it was trained or promoted in another environment" if store_project(store) !=
                  store_project(expected.get("store")) else "the environment's online store has changed since")
         return (f"the model would read the online store {store} ({source}), not {environment}'s "
-                f"{expected.get('store')}: {where}. Promote it again with Pipewright 1.2 or later, which gives a "
+                f"{expected.get('store')}: {where}. Promote it again with Pipewright 1.2.0 or later, which gives a "
                 "promoted model the destination's store, or retrain it here")
     return None

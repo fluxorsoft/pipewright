@@ -230,7 +230,7 @@ class KServe:
         return r.body
 
     def how_to_call(self) -> str | None:
-        """Pipewright 1.2 (FR-60) on KServe (found in 1.2 QA: only Agent Platform endpoints said it): where callers
+        """Pipewright 1.2.0 (FR-60) on KServe (found in 1.2.0 QA: only Agent Platform endpoints said it): where callers
         reach the model, the route, what a caller needs and a sample request. None when it is not deployed."""
         from pipewright.models.deploy import sample_request
 

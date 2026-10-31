@@ -134,7 +134,7 @@ def test_bad_addresses_and_events_rejected(repo):
 
 
 def test_an_address_that_left_notify_loses_its_channel(repo):
-    # FR-77 (Pipewright 1.2), the ebook's Chapter 14: a test address swapped for the team's left its channel behind.
+    # FR-77 (Pipewright 1.2.0), the ebook's Chapter 14: a test address swapped for the team's left its channel behind.
     mon = FakeMonitoring()
     first = uc_for(repo, notify=["tester@example.com"], events=["monitoring.alert"])
     env = load_environment(repo.root, "dev")

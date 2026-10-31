@@ -1,5 +1,5 @@
 """FR-84: decisions are kept and shown: lineage reads them from the event log, the release pointer names the person
-behind a CI identity, and doctor fails an events topic nobody subscribes to (Pipewright 1.2)."""
+behind a CI identity, and doctor fails an events topic nobody subscribes to (Pipewright 1.2.0)."""
 import json
 from types import SimpleNamespace
 
@@ -61,7 +61,7 @@ def test_the_pointer_records_the_person_behind_a_ci_identity_and_reads_old_point
     old = json.dumps({"usecase": "churn", "release_id": "r0", "contract": "c", "updated_at": "t", "updated_by": "x",
                       "history": []})                                      # written by Pipewright 1.0 or 1.1
     assert Pointer.from_json(old).approval is None
-    assert new_pointer("churn", "r1", "c", "me").approval is None          # callers from before 1.2
+    assert new_pointer("churn", "r1", "c", "me").approval is None          # callers from before 1.2.0
 
 
 def gcp_answering(subscriptions, ok=True):

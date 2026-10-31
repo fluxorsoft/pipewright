@@ -1,5 +1,5 @@
 """FR-70: bqml.contract_on: source checks the data contract on the rows as read, before bqml.prepare, as the
-container path does (Pipewright 1.2). The default stays the prepared rows, as in 1.x."""
+container path does (Pipewright 1.2.0). The default stays the prepared rows, as in 1.x."""
 import sys
 
 from pipewright import bqml

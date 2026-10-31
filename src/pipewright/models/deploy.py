@@ -41,7 +41,7 @@ def endpoint_name(uc: ResolvedUseCase) -> str:
 
 def check_approval(uc: ResolvedUseCase, identity: str | None, approved: bool, key: str = "deploy_model") -> None:
     mode = uc.approvals.get(key, "manual")
-    if mode in ("auto", "on_register"):          # on_register (Pipewright 1.2): the decisions workflow deploys
+    if mode in ("auto", "on_register"):          # on_register (Pipewright 1.2.0): the decisions workflow deploys
         return
     if not approved:
         where = " (from the pipewright-gate workflow, once its reviewers approve)" if mode == "ci" else ""
@@ -176,9 +176,9 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     # Online features (FR-51): the endpoint reads the tenant's feature views, so it runs as the tenant's runner.
     identity = uc.resources["runner_service_account"] if uc.ml.get("online_features") else None
     serving = uc.model["serving"]
-    accelerator = serving.get("accelerator")             # FR-61 (Pipewright 1.2): within the environment's policy
+    accelerator = serving.get("accelerator")             # FR-61 (Pipewright 1.2.0): within the environment's policy
     if serving.get("scale_to_zero") and int(p.replicas["min"]) == 0:
-        # FR-62 (Pipewright 1.2): an idle endpoint runs no replica; Agent Platform offers it in v1beta1 only.
+        # FR-62 (Pipewright 1.2.0): an idle endpoint runs no replica; Agent Platform offers it in v1beta1 only.
         log("scale to zero: an idle endpoint runs no replica; the first request after a quiet spell waits for one")
         from pipewright.gcp import Gcp
 
@@ -332,7 +332,7 @@ def sample_request(uc: ResolvedUseCase) -> list[str]:
 
 
 def how_to_call(uc: ResolvedUseCase, env: Environment, endpoint_resource: str) -> str:
-    """Pipewright 1.2 (FR-60): the endpoint's ID, its predict URL, the role a caller needs and a sample request."""
+    """Pipewright 1.2.0 (FR-60): the endpoint's ID, its predict URL, the role a caller needs and a sample request."""
     url = f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint_resource}:predict"
     return "\n".join([
         "How to call it:",

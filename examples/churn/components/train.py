@@ -62,7 +62,7 @@ def train_model(
             json.dump(content, f, indent=2, default=str)
     extra = [os.path.join(model.path, "features.json")]
     # What the serving handler needs beside the network: the training medians, so an empty feature is filled online
-    # as batch scoring fills it (Pipewright 1.2, model.serving.fill_missing), and with model.serving.features online
+    # as batch scoring fills it (Pipewright 1.2.0, model.serving.fill_missing), and with model.serving.features online
     # (Pipewright 1.1) the views and key, which the serving container's PIPEWRIGHT_ONLINE_FEATURES overrides.
     serving = {"medians": stats["medians"],
                "fill_missing": (ml_config.get("serving") or {}).get("fill_missing", True)}

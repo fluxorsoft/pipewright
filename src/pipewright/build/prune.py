@@ -1,4 +1,4 @@
-"""pipewright images prune (Pipewright 1.2, FR-87): delete old images from an environment's docker repository,
+"""pipewright images prune (Pipewright 1.2.0, FR-87): delete old images from an environment's docker repository,
 never one a release may still need.
 
 Every release builds and pushes its images (tagged <release>-<context hash>) and nothing removed them, so a

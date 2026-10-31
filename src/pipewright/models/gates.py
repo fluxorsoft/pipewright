@@ -50,7 +50,7 @@ def check(record: dict, evaluation: dict, champion_expected: bool = False) -> li
             problems.append(f"gate {m}: {_fmt(value)} is below the minimum {gate['min']}")
         if "max" in gate and value > gate["max"]:
             problems.append(f"gate {m}: {_fmt(value)} is above the maximum {gate['max']}")
-        if gate.get("per_series"):           # Pipewright 1.2 (FR-69): every series of a forecast
+        if gate.get("per_series"):           # Pipewright 1.2.0 (FR-69): every series of a forecast
             problems += _series_problems(record, gate)
 
     slices = record.get("slices") or {}

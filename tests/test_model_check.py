@@ -1,4 +1,4 @@
-"""FR-72 (Pipewright 1.2): `pipewright model check` measures a version against today's gates, filling the slices and
+"""FR-72 (Pipewright 1.2.0): `pipewright model check` measures a version against today's gates, filling the slices and
 fairness its own record lacks from the newest challenger that measured it as the champion."""
 from types import SimpleNamespace
 

@@ -43,7 +43,7 @@ def get_case(env: Environment, usecase: str, case_id: str | None, gcp: Gcp) -> d
 
 
 def training_outcome(case: dict) -> str:
-    """What the case's latest training did (Pipewright 1.2, FR-79): registered vN, refused, failed, running, or -."""
+    """What the case's latest training did (Pipewright 1.2.0, FR-79): registered vN, refused, failed, running, or -."""
     t = case.get("training") or {}
     if not t.get("job_id"):
         return "-"

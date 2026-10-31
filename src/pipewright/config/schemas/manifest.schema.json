@@ -144,7 +144,7 @@
             "auto",
             "ci"
           ],
-          "description": "manual: use cases may not deploy without a person (auto and on_register refused); ci (Pipewright 1.2): only through a GitHub-approved gate (approvals.deploy_model ci)"
+          "description": "manual: use cases may not deploy without a person (auto and on_register refused); ci (Pipewright 1.2.0): only through a GitHub-approved gate (approvals.deploy_model ci)"
         },
         "promote_model": {
           "enum": [
@@ -231,7 +231,7 @@
         "accelerators": {
           "type": "object",
           "additionalProperties": false,
-          "description": "accelerators use cases may ask for (Pipewright 1.2): steps (steps.<name>.gpu; without it any, as in 1.x) and serving (model.serving.accelerator; without it none)",
+          "description": "accelerators use cases may ask for (Pipewright 1.2.0): steps (steps.<name>.gpu; without it any, as in 1.x) and serving (model.serving.accelerator; without it none)",
           "properties": {
             "steps": {
               "type": "object",

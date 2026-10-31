@@ -1,4 +1,4 @@
-"""pipewright model check (Pipewright 1.2, FR-72): a version against today's gates, slices and fairness.
+"""pipewright model check (Pipewright 1.2.0, FR-72): a version against today's gates, slices and fairness.
 
 `model list` shows each version against the gates in force, but a version that predates a gate was never measured
 for it (the ebook's Chapter 10: `[gates FAIL: slice gate auc: the evaluation record has no slices]`). Each training

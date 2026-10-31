@@ -31,7 +31,7 @@ def prepare_data(
     label = data["label"]["column"]
     df = pd.read_parquet(raw_data.path).dropna(subset=[label])
     # Rows arrive from BigQuery in no fixed order, and training shuffles them from the order it receives. Sorted by
-    # the contract's unique key, a run and its replay train on the same sequence (Pipewright 1.2, FR-85).
+    # the contract's unique key, a run and its replay train on the same sequence (Pipewright 1.2.0, FR-85).
     key = [c for c in (data.get("contract") or {}).get("unique") or [] if c in df.columns]
     if key:
         df = df.sort_values(key, kind="stable")

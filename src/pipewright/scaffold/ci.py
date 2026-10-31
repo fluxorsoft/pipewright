@@ -1,15 +1,15 @@
 """pipewright ci init: write the GitHub Actions workflows an app team runs Pipewright with.
 
     .github/actions/pipewright-setup/action.yml   Python, uv, Workload Identity Federation, Pipewright
-    .github/pipewright-constraints.txt            the kfp Pipewright was tested with (Pipewright 1.2)
+    .github/pipewright-constraints.txt            the kfp Pipewright was tested with (Pipewright 1.2.0)
     .github/workflows/pipewright-pr.yml           pull requests: validate, test, doctor, dry runs
     .github/workflows/pipewright-release.yml      merge to main: release changed use cases, env by env
     .github/workflows/pipewright-operate.yml      by hand: run, status, rollback, approve, deploy, canary
     .github/workflows/pipewright-decisions.yml    on a schedule: pending decisions; advances retrain loops
     .github/workflows/pipewright-gate.yml         one decision, approved by its GitHub environment's reviewers
-    .github/workflows/pipewright-promote.yml      by hand: promote to an environment with promotion.from (1.2)
+    .github/workflows/pipewright-promote.yml      by hand: promote to an environment with promotion.from (1.2.0)
 
-Environments with promotion.from (Pipewright 1.2, FR-80) get no release job: their releases come from the source
+Environments with promotion.from (Pipewright 1.2.0, FR-80) get no release job: their releases come from the source
 environment through pipewright-promote, in the destination's GitHub environment, and the operate workflow has a
 promote action. The decisions workflow runs hourly in working hours (UTC) by default; --decisions-cron changes it
 (every 15 minutes uses up a private repository's free Actions minutes).
@@ -47,7 +47,7 @@ FILES = {
 PROMOTE_FILE = ".github/workflows/pipewright-promote.yml"   # only with an environment that has promotion.from
 
 # Hourly in working hours (UTC, Monday to Friday): every 15 minutes, as in 1.1, uses up a private repository's free
-# Actions minutes (Pipewright 1.2, FR-80).
+# Actions minutes (Pipewright 1.2.0, FR-80).
 DECISIONS_CRON = "17 7-18 * * 1-5"
 
 RELEASE_JOB = """  release-@@ENV@@:

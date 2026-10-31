@@ -44,7 +44,7 @@ EVENTS = {
                            ["decision", "primary_metric", "primary_value", "champion_version"]),
     "model.registered": ('jsonPayload.pipewright_event.event_type="model.registered"', "model registered",
                          ["model", "version", "default", "primary_value"]),
-    # from the launcher's hourly tick (Pipewright 1.2, FR-67)
+    # from the launcher's hourly tick (Pipewright 1.2.0, FR-67)
     "run.failed": ('jsonPayload.pipewright_event.event_type="run.failed"', "pipeline run failed",
                    ["pipeline", "job_id", "state", "failed_steps", "error"]),
 }
@@ -60,7 +60,7 @@ DECISION_EVENTS = {
     "retrain.snoozed": "retrain snoozed",
     "retrain.digest": "weekly retrain digest",
     "retrain.training_failed": "retrain training failed",     # Pipewright 1.1: the approval stays; retry
-    "retrain.refused": "retrained model refused by the gates",   # Pipewright 1.2: the case is open again
+    "retrain.refused": "retrained model refused by the gates",   # Pipewright 1.2.0: the case is open again
     "retrain.training_retried": "retrain training resubmitted",
 }
 for _event, _title in DECISION_EVENTS.items():
@@ -216,7 +216,7 @@ def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run:
 
 def _unused_channels(gcp: Gcp, base: str, uc: ResolvedUseCase, live_channels: list[dict], plan: AlertsPlan,
                      dry_run: bool) -> None:
-    """Pipewright 1.2 (FR-77): an email channel Pipewright created that no alert policy in the project uses once this
+    """Pipewright 1.2.0 (FR-77): an email channel Pipewright created that no alert policy in the project uses once this
     use case's policies are in place is deleted (an address that left notify). Channels Pipewright did not create are
     never touched; the delete is not forced, so a channel a policy started using meanwhile stays."""
     if plan.errors:

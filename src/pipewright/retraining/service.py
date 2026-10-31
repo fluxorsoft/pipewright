@@ -84,7 +84,7 @@ class Decisions:
 
     def _observe_during_cooldown(self, contract: ReleaseContract, obs: dict) -> None:
         """An alert during the cooldown opens no case, but it is not lost: it is added to the approved case it
-        follows, so the approvers see what happened after their decision (Pipewright 1.2, FR-79)."""
+        follows, so the approvers see what happened after their decision (Pipewright 1.2.0, FR-79)."""
         pointer, _ = self.store.pointer(contract.usecase)
         cid = pointer.get("last_case")
         if not cid:

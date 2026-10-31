@@ -98,7 +98,7 @@ def register_model(
         artifact_uri=model.uri,
         serving_container_image_uri=SERVING_IMAGE,
         # The environment's online lookup on the container, which the handler prefers over serving.json, so a
-        # promoted copy can be given the destination's (Pipewright 1.2, FR-76).
+        # promoted copy can be given the destination's (Pipewright 1.2.0, FR-76).
         serving_container_environment_variables=(
             {"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
             if online else None),
@@ -110,7 +110,7 @@ def register_model(
         labels={"run_id": alias[:63], "pipeline": "training", "usecase": ml_config["usecase"][:63],
                 "status": "champion" if make_default else "candidate",
                 # A first version is the default by itself; under a manual policy nobody has approved it yet
-                # (Pipewright 1.2, FR-83): `pipewright model approve` records the approval.
+                # (Pipewright 1.2.0, FR-83): `pipewright model approve` records the approval.
                 **({"approval": "pending"} if not existing and ml_config["registry"]["set_default"] == "manual"
                    else {}),
                 # the release that trained it: `pipewright promote` promotes a model only with that release

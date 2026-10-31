@@ -123,7 +123,7 @@ def fingerprints(gcp, env: Environment, run_id: str | None, replay_of: str | Non
     return {"fingerprint": out} if current or replay_of else {}
 
 
-# Decisions about a version (Pipewright 1.2, FR-84): who approved, promoted, deployed or rolled it back, and how each
+# Decisions about a version (Pipewright 1.2.0, FR-84): who approved, promoted, deployed or rolled it back, and how each
 # was approved, from the environment's event log (manifest observability.evidence_dataset, table `events`).
 VERSION_EVENTS = ("model.approved", "model.deployed", "model.undeployed")
 RELEASE_EVENTS = ("release.live", "release.promoted", "release.rolled_back")

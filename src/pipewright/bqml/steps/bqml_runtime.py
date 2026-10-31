@@ -177,7 +177,7 @@ def prepared_sql(ml_config: dict, source_sql: str) -> str:
 
 def contract_table(ml_config: dict, rows_table: str) -> str:
     """The table the data contract checks: the run's rows, or with bqml.contract_on: source and a bqml.prepare, the
-    rows as read before preparation (Pipewright 1.2, FR-70), as the container path checks them."""
+    rows as read before preparation (Pipewright 1.2.0, FR-70), as the container path checks them."""
     bqml = ml_config.get("bqml") or {}
     return f"{rows_table}_source" if bqml.get("contract_on") == "source" and bqml.get("prepare") else rows_table
 
@@ -447,7 +447,7 @@ def evaluate_forecast(jobs: Jobs, ml_config: dict, settings: dict, model: str, r
         raise ValueError("the forecast matched none of the held-out rows: is data.split.time_column a regular series "
                          "(one row per series and time point)?")
     ids = settings.get("id_columns") or []
-    if ids:                    # each series' metrics (Pipewright 1.2, FR-69): the one that fails is named
+    if ids:                    # each series' metrics (Pipewright 1.2.0, FR-69): the one that fails is named
         names = ml_config["evaluation"]["metrics"]
         result["per_series"] = {str(r["_pw_group"]): {"rows": int(r["row_count"]), **shape_metrics(r, names)}
                                 for r in jobs.run(metrics_sql(ml_config, out_table, group_sql=series_key(ids)),
@@ -783,7 +783,7 @@ def proposal(ml_config: dict, run_id: str, fired: list[str], summary: dict, data
 
 
 def metrics_row(ml_config: dict, run_id: str, rows_table: str, record: dict, now: str) -> dict:
-    """bqml.metrics_table (Pipewright 1.2, FR-86): the row a training run writes, approved or refused, with the
+    """bqml.metrics_table (Pipewright 1.2.0, FR-86): the row a training run writes, approved or refused, with the
     container examples' record step's column names (pipewright.bqml.config.METRICS_COLUMNS). The source is the
     run's rows table, the rows this evaluation measured."""
     import json

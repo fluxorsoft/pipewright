@@ -198,7 +198,7 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
                     else rt.evaluate_rows(jobs, ml_config, champion_predictions))
         record["champion"] = {**measured["metrics"],
                               "_version": champion.get("versionId"), "_model": champion_ref,
-                              # its slices and fairness on the same rows (Pipewright 1.2, FR-72)
+                              # its slices and fairness on the same rows (Pipewright 1.2.0, FR-72)
                               **({"_slices": measured["slices"]} if measured.get("slices") else {}),
                               **({"_fairness": rt.fairness(jobs, ml_config, champion_predictions)}
                                  if ml_config["evaluation"].get("fairness") and not unsupervised else {})}
@@ -231,7 +231,7 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
                        f"(champion version {record['champion']['_version']})")
     record.update({"decision": decision, "reasons": reasons, "run_id": run_id, "bytes_billed": jobs.billed})
     uri = rt.write_record(project, rt.record_uri(ml_config, run_id), record)
-    if section.get("metrics_table"):         # Pipewright 1.2 (FR-86): the run in the metrics table, as containers do
+    if section.get("metrics_table"):         # Pipewright 1.2.0 (FR-86): the run in the metrics table, as containers do
         from datetime import datetime, timezone
 
         rt.append_row(jobs.client, f"{project}.{ml_config['platform']['bigquery_dataset']}.{section['metrics_table']}",
@@ -288,7 +288,7 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
     # A model's first version is the registry's default from the start: the champion, as the container path labels it
     # (evidence EV-06 then reads it as a first version, not as a default without an approval).
     if default or str((rt.default_version(project, region, registry_id) or {}).get("versionId")) == str(version):
-        # Under a manual policy a first version is the default with nobody's approval (Pipewright 1.2, FR-83):
+        # Under a manual policy a first version is the default with nobody's approval (Pipewright 1.2.0, FR-83):
         # `pipewright model approve` records it.
         pending = {} if default else {"approval": "pending"}
         rt.label_version(project, region, registry_id, version, {"status": "champion", **pending})

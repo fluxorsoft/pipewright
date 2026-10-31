@@ -1,4 +1,4 @@
-"""Accelerator limits per environment (Pipewright 1.2): GPUs for pipeline steps (FR-58) and for serving (FR-61).
+"""Accelerator limits per environment (Pipewright 1.2.0): GPUs for pipeline steps (FR-58) and for serving (FR-61).
 
 The manifest's policies.accelerators lists what each may ask for:
 
@@ -8,7 +8,7 @@ The manifest's policies.accelerators lists what each may ask for:
         serving: { types: [NVIDIA_L4], max_count: 1 }
 
 Steps: without policies.accelerators.steps a step may ask for any GPU, as in 1.x (quota is the limit). Serving is new
-in 1.2: model.serving.accelerator needs the environment to list it. Scale to zero (FR-62) is opt-in as well:
+in 1.2.0: model.serving.accelerator needs the environment to list it. Scale to zero (FR-62) is opt-in as well:
 model.serving.scale_to_zero with replicas.min 0; 1.x deploys at least one replica whatever min says.
 """
 

@@ -1,4 +1,4 @@
-"""FR-64 (Pipewright 1.2): the examples are real YAML with readable sample values, schema-checked as they stand,
+"""FR-64 (Pipewright 1.2.0): the examples are real YAML with readable sample values, schema-checked as they stand,
 and new-usecase replaces every sample value."""
 import pytest
 import yaml

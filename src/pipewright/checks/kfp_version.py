@@ -16,7 +16,7 @@ from packaging.version import Version
 from pipewright.config import ResolvedUseCase
 
 # The kfp minor this Pipewright release is tested with: the examples' components pin it, and `pipewright ci init`
-# writes it into .github/pipewright-constraints.txt so CI installs the same compiler (Pipewright 1.2, FR-81).
+# writes it into .github/pipewright-constraints.txt so CI installs the same compiler (Pipewright 1.2.0, FR-81).
 TESTED_KFP = "2.17"
 
 

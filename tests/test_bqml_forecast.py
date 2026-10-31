@@ -133,7 +133,7 @@ def test_evaluate_forecast_measures_the_held_out_period():
                 return [{"failed": 0, "status": None}]
             if what == "metrics":
                 return [{"row_count": 60, "mae": 1.5, "rmse": 2.25}]
-            if what == "metrics per series":            # Pipewright 1.2 (FR-69): each store's metrics
+            if what == "metrics per series":            # Pipewright 1.2.0 (FR-69): each store's metrics
                 assert "GROUP BY t.g" in sql and "CONCAT(IFNULL(CAST(`store` AS STRING), ''))" in sql
                 return [{"_pw_group": "s1", "row_count": 30, "mae": 1.0, "rmse": 2.0},
                         {"_pw_group": "s2", "row_count": 30, "mae": 2.0, "rmse": 2.5}]

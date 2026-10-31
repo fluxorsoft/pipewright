@@ -17,14 +17,14 @@ Feature order is recorded in features.json (packaged alongside the model).
 
 Online features (model.serving.features online, Pipewright 1.1): serving.json names the tenant's online store, its
 feature views and the entity key; the serving container's PIPEWRIGHT_ONLINE_FEATURES, when set, wins over it
-(Pipewright 1.2: a promoted model reads the destination's store). An instance is then an entity ID ("c-42" or
+(Pipewright 1.2.0: a promoted model reads the destination's store). An instance is then an entity ID ("c-42" or
 {"customer_id": "c-42"}); the handler reads each view's latest values at the regional Agent Platform endpoint, as
 the endpoint's service account, and builds the row in features.json order.
 
-Empty values (Pipewright 1.2, model.serving.fill_missing, on by default): an empty or non-numeric feature, in a
+Empty values (Pipewright 1.2.0, model.serving.fill_missing, on by default): an empty or non-numeric feature, in a
 request row or from the online store, is filled with the median the model was trained with (serving.json), exactly
 as batch scoring fills it. A value that cannot be filled (no median, or fill_missing false) makes that instance's
-prediction {"error": "... <feature> ..."}; the other instances are still scored. Models packaged before 1.2 carry no
+prediction {"error": "... <feature> ..."}; the other instances are still scored. Models packaged before 1.2.0 carry no
 medians and behave as before. Each request logs counts only, never the IDs or the values.
 """
 
@@ -139,7 +139,7 @@ class TabularChurnHandler(BaseHandler):
             with open(os.path.join(model_dir, "features.json")) as f:
                 self._features = json.load(f)
         self._online = serving.get("online_features")
-        if serving.get("fill_missing", True) and serving.get("medians"):     # packaged from Pipewright 1.2
+        if serving.get("fill_missing", True) and serving.get("medians"):     # packaged from Pipewright 1.2.0
             self._medians = serving["medians"]
         # The environment's own lookup on the serving container wins over the one packaged at training (FR-76): a
         # promoted model's files name the store of the environment it was trained in.

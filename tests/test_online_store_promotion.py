@@ -1,4 +1,4 @@
-"""FR-76: a promoted model reads the destination's online store, never the source's (Pipewright 1.2)."""
+"""FR-76: a promoted model reads the destination's online store, never the source's (Pipewright 1.2.0)."""
 import json
 from types import SimpleNamespace
 

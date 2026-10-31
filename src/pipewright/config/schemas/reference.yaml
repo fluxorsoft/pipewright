@@ -26,7 +26,7 @@ pipelines.inference.function: The name of the inference pipeline function in tha
 components: Where the pipeline components' code lives. It is built into the component image every step runs in.
 components.dir: The folder of component code, relative to the use case folder.
 components.requirements: The requirements file installed into the component image.
-components.base_image: The component image's base instead of the environment's default (Pipewright 1.2), for example a CUDA image for GPU training. It must match the environment's approved base images (policies.images.base_images), and the release records it by digest. It needs Python 3.11 with pip on the path (python3, pip), as the default python:3.11-slim has; pin it by digest.
+components.base_image: The component image's base instead of the environment's default (Pipewright 1.2.0), for example a CUDA image for GPU training. It must match the environment's approved base images (policies.images.base_images), and the release records it by digest. It needs Python 3.11 with pip on the path (python3, pip), as the default python:3.11-slim has; pin it by digest.
 components.ray_requirements: Extra packages for the use case's Ray image (the clusters' nodes), such as torch. The image is built at release on the platform's Ray base image, with the component code.
 framework: The ML framework of the component image.
 
@@ -158,7 +158,7 @@ evaluation.gates: Minimums and maximums a model must meet. A model that fails on
 evaluation.gates.metric: The metric the gate checks.
 evaluation.gates.min: The lowest value allowed.
 evaluation.gates.max: The highest value allowed.
-evaluation.gates.per_series: For a forecast, every series (bqml.forecast.id_columns) must pass the gate, not only the overall value; the evaluation record holds each series' metrics and `pipewright model list` shows the worst (Pipewright 1.2).
+evaluation.gates.per_series: For a forecast, every series (bqml.forecast.id_columns) must pass the gate, not only the overall value; the evaluation record holds each series' metrics and `pipewright model list` shows the worst (Pipewright 1.2.0).
 evaluation.champion: Comparison with the current champion on the same test data.
 evaluation.champion.enabled: Whether a new model must beat the champion.
 evaluation.champion.metric: The metric compared. Left out, evaluation.primary_metric.
@@ -188,7 +188,7 @@ inference.output_table: The table predictions are written to.
 inference.decision_threshold: The score above which a prediction is positive. Left out, evaluation.decision_threshold.
 
 monitoring: Checks run on each inference, for drift, prediction drift and performance against observed outcomes.
-monitoring.alerts.events: The events that send an email. run.failed (Pipewright 1.2) emails a run that ended failed or cancelled, found by the launcher within the hour.
+monitoring.alerts.events: The events that send an email. run.failed (Pipewright 1.2.0) emails a run that ended failed or cancelled, found by the launcher within the hour.
 monitoring.alerts.severity: The severity of the alert policies.
 monitoring.drift: Whether the scored data has moved away from the training data, feature by feature.
 monitoring.drift.enabled: Whether drift is checked.
@@ -203,7 +203,7 @@ monitoring.performance.enabled: Whether performance is checked.
 monitoring.performance.labels: Where the observed outcomes are.
 monitoring.performance.labels.table: The table of observed outcomes.
 monitoring.performance.labels.key: The column that joins outcomes to predictions.
-monitoring.performance.labels.time_column: The outcome's cut-off column (Pipewright 1.2). With it, each outcome is joined to the score made for that cut-off (the scores table's scored_for), never to a later score that already knows the outcome. Without it, outcomes meet each key's latest score, and validate warns.
+monitoring.performance.labels.time_column: The outcome's cut-off column (Pipewright 1.2.0). With it, each outcome is joined to the score made for that cut-off (the scores table's scored_for), never to a later score that already knows the outcome. Without it, outcomes meet each key's latest score, and validate warns.
 monitoring.performance.labels.label: The column holding the observed outcome.
 monitoring.performance.metric: The metric computed on observed outcomes.
 monitoring.performance.min: The value below which an alert is raised.
@@ -242,8 +242,8 @@ bqml.model_type: "The BigQuery ML model type, matching data.label.task: logistic
 bqml.options: "CREATE MODEL options, for example {max_iterations: 50, l2_reg: 0.1}. Pipewright sets the label, the split, the key, the registry and explanations itself, so those options are refused."
 bqml.transform: "A .sql file with the expressions of a TRANSFORM clause (without TRANSFORM ( ... )), for preparation the model needs when it is served: BigQuery ML applies it in ML.PREDICT and at a Model Registry endpoint. Pinned by the release."
 bqml.prepare: "A .sql file with a SELECT over {rows} (the run's rows): preparation in SQL, pinned by the release. Its output is written into the run's rows before training; scoring runs the same file. An endpoint runs no SQL, so preparation needed online belongs in bqml.transform."
-bqml.metrics_table: "A table in outputs.bigquery.tables that gets one row per training run, approved or refused, with the columns of the churn example's model_metrics.json (run_id, decision, primary_value, champion_value and the rest), so BigQuery ML runs sit in the same history as container runs (Pipewright 1.2)."
-bqml.contract_on: "Which rows the data contract checks: prepared (the default) checks the output of bqml.prepare; source checks the rows as read, before bqml.prepare, as the container path does, so preparation may rescale or derive columns without breaking the contract's ranges (Pipewright 1.2)."
+bqml.metrics_table: "A table in outputs.bigquery.tables that gets one row per training run, approved or refused, with the columns of the churn example's model_metrics.json (run_id, decision, primary_value, champion_value and the rest), so BigQuery ML runs sit in the same history as container runs (Pipewright 1.2.0)."
+bqml.contract_on: "Which rows the data contract checks: prepared (the default) checks the output of bqml.prepare; source checks the rows as read, before bqml.prepare, as the container path does, so preparation may rescale or derive columns without breaking the contract's ranges (Pipewright 1.2.0)."
 bqml.explain: "Compute global explanations when the model is created (ML.GLOBAL_EXPLAIN). Left out, explainability.enabled."
 model.serving.features: "online: the endpoint takes entity IDs (data.features_from.entity.columns) and reads every feature from the tenant's online store, so serving, batch scoring and training share one feature definition (Pipewright 1.1). request (the default): callers send the feature values."
 data.features_from.sources.online_view: "The feature view in the tenant's online store that serves this source's features (model.serving.features online). Default: the feature group's name."
@@ -274,7 +274,7 @@ synthetic: Synthetic data generation. Off unless enabled; with it off nothing is
 synthetic.enabled: Switches synthetic data on for this use case. May differ per environment (for example on in production-grade environments only).
 synthetic.purpose: Sets the default gates. test-data stays in the organisation; sharing leaves it and has stricter privacy gates.
 synthetic.tier: learned (an engine learns from real data inside this environment, in the synthetic pipeline) or contract (rows from the data contract and rules alone, no real data, from `pipewright synthetic generate`).
-synthetic.source_uri: The data the engine learns from, bq:// or gs://, read point in time like training (with data.features_from, the entity table; with data.label_source and a table without the label column, its labels come from the label window, as in training; Pipewright 1.2).
+synthetic.source_uri: The data the engine learns from, bq:// or gs://, read point in time like training (with data.features_from, the entity table; with data.label_source and a table without the label column, its labels come from the label window, as in training; Pipewright 1.2.0).
 synthetic.output_table: The table in outputs.bigquery.tables that receives the synthetic rows. Its schema holds the contract's columns and a run_id column.
 synthetic.rows: "How many rows to generate. Default: as many as the source has. May differ per environment."
 synthetic.holdout_fraction: Real rows kept back from the engine, to test utility and privacy against.
@@ -341,8 +341,8 @@ synthetic.sequences.columns: The columns to learn and generate (default all). Ke
 
 tests: How `pipewright test` checks the use case's code (the CI pull-request workflow runs it), and with tests.on_release `pipewright release` too.
 tests.command: The command run in the use case folder; it must exit 0.
-tests.environment: Where tests.command runs. pipewright (the default) is Pipewright's own interpreter; components is a virtual environment built from components/requirements.txt and cached by its hash, so a test that imports a component finds numpy, pandas or torch in CI too (Pipewright 1.2).
-tests.on_release: When true, `pipewright release` runs tests.command before it builds anything and stops on a non-zero exit (default false, so the release does not run the tests; Pipewright 1.2).
+tests.environment: Where tests.command runs. pipewright (the default) is Pipewright's own interpreter; components is a virtual environment built from components/requirements.txt and cached by its hash, so a test that imports a component finds numpy, pandas or torch in CI too (Pipewright 1.2.0).
+tests.on_release: When true, `pipewright release` runs tests.command before it builds anything and stops on a non-zero exit (default false, so the release does not run the tests; Pipewright 1.2.0).
 
 outputs: Where the use case's tables are written.
 outputs.store: bigquery (tables), gcs (Parquet files plus BigQuery external tables) or both, for example while moving to a lake.
@@ -365,15 +365,15 @@ model.serving.replicas: How many replicas serve.
 model.serving.replicas.min: The fewest replicas.
 model.serving.replicas.max: The most replicas, reached under load.
 model.serving.canary_percent: The share of traffic a new version gets with `deploy-model --canary`.
-model.serving.accelerator: A GPU for each replica (Pipewright 1.2), within the environment's policies.accelerators.serving. The machine must take it, for example g2-standard-8 with NVIDIA_L4.
+model.serving.accelerator: A GPU for each replica (Pipewright 1.2.0), within the environment's policies.accelerators.serving. The machine must take it, for example g2-standard-8 with NVIDIA_L4.
 model.serving.accelerator.type: The accelerator type, for example NVIDIA_L4.
 model.serving.accelerator.count: How many per replica (default 1).
-model.serving.scale_to_zero: With replicas.min 0, an idle endpoint runs no replica and costs nothing while idle; the first request after a quiet spell waits for a replica to start (Pipewright 1.2, an Agent Platform preview). Without it, min 0 deploys one replica, as in 1.x.
-model.serving.fill_missing: The endpoint fills an empty feature (request or online) with the median the model was trained with, as batch scoring does (Pipewright 1.2, default true). Set false to answer an error naming the feature instead.
+model.serving.scale_to_zero: With replicas.min 0, an idle endpoint runs no replica and costs nothing while idle; the first request after a quiet spell waits for a replica to start (Pipewright 1.2.0, an Agent Platform preview). Without it, min 0 deploys one replica, as in 1.x.
+model.serving.fill_missing: The endpoint fills an empty feature (request or online) with the median the model was trained with, as batch scoring does (Pipewright 1.2.0, default true). Set false to answer an error naming the feature instead.
 
 approvals: Which changes need a person.
 approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.
-approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation; ci (Pipewright 1.2) - `pipewright decisions pending` lists a deploy-approve item for each new default version that passes its gates and is not served, and a pipewright-gate run deploys it once the GitHub environment's reviewers approve; on_register (1.2) - the pipewright-decisions workflow deploys such a version without a person.
+approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation; ci (Pipewright 1.2.0) - `pipewright decisions pending` lists a deploy-approve item for each new default version that passes its gates and is not served, and a pipewright-gate run deploys it once the GitHub environment's reviewers approve; on_register (1.2.0) - the pipewright-decisions workflow deploys such a version without a person.
 approvals.approvers: Who may approve, as user:<email> or group:<email>.
 
 features_store: Reserved for a later version; leave it out.

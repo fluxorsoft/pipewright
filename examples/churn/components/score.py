@@ -58,7 +58,7 @@ def score_batch(
         "run_id": run_id,
         "scored_at": datetime.now(timezone.utc),
     })
-    # The cut-off each score is for (Pipewright 1.2, FR-78): monitoring.performance joins outcomes to the score made
+    # The cut-off each score is for (Pipewright 1.2.0, FR-78): monitoring.performance joins outcomes to the score made
     # for their cut-off (labels.time_column), never to a later score that already knows the outcome.
     when = (((ml_config["data"].get("features_from") or {}).get("entity") or {}).get("time_column")
             or (ml_config["data"].get("split") or {}).get("time_column"))
