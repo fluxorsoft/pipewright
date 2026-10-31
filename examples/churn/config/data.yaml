@@ -18,6 +18,8 @@ data:
     unique: [customer_id]
     allow_extra_columns: true
   label: { column: churned, values: [0, 1], positive: 1 }
+  # default data.features_from: null      # feature tables read at each row's cut-off (see the features example)
+  # default data.label_source: null       # labels from an events table and a window (see the reference)
   split:
     strategy: time                       # train on the past, test on the latest months
     time_column: snapshot_date

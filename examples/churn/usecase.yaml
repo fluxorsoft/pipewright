@@ -29,13 +29,23 @@ spec:
     training:  { file: training_pipeline.py,  function: churn_training_pipeline }
     inference: { file: inference_pipeline.py, function: churn_inference_pipeline }
   components: { dir: components/, requirements: components/requirements.txt }
+  # default components.base_image: null       # the environment's base (python:3.11-slim or its mirror); a CUDA
+  #                                           # image for GPU training goes here, within the approved base images
   framework:  pytorch
 
   model:
     name: my-churn-classifier
     promotion: model
     serving: { enabled: false, target: vertex, machine: n1-standard-2, canary_percent: 10 }
+    # Lines starting `# default` show what Pipewright fills in when a key is left out (a test keeps them true;
+    # `pipewright resolve --env <env>` shows the merged result, `pipewright explain <key>` what a key means):
+    # default model.serving.replicas: { min: 1, max: 1 }   # min 0 needs scale_to_zero
+    # default model.serving.features: request        # online: callers send entity IDs, features come from the store
+    # default model.serving.fill_missing: true       # an empty feature gets its training median, as in batch scoring
+    # default model.serving.scale_to_zero: false     # true with replicas.min 0: no replica while idle (preview)
+    # default model.serving.accelerator: null        # e.g. { type: NVIDIA_L4, count: 1 }, within the platform's list
 
   approvals:
     promote_model: manual                # a passing model is a candidate until `pipewright model approve`
-    deploy_model: manual
+    deploy_model: manual                 # also: auto, ci (a GitHub-approved gate), on_register (the workflow)
+    # default approvals.approvers: []      # e.g. [user:lead@example.com]: who may run --approve

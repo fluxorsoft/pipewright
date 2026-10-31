@@ -12,3 +12,5 @@ steps:                                   # applied to the compiled pipelines; no
 
 tests:
   command: uv run --no-project --with-requirements tests/requirements.txt python -m pytest tests -q
+  # default tests.on_release: false          # true: `pipewright release` runs the command first, stops on failure
+  # default tests.environment: pipewright    # components: run in a venv with components/requirements.txt

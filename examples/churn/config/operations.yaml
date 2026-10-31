@@ -16,6 +16,7 @@ monitoring:
     labels: { table: my_churn_churn_outcomes, key: customer_id, label: churned }
     metric: auc
     min: 0.7
+    # default monitoring.performance.labels.time_column: null   # set it to join outcomes on key and time
 
 retraining:                             # drift or a performance drop opens a case; a person decides
   mode: propose                         # off (alerts only) | propose | candidate (trains, never promotes)
@@ -27,6 +28,7 @@ retraining:                             # drift or a performance drop opens a ca
     publish: false                      # true: also on your team's decision feed (Pub/Sub), for your own apps
     escalate_after_days: 3
     escalate_notify: []
+    # default retraining.decisions.digest: true                 # a weekly digest of open cases
   approvals:
     required: []                        # approver groups the platform registered, e.g. [ml-leads, model-risk]
     separate_from_requester: true
