@@ -72,6 +72,10 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
     test_flag = rt.split_flag(ml_config, rt.split_keys(ml_config)) if mode == "training" else "FALSE"
     jobs.run(rt.render("rows.sql", rows_table=rows_table, labels=rt.label_pairs(jobs.labels), run_id=run_id,
                        prepared=rt.prepared_sql(ml_config, source), test_flag=test_flag), "the run's rows")
+    checked = rt.contract_table(ml_config, rows_table)
+    if checked != rows_table:                      # the contract checks the rows as read (bqml.contract_on: source)
+        jobs.run(f"CREATE OR REPLACE TABLE `{checked}` OPTIONS (expiration_timestamp = "
+                 f"TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS\n{source}", "the rows as read")
     counts = jobs.run(f"SELECT COUNT(*) AS n, COUNTIF(_pw_test) AS test FROM `{rows_table}`", "row counts")[0]
     columns = [f.name for f in jobs.client.get_table(rows_table).schema]
     label = (data.get("label") or {}).get("column")
@@ -93,9 +97,10 @@ def bqml_validate(project: str, rows_table: str, run_id: str, mode: str, ml_conf
     from pipewright_runtime import labels
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-validate"}))
-    columns = {f.name for f in jobs.client.get_table(rows_table).schema}
+    table = rt.contract_table(ml_config, rows_table)
+    columns = {f.name for f in jobs.client.get_table(table).schema}
     checks, rules = rt.contract_checks(ml_config, columns, mode)
-    row = jobs.run(rt.render("contract.sql", checks=checks, rows_table=rows_table), "data contract")[0]
+    row = jobs.run(rt.render("contract.sql", checks=checks, rows_table=table), "data contract")[0]
     errors = rt.contract_errors(row, rules, ml_config["data"].get("contract") or {}, mode)
     if errors:
         raise ValueError("data contract failed:\n  " + "\n  ".join(errors))

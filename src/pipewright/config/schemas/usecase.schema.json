@@ -588,6 +588,7 @@
         "options": { "type": "object" },
         "transform": { "type": "string", "pattern": "\\.sql$" },
         "prepare": { "type": "string", "pattern": "\\.sql$" },
+        "contract_on": { "enum": ["prepared", "source"], "description": "the rows the data contract checks: prepared (the default, as in 1.x) or source (as read, before bqml.prepare, as the container path checks them)" },
         "explain": { "type": "boolean" },
         "max_bytes_billed": { "type": "integer", "minimum": 1 }
       }

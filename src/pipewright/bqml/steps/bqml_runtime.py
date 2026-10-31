@@ -175,6 +175,13 @@ def prepared_sql(ml_config: dict, source_sql: str) -> str:
     return prepare["sql"].replace("{rows}", f"({source_sql})")
 
 
+def contract_table(ml_config: dict, rows_table: str) -> str:
+    """The table the data contract checks: the run's rows, or with bqml.contract_on: source and a bqml.prepare, the
+    rows as read before preparation (Pipewright 1.2, FR-70), as the container path checks them."""
+    bqml = ml_config.get("bqml") or {}
+    return f"{rows_table}_source" if bqml.get("contract_on") == "source" and bqml.get("prepare") else rows_table
+
+
 def contract_checks(ml_config: dict, columns: set[str], mode: str) -> tuple[str, list[tuple[str, str, object]]]:
     """The contract's checks as COUNTIF expressions over the run's rows, and (alias, rule, limit) for each, as the
     container path's validate step checks them (mlkit.validate_frame)."""

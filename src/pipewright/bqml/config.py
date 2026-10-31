@@ -118,6 +118,8 @@ def resolve(spec: dict, ml: dict, directory: Path, policy: dict, tables: dict, h
                 "max_bytes_billed": int(limit),
                 "transform": _sql_file(spec.get("transform"), directory, f"{where}.transform", problems),
                 "prepare": _sql_file(spec.get("prepare"), directory, f"{where}.prepare", problems)}
+    if spec.get("contract_on"):                   # only when set: a 1.x use case resolves as before (FR-70)
+        resolved["contract_on"] = spec["contract_on"]
     if resolved["prepare"] and ROWS_PLACEHOLDER not in resolved["prepare"]["sql"]:
         problems.append(f"{where}.prepare: {spec['prepare']} must read the run's rows FROM {ROWS_PLACEHOLDER}")
     if resolved["transform"] and re.search(r"\bTRANSFORM\s*\(", resolved["transform"]["sql"], re.I):
