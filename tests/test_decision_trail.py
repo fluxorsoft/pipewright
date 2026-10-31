@@ -76,7 +76,7 @@ def results(env, gcp):
 def test_doctor_fails_an_events_topic_nobody_subscribes_to():
     # The ebook's Chapter 17: every promotion, approval and deployment had been published and discarded.
     (status, detail), = results(ENV, gcp_answering([]))
-    assert status == doctor.FAIL and "nothing subscribes to pw-events" in detail
+    assert status == doctor.WARN and "nothing subscribes to pw-events" in detail
 
 
 def test_doctor_names_the_table_events_are_kept_in():

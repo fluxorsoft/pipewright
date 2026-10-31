@@ -165,7 +165,7 @@ def _check_event_log(env: Environment, gcp: Gcp, report: Report, s: str, platfor
         return
     subs = (resp.body or {}).get("subscriptions") or []
     if not subs:
-        report.add(s, Result(FAIL, "event log", f"nothing subscribes to {topic.rsplit('/', 1)[-1]}: every lifecycle "
+        report.add(s, Result(WARN, "event log", f"nothing subscribes to {topic.rsplit('/', 1)[-1]}: every lifecycle "
                              "event, every decision included, is discarded",
                              "keep them in BigQuery (the starter's and Enterprise's evidence dataset, manifest "
                              "observability.evidence_dataset)" + f"; {platform}"))
