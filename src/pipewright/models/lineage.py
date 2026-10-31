@@ -139,7 +139,7 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
     def p(name, value):
         return {"name": name, "parameterType": {"type": "STRING"}, "parameterValue": {"value": value or ""}}
 
-    sql = (f"SELECT CAST(publish_time AS STRING) AS at, TO_JSON_STRING(data) AS event "
+    sql = (f"SELECT CAST(publish_time AS STRING) AS published, TO_JSON_STRING(data) AS event "
            f"FROM `{env.project}.{dataset}.events` "
            "WHERE JSON_VALUE(data, '$.usecase') = @usecase AND JSON_VALUE(data, '$.environment') = @env AND ("
            f"(JSON_VALUE(data, '$.event_type') IN UNNEST({list(VERSION_EVENTS)}) "
@@ -156,7 +156,7 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
     for row in found:
         event = json.loads(row["event"] or "{}")
         data = event.get("data") or {}
-        out.append({"at": (row["at"] or "")[:19], "event": event.get("event_type"), "by": data.get("by"),
+        out.append({"at": (row["published"] or "")[:19], "event": event.get("event_type"), "by": data.get("by"),
                     "approval": data.get("approval"), "version": data.get("version"),
                     "release": event.get("release"), "endpoint": data.get("endpoint"),
                     "traffic_percent": data.get("traffic_percent")})
