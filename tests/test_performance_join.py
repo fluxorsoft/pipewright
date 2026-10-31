@@ -93,4 +93,8 @@ def test_validate_warns_only_for_data_with_a_cut_off(repo):
     data["split"] = {"strategy": "time", "time_column": "snapshot_date"}
     assert any("by key only" in w for w in resolve(repo).warnings)
     spec["monitoring"]["performance"]["labels"]["time_column"] = "snapshot_date"
+    # Found live: the setting needs a monitor step that reads it; one copied from 1.1 joins by key only.
+    uc = resolve(repo)
+    assert any("no component reads it" in w and "FR-78" in w for w in uc.warnings)
+    (uc.components_dir / "monitor.py").write_text('when = labels.get("time_column")\n', encoding="utf-8")
     assert not resolve(repo).warnings

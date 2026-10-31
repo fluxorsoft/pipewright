@@ -206,6 +206,20 @@ def test_performance_key_must_be_in_the_scores(repo):
     assert resolve(repo).ml["monitoring"]["performance"]["enabled"]
 
 
+def test_performance_on_the_cut_off_needs_it_in_the_scores(repo, monkeypatch):
+    """FR-78 in BigQuery ML (found live: labels.time_column was ignored): the scores carry the cut-off through."""
+    import tests.test_bqml_config as here
+
+    bqml_repo(repo)
+    repo.usecase["spec"]["monitoring"] = {"output_table": "model_metrics", "performance": {"enabled": True, "labels": {
+        "table": "outcomes", "key": "customer_id", "label": "churned", "time_column": "scored_for"}}}
+    assert "inference.output_table scores needs the cut-off column snapshot_date" in problems(repo)
+    monkeypatch.setattr(here, "SCORES", [*SCORES, {"name": "snapshot_date", "type": "DATE"}])
+    assert resolve(repo).ml["bqml"]["performance_cutoff"] == "snapshot_date"
+    del repo.usecase["spec"]["monitoring"]["performance"]["labels"]["time_column"]
+    assert "performance_cutoff" not in resolve(repo).ml["bqml"]                   # 1.x: unchanged
+
+
 def test_generative_ai_functions_are_refused(repo):
     """C-08, kept for 1.1: no generative AI in a use case's SQL; in comments, strings and quoted names it is fine."""
     bqml_repo(repo, prepare="sql/prepare.sql")

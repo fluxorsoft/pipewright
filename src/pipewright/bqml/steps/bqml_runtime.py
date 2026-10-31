@@ -732,9 +732,15 @@ def performance_sql(ml_config: dict, project: str, model_version: str, out_table
     task = data["label"].get("task", "binary")
     dataset = ml_config["platform"]["bigquery_dataset"]
     source = perf["labels"]
+    key, cutoff = q(source["key"]), ml_config["bqml"].get("performance_cutoff")
+    if cutoff and source.get("time_column"):     # FR-78: the score made for the outcome's cut-off
+        join = f"ON lb.{key} = pr.{key} AND DATE(lb.{q(source['time_column'])}) = DATE(pr.{q(cutoff)})"
+        partition = f"pr.{key}, pr.{q(cutoff)}"
+    else:                                        # 1.x: each key's latest score
+        join, partition = f"USING ({key})", f"pr.{key}"
     return render("performance.sql", out_table=out_table, labels=label_pairs(labels), keep_days=KEEP_DAYS,
                   outcome=ident(source["label"]), label=ident(data["label"]["column"]),
-                  outputs=PERFORMANCE_OUTPUTS[task], key=ident(source["key"]),
+                  outputs=PERFORMANCE_OUTPUTS[task], join=join, partition=partition,
                   output_table=f"{project}.{dataset}.{ml_config['inference']['output_table']}",
                   labels_table=f"{project}.{dataset}.{source['table']}", model_version=str(int(model_version)))
 

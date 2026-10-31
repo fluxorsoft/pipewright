@@ -292,6 +292,14 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     problems += accelerators.problems(steps, model["serving"], env.policies, env.name)
     extra_warnings += accelerators.warnings(model["serving"])
+    # FR-78 on the container path lives in the team's monitor step (found live: a 1.1 copy ignored the setting).
+    labels = (((ml.get("monitoring") or {}).get("performance") or {}).get("labels") or {})
+    if (not bqml_spec and labels.get("time_column") and components_dir.is_dir()
+            and not any("time_column" in p.read_text(encoding="utf-8", errors="ignore")
+                        for p in components_dir.rglob("*.py"))):
+        extra_warnings.append("monitoring.performance.labels.time_column is set, but no component reads it: a monitor "
+                              "step from Pipewright 1.1 or earlier joins outcomes by key only. Update it from the "
+                              "churn example's components/monitor.py (FR-78)")
 
     if problems:
         raise ConfigError(problems, source=f"{path} ({env.name})")
@@ -452,6 +460,23 @@ def _bqml_section(spec: dict, ml: dict, model: dict, directory: Path, env: Envir
     if model["serving"]["enabled"] and ml["bqml"].get("forecast"):
         problems.append("model.serving: a forecast is not served online; scoring writes it to "
                         "inference.output_table")
+    # FR-78 in BigQuery ML (found live: the join ignored labels.time_column): an outcome meets the score made for its
+    # cut-off, the entity's or the split's time column, which the scores carry through from the scored rows.
+    perf = (ml.get("monitoring") or {}).get("performance") or {}
+    if perf.get("enabled") and (perf.get("labels") or {}).get("time_column"):
+        data = ml["data"]
+        cutoff = (((data.get("features_from") or {}).get("entity") or {}).get("time_column")
+                  or (data.get("split") or {}).get("time_column"))
+        output = (ml.get("inference") or {}).get("output_table")
+        scores = tables.get(output)
+        if not cutoff:
+            problems.append("monitoring.performance.labels.time_column: BigQuery ML matches it to each score's cut-off "
+                            "(data.features_from.entity.time_column or data.split.time_column); there is none")
+        elif scores is not None and scores.fields and cutoff not in {f["name"] for f in scores.fields}:
+            problems.append(f"monitoring.performance.labels.time_column: inference.output_table {output} needs the "
+                            f"cut-off column {cutoff}, so each outcome meets the score made for its cut-off")
+        else:
+            ml["bqml"]["performance_cutoff"] = cutoff
 
 
 def _synthetic_pipeline(spec: dict, pipelines: dict, directory: Path, problems: list[str]) -> Path | None:

@@ -167,6 +167,14 @@ def test_performance_joins_this_versions_latest_scores_with_outcomes(cfg):
         rt.performance_sql(cfg, "p", "7' OR '1'='1", "p.churn.perf", {})        # versions are numbers
     assert rt.performance_trigger(0.70, "auc", 0.75) and not rt.performance_trigger(0.80, "auc", 0.75)
     assert rt.performance_trigger(3.0, "rmse", 2.0) and not rt.performance_trigger(None, "auc", 0.75)
+    assert "PARTITION BY pr.`customer_id` ORDER BY" in sql                     # 1.x: each key's latest score
+    # FR-78 (found live): with labels.time_column, each outcome meets the score made for its cut-off.
+    cfg["monitoring"]["performance"]["labels"]["time_column"] = "scored_for"
+    cfg["bqml"]["performance_cutoff"] = "snapshot_date"
+    sql = rt.performance_sql(cfg, "p", "7", "p.churn.perf", {})
+    assert ("JOIN `p.churn.outcomes` AS lb ON lb.`customer_id` = pr.`customer_id` AND DATE(lb.`scored_for`) = "
+            "DATE(pr.`snapshot_date`)") in sql
+    assert "PARTITION BY pr.`customer_id`, pr.`snapshot_date` ORDER BY pr.scored_at DESC" in sql
 
 
 def test_lower_is_better_matches_the_core():
