@@ -285,6 +285,11 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                "mode": (f.get("mode") or "NULLABLE").upper()} for f in t.fields]
                           for n, t in tables.items()}}
 
+    from pipewright.config import accelerators  # Pipewright 1.2: FR-58, FR-61, FR-62
+
+    problems += accelerators.problems(steps, model["serving"], env.policies, env.name)
+    extra_warnings += accelerators.warnings(model["serving"])
+
     if problems:
         raise ConfigError(problems, source=f"{path} ({env.name})")
 

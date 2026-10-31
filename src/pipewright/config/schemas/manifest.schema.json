@@ -226,6 +226,29 @@
             }
           }
         },
+        "accelerators": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "accelerators use cases may ask for (Pipewright 1.2): steps (steps.<name>.gpu; without it any, as in 1.x) and serving (model.serving.accelerator; without it none)",
+          "properties": {
+            "steps": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "max_count": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "serving": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "max_count": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        },
         "synthetic": {
           "type": "object",
           "additionalProperties": false,

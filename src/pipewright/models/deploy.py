@@ -174,9 +174,24 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
         "(takes about 10-20 minutes)")
     # Online features (FR-51): the endpoint reads the tenant's feature views, so it runs as the tenant's runner.
     identity = uc.resources["runner_service_account"] if uc.ml.get("online_features") else None
-    model.deploy(endpoint=endpoint, deployed_model_display_name=f"{p.model}-v{p.version}", machine_type=p.machine,
-                 min_replica_count=max(p.replicas["min"], 1), max_replica_count=p.replicas["max"],
-                 traffic_percentage=share, sync=True, **({"service_account": identity} if identity else {}))
+    serving = uc.model["serving"]
+    accelerator = serving.get("accelerator")             # FR-61 (Pipewright 1.2): within the environment's policy
+    if serving.get("scale_to_zero") and int(p.replicas["min"]) == 0:
+        # FR-62 (Pipewright 1.2): an idle endpoint runs no replica; Agent Platform offers it in v1beta1 only.
+        log("scale to zero: an idle endpoint runs no replica; the first request after a quiet spell waits for one")
+        from pipewright.gcp import Gcp
+
+        deploy_scaling_to_zero(Gcp(creds), env, endpoint.resource_name, model.versioned_resource_name,
+                               f"{p.model}-v{p.version}", p.machine, p.replicas["max"], share,
+                               {d.id: int((endpoint.traffic_split or {}).get(d.id, 0)) for d in previous},
+                               accelerator, identity)
+    else:
+        model.deploy(endpoint=endpoint, deployed_model_display_name=f"{p.model}-v{p.version}",
+                     machine_type=p.machine, min_replica_count=max(p.replicas["min"], 1),
+                     max_replica_count=p.replicas["max"], traffic_percentage=share, sync=True,
+                     **({"service_account": identity} if identity else {}),
+                     **({"accelerator_type": accelerator["type"], "accelerator_count": int(accelerator.get("count", 1))}
+                        if accelerator else {}))
     if (p.labels or {}).get("pipewright-engine") == "bqml":
         _bqml_parity(uc, env, creds, p, endpoint, previous, log)
     if share < 100:
@@ -325,3 +340,57 @@ def find_endpoint(uc: ResolvedUseCase, env: Environment, gcp) -> str | None:
     found = gcp.get(f"{api}/endpoints", filter=f'display_name="{endpoint_name(uc)}"')
     endpoints = (found.body or {}).get("endpoints") or [] if found.ok else []
     return endpoints[0]["name"] if endpoints else None
+
+
+# ---------------------------------------------------------------------------------- scale to zero (FR-62) --
+
+IDLE_SCALEDOWN = "900s"            # 15 minutes without traffic, then no replica (Agent Platform minimum: 300s)
+
+
+def scale_to_zero_request(model_version: str, display_name: str, machine: str, max_replicas: int, share: int,
+                          previous: dict, accelerator: dict | None, identity: str | None) -> dict:
+    """The v1beta1 deployModel body: minReplicaCount 0 with a scaleToZeroSpec. previous: {deployed model id: its
+    traffic}; the new model gets share, the rest keep theirs in proportion (as the SDK splits traffic)."""
+    machine_spec = {"machineType": machine, **({"acceleratorType": accelerator["type"],
+                                                "acceleratorCount": int(accelerator.get("count", 1))}
+                                               if accelerator else {})}
+    split = {"0": share}
+    total = sum(previous.values())
+    if share < 100 and total:
+        rest, ids = 100 - share, sorted(previous, key=lambda i: -previous[i])
+        given = {i: rest * previous[i] // total for i in ids}
+        given[ids[0]] += rest - sum(given.values())          # rounding goes to the busiest
+        split.update({i: v for i, v in given.items() if v})
+    return {"deployedModel": {"model": model_version, "displayName": display_name,
+                              **({"serviceAccount": identity} if identity else {}),
+                              "dedicatedResources": {"machineSpec": machine_spec, "minReplicaCount": 0,
+                                                     "maxReplicaCount": int(max_replicas),
+                                                     "scaleToZeroSpec": {"idleScaledownPeriod": IDLE_SCALEDOWN}}},
+            "trafficSplit": split}
+
+
+def deploy_scaling_to_zero(gcp, env: Environment, endpoint: str, model_version: str, display_name: str, machine: str,
+                           max_replicas: int, share: int, previous: dict, accelerator: dict | None,
+                           identity: str | None, wait_seconds: int = 2400, sleep=None) -> None:
+    import time
+
+    from pipewright.gcp import error_text
+
+    sleep = sleep or time.sleep
+    api = f"https://{env.region}-aiplatform.googleapis.com/v1beta1"
+    body = scale_to_zero_request(model_version, display_name, machine, max_replicas, share, previous, accelerator,
+                                 identity)
+    r = gcp.post(f"{api}/{endpoint}:deployModel", body)
+    if not r.ok:
+        raise ConfigError(f"deploying with scale to zero failed: {error_text(r)}")
+    name, waited = (r.body or {}).get("name"), 0
+    while name and waited <= wait_seconds:
+        op = gcp.get(f"{api}/{name}")
+        if op.ok and (op.body or {}).get("done"):
+            if (op.body or {}).get("error"):
+                raise ConfigError(f"deploying with scale to zero failed: {op.body['error'].get('message')}")
+            return
+        sleep(30)
+        waited += 30
+    raise ConfigError(f"the deployment ({name}) did not finish in {wait_seconds // 60} minutes; check the endpoint "
+                      "in the console")

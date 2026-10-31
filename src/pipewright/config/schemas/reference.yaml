@@ -364,6 +364,10 @@ model.serving.replicas: How many replicas serve.
 model.serving.replicas.min: The fewest replicas.
 model.serving.replicas.max: The most replicas, reached under load.
 model.serving.canary_percent: The share of traffic a new version gets with `deploy-model --canary`.
+model.serving.accelerator: A GPU for each replica (Pipewright 1.2), within the environment's policies.accelerators.serving. The machine must take it, for example g2-standard-8 with NVIDIA_L4.
+model.serving.accelerator.type: The accelerator type, for example NVIDIA_L4.
+model.serving.accelerator.count: How many per replica (default 1).
+model.serving.scale_to_zero: With replicas.min 0, an idle endpoint runs no replica and costs nothing while idle; the first request after a quiet spell waits for a replica to start (Pipewright 1.2, an Agent Platform preview). Without it, min 0 deploys one replica, as in 1.x.
 model.serving.fill_missing: The endpoint fills an empty feature (request or online) with the median the model was trained with, as batch scoring does (Pipewright 1.2, default true). Set false to answer an error naming the feature instead.
 
 approvals: Which changes need a person.
