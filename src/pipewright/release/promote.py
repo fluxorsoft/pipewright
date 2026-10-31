@@ -394,6 +394,14 @@ def _source_release(gcp: Gcp, src_env: Environment, usecase: str, release_id: st
     return read_contract(gcp, src_env, known[rid])
 
 
+def source_commit(src_env: Environment, usecase: str, release_id: str | None = None, gcp: Gcp | None = None) -> str:
+    """The commit a source release was built from (Pipewright 1.2): CI checks it out before `promote`."""
+    commit = _source_release(gcp or Gcp(), src_env, usecase, release_id).source_commit
+    if not commit:
+        raise ConfigError("the source release has no source commit, so its templates cannot be recompiled here")
+    return commit
+
+
 def _check_checkout(uc: ResolvedUseCase, commit: str | None) -> None:
     if not commit:
         raise ConfigError("the source release has no source commit, so its templates cannot be recompiled here")

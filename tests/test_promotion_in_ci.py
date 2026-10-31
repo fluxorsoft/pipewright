@@ -28,8 +28,23 @@ def test_a_promoted_environment_gets_the_promote_workflow_instead_of_a_release_j
     assert "promote" in operate[True]["workflow_dispatch"]["inputs"]["action"]["options"]
     script = operate["jobs"]["operate"]["steps"][-1]["run"]
     assert 'promote)         case "$ENV" in prod) SOURCE=test ;;' in script
+    # Found live: promote compiles from the source release's commit, so both check it out first.
+    for text in (run, script):
+        checkout = text.index('git checkout -q --detach "$commit"')
+        assert text.index("--print-source-commit") < checkout < text.index("promote --from", checkout)
     for text in files.values():
         assert "@@" not in text
+
+
+def test_print_source_commit(monkeypatch):
+    from pipewright.release import promote
+
+    contract = SimpleNamespace(source_commit="0123456789abcdef")
+    monkeypatch.setattr(promote, "_source_release", lambda gcp, env, uc, rid: contract)
+    assert promote.source_commit(None, "churn", gcp=object()) == "0123456789abcdef"
+    contract.source_commit = None
+    with pytest.raises(ConfigError, match="no source commit"):
+        promote.source_commit(None, "churn", gcp=object())
 
 
 @pytest.mark.skipif(not shutil.which("bash"), reason="needs bash")

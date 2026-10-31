@@ -138,6 +138,9 @@ def render(environments: list[str], labels: list[str] | None = None, promotions:
                   "            promote)         case \"$ENV\" in "
                   + " ".join(f"{e}) SOURCE={s} ;;" for e, s in promotions.items())
                   + " *) echo \"$ENV has no promotion.from\"; exit 1 ;; esac\n"
+                  "                             commit=$(pipewright promote --from \"$SOURCE\" --to \"$ENV\" --usecase "
+                  "\"$UC\" ${VERSION:+--release \"$VERSION\"} --print-source-commit)\n"
+                  "                             git checkout -q --detach \"$commit\"   # the release's own commit\n"
                   "                             p promote --from \"$SOURCE\" --to \"$ENV\" --usecase \"$UC\" "
                   "${VERSION:+--release \"$VERSION\"} ;;\n") if promotions else ""}
     out = {}

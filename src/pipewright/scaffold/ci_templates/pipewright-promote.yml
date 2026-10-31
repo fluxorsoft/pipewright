@@ -66,6 +66,10 @@ jobs:
 @@PROMOTE_CASES@@
             *) echo "$ENV has no promotion.from"; exit 1 ;;
           esac
+          # The destination's templates are compiled from the source release's own commit.
+          commit=$(pipewright promote --from "$SOURCE" --to "$ENV" --usecase "$UC" ${RELEASE:+--release "$RELEASE"} \
+              --print-source-commit)
+          git checkout -q --detach "$commit"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           trap 'echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"' EXIT
           pipewright promote --from "$SOURCE" --to "$ENV" --usecase "$UC" ${RELEASE:+--release "$RELEASE"} \
