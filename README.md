@@ -696,11 +696,11 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 |---|---|
 | Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test` |
 | Release | `tables sync`, `release`, `status`, `rollback`, `promote`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model approve`, `deploy-model`, `model predict`, `monitor status`, `lineage`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
+| Operate | `run`, `model list`, `model check`, `model approve`, `deploy-model`, `model endpoint`, `model predict`, `monitor status`, `lineage`, `images prune`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze`, `retrain retry`, `loop start`, `loop advance`, `loop show`, `loop rollback`, `decisions pending` |
 | Extend | `plugins` (commands added by installed packages) |
 
-Every command takes `--env` and most take `--usecase`. `pipewright <command> --help` lists the options.
+Every command takes `--env` and most take `--usecase`. `pipewright <command> --help` lists the options. `status`, `model list`, `monitor status`, `retrain list`, `lineage`, `retrain show` and `decisions pending` take `--json` for scripts and reports.
 
 ## Open source and Enterprise
 
