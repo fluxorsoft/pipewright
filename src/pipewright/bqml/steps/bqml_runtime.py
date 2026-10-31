@@ -793,3 +793,15 @@ def metrics_row(ml_config: dict, run_id: str, rows_table: str, record: dict, now
             "decision_reasons": json.dumps(record.get("reasons") or []),
             "metrics_json": json.dumps({"metrics": record["metrics"], "champion": champion or None}, default=str),
             "environment": ml_config.get("environment")}
+
+
+def append_row(client, table: str, row: dict, labels: dict | None = None) -> None:
+    """Appends one row to an existing table with a load job (free, visible to DML at once), the table's own columns
+    only. Not pipewright_runtime.write_table: that needs pandas, which the BigQuery ML image does not carry (found
+    live)."""
+    from google.cloud import bigquery
+
+    ref = client.get_table(table)
+    known = {f.name for f in ref.schema}
+    client.load_table_from_json([{k: v for k, v in row.items() if k in known}], ref, job_config=bigquery.LoadJobConfig(
+        schema=ref.schema, write_disposition="WRITE_APPEND", labels=labels or {})).result()

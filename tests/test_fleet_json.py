@@ -76,3 +76,26 @@ def test_status_json(repo, monkeypatch, capsys):
     (row,) = json.loads(capsys.readouterr().out)
     assert row["usecase"] == "churn" and row["release"] == "abc123" and row["approval"]["via"] == "github"
     assert row["pipelines"] == ["training", "inference"] and row["history"][0]["release_id"] == "old1"
+
+
+def test_the_metrics_row_is_appended_without_pandas():
+    """Found live: the BigQuery ML image has no pandas, so the row goes in with a JSON load job."""
+    from types import SimpleNamespace
+
+    from google.cloud.bigquery import SchemaField
+
+    loaded = {}
+
+    class Client:
+        def get_table(self, name):
+            return SimpleNamespace(schema=[SchemaField("run_id", "STRING"), SchemaField("decision", "STRING")])
+
+        def load_table_from_json(self, rows, ref, job_config):
+            loaded.update(rows=rows, mode=job_config.write_disposition, labels=job_config.labels)
+            return SimpleNamespace(result=lambda: None)
+
+    rt.append_row(Client(), "p.d.metrics", {"run_id": "r1", "decision": "approve", "extra": 1}, {"pipewright": "x"})
+    assert loaded == {"rows": [{"run_id": "r1", "decision": "approve"}], "mode": "WRITE_APPEND",
+                      "labels": {"pipewright": "x"}}
+    steps = (bqml.STEPS_DIR / "bqml_steps.py").read_text(encoding="utf-8")
+    assert "write_table" not in steps and "pandas" not in steps
