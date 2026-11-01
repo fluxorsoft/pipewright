@@ -32,9 +32,11 @@ def _fingerprint(root: Path, env, usecase_files: list[Path]) -> str:
     h.update(json.dumps({"env": env.name, "project": env.project, "region": env.region, "policies": env.policies,
                          "tenants": env.tenants, "features": env.features, "ai": getattr(env, "ai", {}),
                          "orchestrator": env.orchestrator}, sort_keys=True, default=str).encode())
-    for f in sorted(usecase_files):
-        h.update(str(f.relative_to(root)).replace("\\", "/").encode())
-        h.update(f.read_bytes())
+    # The same on every machine: paths in POSIX form and ordered as text (Windows compares paths without case), and
+    # line endings normalised (a Windows checkout has CRLF, a CI runner LF; found in the demo's CI).
+    for rel, f in sorted((f.relative_to(root).as_posix(), f) for f in usecase_files):
+        h.update(rel.encode())
+        h.update(f.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()[:16]
 
 

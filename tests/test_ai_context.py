@@ -84,3 +84,13 @@ def test_an_environment_with_a_hosted_server_gets_a_pack_that_says_how_to_use_it
     assert "or the local `pipewright mcp`" not in pack      # local tools are forbidden here
     assert "and `pipewright doctor --env dev --usecase <name>` on the command line" in pack
     assert main(["context", "check", "--root", str(repo.root), "--env", "dev"]) == 0
+
+
+def test_the_stamp_is_the_same_with_windows_line_endings(repo):
+    """A pack built on Windows (CRLF checkout) is current on a Linux CI runner (LF), and the other way round."""
+    env, _ = built(repo)
+    ok, _ = context.check(repo.root, env)
+    assert ok
+    for f in (repo.root / "usecases").rglob("*.yaml"):
+        f.write_bytes(f.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    assert context.check(repo.root, env)[0]
