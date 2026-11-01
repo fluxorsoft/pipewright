@@ -91,7 +91,7 @@ account are the record).
   (`data.features_from`); the use case's own table holds the entity rows and the label. A prepared table is allowed
   to start with, but is not the pattern. A missing feature goes back to the data team.
 - Judgement checks in `validate` warn about rows ordered in time with a non-time split, dates as features, and
-  features named after the label. A platform can set gate minimums per environment (`policies.evaluation.min_gates`).
+  features named after the label, and a team with feature datasets whose use case takes no feature from them. A platform can set gate minimums per environment (`policies.evaluation.min_gates`).
 - Agents never merge, release, approve or deploy: their identity cannot, and the playbooks say so.
 
 ## 5. Review

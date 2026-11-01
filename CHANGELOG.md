@@ -12,7 +12,8 @@ for more.
 
 - **Judgement checks in `validate`:** warnings for configuration that is valid but probably misleads a model: rows
   ordered in time with a split that is not a time split (the model learns from the future), a date or timestamp as
-  a feature, and features named after the label, which usually describe the outcome itself.
+  a feature, and features named after the label, which usually describe the outcome itself; and a team with feature datasets whose
+  use case reads every feature from its own table (the pattern is feature tables and groups through `data.features_from`).
 - **Gate minimums per environment:** the manifest's `policies.evaluation.min_gates` sets the least each metric's
   gate may ask (`auc: 0.7`, or `{min, max}`); `validate` refuses a use case without such a gate, or with a weaker one.
 - **An agent identity per tenant:** `tenants.<t>.agent_service_account` in the manifest names a service account a coding

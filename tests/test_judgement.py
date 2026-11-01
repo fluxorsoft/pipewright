@@ -97,3 +97,15 @@ def test_warnings_reach_validate(repo):
     ml_repo(repo)
     repo.usecase["spec"]["data"]["split"] = {"strategy": "random"}
     assert any("(judgement check)" in w for w in resolve(repo).warnings)
+
+
+def test_features_from_the_use_cases_own_table_are_warned_when_the_team_has_feature_datasets():
+    env = SimpleNamespace(name="prod", policies={}, features={},
+                          tenants={"retail": {"features": {"datasets": ["p.features"]}}})
+    split = {"strategy": "time", "time_column": "snapshot_date"}
+    w = judgement.check(ml(split=split), env, "retail")[0]
+    assert len(w) == 1 and "feature datasets (p.features)" in w[0] and "data.features_from" in w[0]
+    assert not judgement.check(ml(split=split), env, "other")[0]
+    assert not judgement.check(ml(split=split, features_from={"sources": []}), env, "retail")[0]
+    env.features = {"required": True}                       # refused by the feature policy instead
+    assert not judgement.check(ml(split=split), env, "retail")[0]

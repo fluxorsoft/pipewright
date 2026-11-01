@@ -5,7 +5,7 @@ person or a coding agent makes most often. They are warnings, so a use case that
 one exception is the platform's own gate minimums (`policies.evaluation.min_gates` in the manifest), which are a
 policy and refuse like every other policy.
 
-    warnings, problems = judgement.check(ml, env)
+    warnings, problems = judgement.check(ml, env, tenant)
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pipewright.config.ml import TIME_TYPES
 UNSUPERVISED = ("clustering", "decomposition")
 
 
-def check(ml: dict, env) -> tuple[list[str], list[str]]:
+def check(ml: dict, env, tenant: str | None = None) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     problems: list[str] = []
     data = ml.get("data") or {}
@@ -27,6 +27,7 @@ def check(ml: dict, env) -> tuple[list[str], list[str]]:
     warnings += _time_split(data, columns, task)
     warnings += _time_as_feature(features, columns, data)
     warnings += _outcome_features(features, data, task)
+    warnings += _raw_features(data, env, tenant, task)
     problems += _gate_minimums(ml, env, task)
     return warnings, problems
 
@@ -90,6 +91,19 @@ def _outcome_features(features: list[str], data: dict, task: str) -> list[str]:
     return [f"features: {', '.join(suspects)} {'looks' if len(suspects) == 1 else 'look'} like part of the outcome "
             f"({label}): a column known only after the label tells the model the answer. If it is known before "
             "each row's cut-off, list it in features.include; otherwise exclude it (judgement check)"]
+
+
+def _raw_features(data: dict, env, tenant: str | None, task: str) -> list[str]:
+    """Plain BigQuery tables are allowed as sources, but the pattern for ML features is feature tables and feature
+    groups: built once by their owners, shared, kept point-in-time correct. A team that has feature datasets and
+    reads every feature from its own table is warned (features.required refuses it instead)."""
+    datasets = (((getattr(env, "tenants", None) or {}).get(tenant or "") or {}).get("features") or {}).get("datasets")
+    if (not datasets or data.get("features_from") or task in UNSUPERVISED or task == "forecast"
+            or ((getattr(env, "features", None) or {}).get("required"))):
+        return []
+    return [f"data.features_from: tenant {tenant!r} has feature datasets ({', '.join(datasets)}), but every feature "
+            "comes from the use case's own table. The pattern for ML features is feature tables and feature groups "
+            "through data.features_from; a missing feature goes to the data team (judgement check)"]
 
 
 def _gate_minimums(ml: dict, env, task: str) -> list[str]:
