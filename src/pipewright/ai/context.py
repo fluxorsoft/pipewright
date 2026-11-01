@@ -69,9 +69,10 @@ def _how_to_connect(env) -> list[str]:
             f"{env.name} --tenant <team> --print-config` shows how to connect)"
             + ("" if not local else ", or the local `pipewright mcp`") + ". They are the live truth. Never guess "
             "names, project IDs or policies.",
-            "- The hosted server has no copy of this repository: its `bootstrap_usecase` returns the drafted files "
-            f"for you to write; run `pipewright validate --env {env.name}` and `pipewright review --env {env.name}` "
-            "on the command line. Never run commands that print table data."]
+            "- The hosted server has no copy of this repository: its `bootstrap_usecase` returns a skeleton command "
+            "and the drafted files to write over it; run `pipewright validate --env "
+            f"{env.name}` and `pipewright review --env {env.name}` on the command line, from the repository root. "
+            "Never run commands that print table data."]
 
 
 def render(root: Path, env, playbooks: list[str]) -> tuple[str, str]:

@@ -80,7 +80,7 @@ def test_an_environment_with_a_hosted_server_gets_a_pack_that_says_how_to_use_it
     assert main(["context", "build", "--root", str(repo.root), "--env", "dev"]) == 0
     pack = (repo.root / "APP_CONTEXT.md").read_text(encoding="utf-8")
     assert "the team's hosted tool server" in pack and "--print-config" in pack
-    assert "no copy of this repository: its `bootstrap_usecase` returns the drafted files" in pack
+    assert "no copy of this repository: its `bootstrap_usecase` returns a skeleton command" in pack
     assert "or the local `pipewright mcp`" not in pack      # local tools are forbidden here
     assert "and `pipewright doctor --env dev --usecase <name>` on the command line" in pack
     assert main(["context", "check", "--root", str(repo.root), "--env", "dev"]) == 0

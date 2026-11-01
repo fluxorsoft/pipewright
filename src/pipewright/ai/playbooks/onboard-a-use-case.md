@@ -10,7 +10,8 @@ Intent: "score <entity> <when> for <outcome>, and tell me when it drifts".
 3. **Find the features.** `list_features`: the feature groups and feature tables the team may read. Choose the
    features the model needs. If one is missing, do not compute it: note it for the review, the data team adds it.
 4. **Draft the use case** on a branch: `bootstrap_usecase` (or `pipewright new-usecase --from-bq ... --label ...`;
-   a hosted tool server returns the files: write them as they are), then edit `config/data.yaml`:
+   a hosted tool server returns a `skeleton` command and the drafted `files`: run the command in the repository
+   root, then write the files over it exactly as they are), then edit `config/data.yaml`:
    - the contract covers the entity table's columns; the label; `personal_data_columns`;
    - `split: { strategy: time, time_column: <cut-off> }`;
    - `features_from: { entity: { columns: [<key>], time_column: <cut-off> }, sources: [...] }`.
