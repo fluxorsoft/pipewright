@@ -241,6 +241,7 @@ def test_runs_lists_the_latest_with_value_free_errors(server):
            "labels": {"run-id": "r1", "pipewright-pipeline": "training", "pipewright-release": "abc"},
            "jobDetail": {"taskDetails": [{"taskName": "ingest-data", "state": "FAILED",
                                           "error": {"message": "replica exited 1\nmore"}}]}}
+    listed = {k: v for k, v in job.items() if k != "jobDetail"}      # a list leaves out the steps (found live)
     ok = {"name": "projects/p/locations/l/pipelineJobs/churn-r2", "state": "PIPELINE_STATE_SUCCEEDED",
           "labels": {"run-id": "r2"}}
     seen = {}
@@ -249,7 +250,9 @@ def test_runs_lists_the_latest_with_value_free_errors(server):
         def get(self, url, **params):
             if url.endswith("/pipelineJobs"):
                 seen.update(params)
-                return Response(200, {"pipelineJobs": [ok, job]})
+                return Response(200, {"pipelineJobs": [ok, listed]})
+            if url.endswith("/pipelineJobs/churn-r1"):
+                return Response(200, job)
             return super().get(url, **params)
 
     server._gcp_factory = G

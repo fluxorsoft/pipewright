@@ -328,8 +328,8 @@ class Server:
                    "release": labels.get("pipewright-release"), "trigger": labels.get("trigger"),
                    "state": job.get("state", "").removeprefix("PIPELINE_STATE_").lower(),
                    "created": job.get("createTime"), "ended": job.get("endTime")}
-            if job.get("state") in watch.FAILED:
-                f = watch.failure(job)
+            if job.get("state") in watch.FAILED:       # a list leaves out the steps; a get has them
+                f = watch.failure(watch.full_job(self.gcp(), job, e.region))
                 run.update(failed_steps=f["failed_steps"], error=f["error"])
             out.append(run)
         self.log("runs", "metadata", "ok", usecase=usecase, runs=len(out))
