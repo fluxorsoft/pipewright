@@ -23,9 +23,9 @@ let the team's engineers impersonate it:
 |---|---|---|
 | `roles/bigquery.metadataViewer` | the team's dataset and its feature datasets | schemas, row counts, partitions; no table data |
 | `roles/bigquery.jobUser` | the project | dry runs and job metadata |
-| `roles/storage.objectViewer` (conditional: `pipewright/` and the team's release prefix) | the artifacts bucket | the manifest and release contracts |
-| `roles/aiplatform.viewer` | the project | models, pipeline runs, feature group definitions |
-| `roles/logging.viewAccessor` on a log view of Pipewright's labelled lines | the project's log bucket | run errors, without other logs |
+| `roles/storage.objectViewer` (conditional: `pipewright/` and `contracts/`) | the artifacts bucket | the manifest and release contracts |
+| `roles/aiplatform.viewer` | the project | models, pipeline runs (with their failed steps), feature group and view definitions |
+| `roles/cloudscheduler.viewer`, `roles/monitoring.viewer` | the project | the plan of a use case's schedules and alerts |
 | `roles/iam.serviceAccountTokenCreator` for the team's engineers | the agent account | impersonation |
 
 Name it in the manifest:
