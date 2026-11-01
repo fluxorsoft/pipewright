@@ -253,6 +253,11 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                       env.approver_groups if env.manifest_source else None, problems)
     _feature_policy(ml, env, tenant, problems)
     _retraining_policy(ml["retraining"], approvals, env, problems)
+    from pipewright.config import judgement  # Pipewright 1.3.0: valid, but probably not what the model needs
+
+    judged_warnings, judged_problems = judgement.check(ml, env)
+    extra_warnings += judged_warnings
+    problems += judged_problems
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
     registry = ml["registry"]
     if registry["set_default"] is None:

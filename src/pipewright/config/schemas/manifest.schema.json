@@ -138,6 +138,23 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "evaluation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Evaluation rules every use case in this environment must meet (Pipewright 1.3.0).",
+          "properties": {
+            "min_gates": {
+              "type": "object",
+              "description": "The least each metric's gate may ask, by metric: a number (a minimum) or {min, max}. A use case without such a gate, or with a weaker one, is refused.",
+              "additionalProperties": {
+                "oneOf": [
+                  {"type": "number"},
+                  {"type": "object", "additionalProperties": false, "properties": {"min": {"type": "number"}, "max": {"type": "number"}}}
+                ]
+              }
+            }
+          }
+        },
         "deploy_model": {
           "enum": [
             "manual",

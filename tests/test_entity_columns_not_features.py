@@ -52,7 +52,7 @@ def test_a_team_that_lists_its_features_is_left_alone(repo):
     ml_repo(repo)
     with_entity(repo).usecase["spec"]["features"] = {"include": ["tenure_months", "snapshot_date"]}
     uc = resolve_container(repo)
-    assert uc.ml["features"]["include"] == ["tenure_months", "snapshot_date"] and not uc.warnings
+    assert uc.ml["features"]["include"] == ["tenure_months", "snapshot_date"] and not [w for w in uc.warnings if "FR-68" in w]
     bqml_repo(repo)
     with_entity(repo).usecase["spec"]["features"] = {"include": ["tenure_months", "snapshot_date"]}
     assert resolve(repo).ml["features"]["include"] == ["tenure_months", "snapshot_date"]
