@@ -3,6 +3,19 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [Unreleased]
+
+Additive: every new setting is off until it is set, and every new check is a warning unless a platform policy asks
+for more.
+
+### Added
+
+- **Judgement checks in `validate`:** warnings for configuration that is valid but probably misleads a model: rows
+  ordered in time with a split that is not a time split (the model learns from the future), a date or timestamp as
+  a feature, and features named after the label, which usually describe the outcome itself.
+- **Gate minimums per environment:** the manifest's `policies.evaluation.min_gates` sets the least each metric's
+  gate may ask (`auc: 0.7`, or `{min, max}`); `validate` refuses a use case without such a gate, or with a weaker one.
+
 ## [1.2.0] - 2026-10-31
 
 Additive: a 1.0 or 1.1 use case, manifest and release behave as before (the 1.1 examples compile to the same
