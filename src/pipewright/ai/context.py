@@ -73,6 +73,7 @@ def _how_to_connect(env) -> list[str]:
 
 def render(root: Path, env, playbooks: list[str]) -> tuple[str, str]:
     """(APP_CONTEXT.md text, fingerprint)."""
+    from pipewright.ai import identity
     from pipewright.config import resolve_usecase
     from pipewright.config.document import discover_usecases
     from pipewright.errors import ConfigError
@@ -86,8 +87,11 @@ def render(root: Path, env, playbooks: list[str]) -> tuple[str, str]:
          "## How to work here", "", *_how_to_connect(env),
          "- Write configuration as YAML under `usecases/<name>/`. Refer to platform resources by name "
          "(`${resources.bigquery_dataset}`, `${buckets.landing}`), never by value.",
-         "- Before proposing a change, run `validate`, `doctor` and `plan` through the tools, fix what fails, then "
-         "open a pull request with `pipewright review` as its description. A person approves; never merge, release, "
+         ("- Before proposing a change, run `validate`, `doctor` and `plan` through the tools, fix what fails, then "
+          if not identity.hosted(env) else
+          f"- Before proposing a change, run `pipewright validate --env {env.name}` and `pipewright doctor --env "
+          f"{env.name} --usecase <name>` on the command line, fix what fails, then ")
+         + "open a pull request with `pipewright review` as its description. A person approves; never merge, release, "
          "approve or deploy yourself.",
          "- Rows of data are never sent to you. Do not ask for them, and do not paste data into the conversation.", "",
          "## The rules this environment holds every use case to", ""]
