@@ -1157,6 +1157,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Manifest forward compatibility (R-05, D-83): unknown keys ignored with a warning, `requires` for policies | Built 2026-10-10 |
 | Per-tenant pipeline roots (R-04): `pipeline-root/<tenant>/<usecase>` | Built 2026-10-10 |
 | OpenTelemetry export from the launcher | Planned: phase 5 (user, 2026-10-31; was phase 4) |
+| The recommended feature pattern in the reference example: the `churn` README points to the `features` example up front (a prepared table is fine to start with; feature tables or feature groups are recommended, docs/FEATURES.md), and a `churn` variant on feature tables, so the reference shows the recommended way too | Planned: 1.3.0 (user, 2026-11-01) |
 | GPU limits for pipeline steps (FR-58): accelerator types and counts per environment for `steps.<name>.gpu`, as Ray already has | Done: 1.2.0 (2026-10-31), tested by unit tests only (no GPU quota) |
 | A base image per use case (FR-59): `components.base_image`, within the image allow-list, for example CUDA for GPU training | Done: 1.2.0 (2026-10-31) |
 | How to call a deployed model (FR-60): `deploy-model` prints the endpoint ID, the predict URL, the caller's role and a sample request | Done: 1.2.0 (2026-10-31) |
