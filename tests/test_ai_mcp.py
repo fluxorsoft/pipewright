@@ -259,3 +259,15 @@ def test_runs_lists_the_latest_with_value_free_errors(server):
                               "state": "succeeded", "created": None, "ended": None}
     failed = out["runs"][1]
     assert failed["failed_steps"] == ["ingest-data"] and failed["error"] == "ingest-data: replica exited 1"
+
+
+def test_every_tool_has_a_description_even_when_overridden(server):
+    pytest.importorskip("mcp")
+
+    class Sub(type(server)):
+        def environment(self):
+            return super().environment()
+
+    server.__class__ = Sub
+    tools = asyncio.run(mcp.build_app(server).list_tools())
+    assert all(t.description for t in tools), [t.name for t in tools if not t.description]

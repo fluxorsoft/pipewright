@@ -16,6 +16,7 @@ import contextlib
 import datetime
 import fnmatch
 import functools
+import inspect
 import io
 import json
 import re
@@ -459,15 +460,13 @@ def build_app(server: Server, tools: tuple[str, ...] = TOOLS, **settings):
 
                 return {"ok": False, "error": value_free(f"{type(e).__name__}: {e}")}
         run.__name__, run.__doc__ = fn.__name__, fn.__doc__
-        import inspect
-
         run.__signature__ = inspect.signature(fn)
         return run
 
     for name in tools:
         fn = getattr(server, name)
         app.add_tool(safe(functools.update_wrapper(functools.partial(server.call, name), fn)), name=name,
-                     description=fn.__doc__)
+                     description=inspect.getdoc(fn))   # an override without a docstring keeps the base one
     return app
 
 
