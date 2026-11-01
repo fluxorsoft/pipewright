@@ -498,6 +498,15 @@ feature and label sources, and its evaluation against the champion. A promoted v
 the environment it came from. The register step writes `lineage.json` next to the evaluation record
 (`write_lineage()` in the component runtime; the example and the BigQuery ML pipelines call it), new in 1.1.
 
+## AI build assistance
+
+Build and change use cases with the coding agent you already use (new in 1.3.0). The agent writes, Pipewright
+verifies, a person decides: `pipewright context build` writes a context pack the agent reads on start;
+`pipewright mcp` is a local MCP tool server, read and verify only, acting as the team's metadata-only agent identity
+(rows never reach the agent); `pipewright review` writes the pull request's review bundle with the agent's judgement
+calls. Judgement checks in `validate` catch the common modelling mistakes. The guide:
+[docs/AI_BUILD.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/AI_BUILD.md).
+
 ## Synthetic data
 
 Off until your team needs it. A `synthetic` section in the use case switches it on; without it nothing is built,
@@ -695,7 +704,8 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 
 | Stage | Commands |
 |---|---|
-| Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test` |
+| Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test`, `context build`, `context check` |
+| AI agents | `mcp` (the tool server), `review` (the review bundle) |
 | Release | `tables sync`, `release`, `status`, `rollback`, `promote`, `schedules sync`, `alerts sync`, `ci init` |
 | Operate | `run`, `model list`, `model check`, `model approve`, `deploy-model`, `model endpoint`, `model predict`, `monitor status`, `lineage`, `images prune`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze`, `retrain retry`, `loop start`, `loop advance`, `loop show`, `loop rollback`, `decisions pending` |

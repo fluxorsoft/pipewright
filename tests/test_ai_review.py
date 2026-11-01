@@ -63,3 +63,16 @@ def test_the_cli_writes_the_bundle(repo, tmp_path):
     out = tmp_path / "PR.md"
     assert main(["review", "--root", str(repo.root), "--env", "dev", "--output", str(out)]) == 0
     assert out.read_text(encoding="utf-8").startswith("## Review bundle")
+
+
+def test_the_pull_request_workflow_writes_the_review_bundle():
+    import yaml
+
+    from pipewright.scaffold import ci
+
+    pr = yaml.safe_load(ci.render(["dev", "prod"])[".github/workflows/pipewright-pr.yml"])
+    job = pr["jobs"]["review"]
+    assert job["environment"] == "dev" and job["needs"] == "changes"
+    steps = {s.get("name"): s for s in job["steps"]}
+    assert steps["Context pack is current"]["if"] == "hashFiles('APP_CONTEXT.md') != ''"   # only once adopted
+    assert "pipewright review --env" in steps["Review bundle"]["run"]

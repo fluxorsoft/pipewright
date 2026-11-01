@@ -93,3 +93,30 @@ jobs:
         with:
           name: resolved-${{ matrix.usecase }}-@@FIRST_ENV@@
           path: resolved-${{ matrix.usecase }}-@@FIRST_ENV@@.yaml
+
+  # Pipewright 1.3.0: the review bundle (what a release would change, the settings that moved, the checks and the
+  # author's judgement calls) in the run's summary, and, once the repository has a context pack for coding agents,
+  # a check that it is current.
+  review:
+    needs: changes
+    if: needs.changes.outputs.usecases != '[]'
+    runs-on: @@RUNS_ON@@
+    environment: @@FIRST_ENV@@
+    env:
+      ENV: @@FIRST_ENV@@
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/pipewright-setup
+        with:
+          wif_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.PIPEWRIGHT_SERVICE_ACCOUNT }}
+          pip_spec: ${{ vars.PIPEWRIGHT_PIP_SPEC }}
+          pip_index: ${{ vars.PIPEWRIGHT_PIP_INDEX }}
+          setup_tools: ${{ vars.PIPEWRIGHT_SETUP_TOOLS }}
+      - name: Context pack is current
+        if: hashFiles('APP_CONTEXT.md') != ''
+        run: pipewright context check --env "$ENV"
+      - name: Review bundle
+        run: pipewright review --env "$ENV" --base "origin/${{ github.base_ref }}" | tee -a "$GITHUB_STEP_SUMMARY"
