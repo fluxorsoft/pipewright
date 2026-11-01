@@ -134,6 +134,17 @@
         }
       }
     },
+    "ai": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "AI build assistance (Pipewright 1.3.0): whether coding agents may use Pipewright's tools against this environment.",
+      "properties": {
+        "local_tools": {
+          "enum": ["allowed", "forbidden"],
+          "description": "allowed (the default): `pipewright mcp` and `pipewright context build` run against this environment; forbidden: they refuse (for example in production)."
+        }
+      }
+    },
     "policies": {
       "type": "object",
       "additionalProperties": false,
@@ -329,6 +340,10 @@
           "bigquery_dataset"
         ],
         "properties": {
+          "agent_service_account": {
+            "type": "string",
+            "description": "AI build assistance (Pipewright 1.3.0): the service account a coding agent and `pipewright mcp` act as for this tenant, impersonated by the team's engineers, with metadata-only roles. Left out, the tools use the person's own credentials."
+          },
           "runner_service_account": {
             "type": "string",
             "minLength": 1

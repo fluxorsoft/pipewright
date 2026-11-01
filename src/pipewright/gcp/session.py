@@ -83,15 +83,22 @@ class Response:
 class Gcp:
     """One authorised session; every call returns a Response instead of raising on 4xx."""
 
-    def __init__(self, creds=None):
+    def __init__(self, creds=None, user_agent: str | None = None, job_labels: dict | None = None):
         self._creds = creds
+        # AI build assistance (1.3.0): calls made for a coding agent say so. Cloud Audit Logs keep the user agent
+        # (callerSuppliedUserAgent) and BigQuery keeps job labels, so the platform can tell them from other calls.
+        self.user_agent = user_agent
+        self.job_labels = job_labels or {}
 
     @cached_property
     def session(self):
         _require_gcp()
         from google.auth.transport.requests import AuthorizedSession
 
-        return AuthorizedSession(self._creds or credentials())
+        s = AuthorizedSession(self._creds or credentials())
+        if self.user_agent:
+            s.headers["User-Agent"] = self.user_agent
+        return s
 
     def get(self, url: str, **params) -> Response:
         r = self.session.get(url, params=params or None, timeout=30)

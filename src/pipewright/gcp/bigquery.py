@@ -43,6 +43,8 @@ def query(gcp: Gcp, project: str, sql: str, params: list[dict] | None = None, lo
         body.update(parameterMode="NAMED", queryParameters=params)
     if location:
         body["location"] = location
+    if getattr(gcp, "job_labels", None):
+        body["labels"] = dict(gcp.job_labels)
     r = gcp.post(f"{BQ}/projects/{project}/queries", body)
     if not r.ok:
         raise ConfigError(value_free(error_text(r)))   # NFR-18

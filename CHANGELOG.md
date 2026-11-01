@@ -15,6 +15,10 @@ for more.
   a feature, and features named after the label, which usually describe the outcome itself.
 - **Gate minimums per environment:** the manifest's `policies.evaluation.min_gates` sets the least each metric's
   gate may ask (`auc: 0.7`, or `{min, max}`); `validate` refuses a use case without such a gate, or with a weaker one.
+- **An agent identity per tenant:** `tenants.<t>.agent_service_account` in the manifest names a service account a coding
+  agent acts as, impersonated by the team's engineers, with metadata-only roles; manifest `ai.local_tools: forbidden`
+  turns the AI build tools off in an environment. Calls made for an agent carry a `pipewright-mcp` user agent and
+  BigQuery job labels, so Cloud Audit Logs show them apart.
 
 ## [1.2.0] - 2026-10-31
 

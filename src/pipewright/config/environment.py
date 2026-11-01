@@ -37,6 +37,7 @@ class Environment:
     kubernetes: dict = field(default_factory=dict)  # orchestrator kfp: endpoint, ca_certificate, namespace
     schedules: dict = field(default_factory=dict)   # backend (cloud_scheduler | kubernetes), namespace, image
     kserve: dict = field(default_factory=dict)      # private-gke serving: namespaces by tenant, mirror, exposure
+    ai: dict = field(default_factory=dict)          # AI build assistance: local_tools allowed | forbidden (1.3.0)
     manifest_ignored: tuple = ()                  # manifest keys this version does not know (R-05): ignored
     promotion_from: str | None = None
     promotion_release: str = "warn"               # promotion.release: warn | refuse (Pipewright 1.2.0, FR-80)
@@ -96,6 +97,7 @@ def environment_from_manifest(ref: str, base_dir: Path = Path(".")) -> Environme
         observability=manifest.get("observability") or {}, security=manifest.get("security") or {},
         approver_groups=manifest.get("approver_groups") or {}, ray=manifest.get("ray") or {},
         features=manifest.get("features") or {}, kubernetes=manifest.get("kubernetes") or {},
+        ai=manifest.get("ai") or {},
         schedules=manifest.get("schedules") or {}, kserve=manifest.get("kserve") or {},
         manifest_ignored=tuple(ignored),
         manifest_source=source, source=source,
@@ -147,7 +149,7 @@ def load_environment(root: Path, name: str) -> Environment:
         security=manifest.get("security") or {},
         approver_groups=manifest.get("approver_groups") or {},
         ray=manifest.get("ray") or {},
-        features=manifest.get("features") or {},
+        features=manifest.get("features") or {}, ai=manifest.get("ai") or {},
         kubernetes=manifest.get("kubernetes") or {},
         schedules=manifest.get("schedules") or {}, kserve=manifest.get("kserve") or {},
         manifest_ignored=tuple(ignored),
