@@ -21,7 +21,8 @@ WATCHED = ("data.contract", "data.label", "data.split", "data.features_from", "f
 
 
 def _git(root: Path, *args: str) -> str:
-    out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8")
+    out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8",
+                         stdin=subprocess.DEVNULL)   # stdin is the MCP channel inside `pipewright mcp`
     return out.stdout if out.returncode == 0 else ""
 
 
@@ -40,7 +41,8 @@ def _base_tree(root: Path, base: str) -> Path | None:
     for n in names:
         if not (n.startswith("environments/") or n.startswith("usecases/")):
             continue
-        blob = subprocess.run(["git", "show", f"{base}:{n}"], cwd=root, capture_output=True)
+        blob = subprocess.run(["git", "show", f"{base}:{n}"], cwd=root, capture_output=True,
+                              stdin=subprocess.DEVNULL)
         if blob.returncode == 0:
             (tmp / n).parent.mkdir(parents=True, exist_ok=True)
             (tmp / n).write_bytes(blob.stdout)

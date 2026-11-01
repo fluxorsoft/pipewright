@@ -37,6 +37,11 @@ for more.
   `new-usecase --from-bq`) can take feature groups or feature tables: the draft's contract covers the entity columns
   and the chosen features, `data.features_from` joins them at each row's cut-off, and the landing trigger is off. It
   reads schemas only.
+- **`doctor` for an agent:** run through `pipewright mcp` as an agent identity, `doctor` checks that the identity
+  cannot release, run, read table data, upload or deploy (by design), and warns if it can, instead of reporting the
+  release permissions it rightly lacks as failures.
+- **The pull request workflow** from `ci init` writes the review bundle to the run's summary and, once the
+  repository has `APP_CONTEXT.md`, checks the context pack is current.
 - **`pipewright review`:** the review bundle for a change, Markdown for a pull request: what a release would change
   in Google Cloud, the settings that moved against the base revision, the checks and their warnings, where the
   features come from, the context pack's state, and a section for the author's judgement calls.

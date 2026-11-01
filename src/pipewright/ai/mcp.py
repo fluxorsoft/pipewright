@@ -157,7 +157,7 @@ class Server:
 
         found = discover_usecases(self.root)
         ucs = [resolve_usecase(found[n], self.env) for n in ([usecase] if usecase else sorted(found))]
-        report = doctor.run(self.env, ucs, gcp=self.gcp(), compile_check=True)
+        report = doctor.run(self.env, ucs, gcp=self.gcp(), compile_check=True, as_agent=bool(self.acting_as))
         self.log("doctor", "metadata", "ok" if not report.failed else "failed", failed=report.failed)
         return {"ok": not report.failed, "failed": report.failed, "report": report.render()}
 

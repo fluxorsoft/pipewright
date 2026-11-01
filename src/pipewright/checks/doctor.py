@@ -229,7 +229,8 @@ def check_security(env: Environment, gcp: Gcp, report: Report) -> None:
 
 # ------------------------------------------------------------- use case --
 
-def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, compile_check: bool = True):
+def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, compile_check: bool = True,
+                  as_agent: bool = False):
     s = f"Use case {uc.name} (tenant {uc.tenant})"
     platform = "ask the platform team"
     res = uc.resources
@@ -291,7 +292,7 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
         _check_tables(uc, env, gcp, report)
     _check_ml(uc, env, gcp, report)
     _check_synthetic(uc, env, gcp, report)
-    _check_permissions(uc, env, gcp, report)
+    _check_permissions(uc, env, gcp, report, as_agent=as_agent)
 
 
 def _check_synthetic(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
@@ -746,7 +747,31 @@ def _schedule_backend(env: Environment) -> str:
     return (getattr(env, "schedules", None) or {}).get("backend") or "cloud_scheduler"
 
 
-def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+def _agent_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    """Pipewright 1.3.0: doctor run for a coding agent (`pipewright mcp`). The agent's identity must not be able to
+    release, run, upload or deploy: lacking those permissions is right; holding any is a warning to the platform."""
+    s = "Permissions of the agent identity (it must not be able to change anything)"
+    wanted = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload", "aiplatform.endpoints.deploy",
+              "bigquery.tables.getData", "bigquery.tables.create", "cloudscheduler.jobs.create"]
+    granted = _test_permissions(gcp, f"{CRM}/projects/{env.project}:testIamPermissions", wanted)
+    bucket = _test_permissions(gcp, f"{GCS}/b/{env.artifacts_bucket}/iam/testPermissions",
+                               ["storage.objects.create", "storage.objects.delete"], False)
+    held = sorted(set(granted or []) | set(bucket or []))
+    if granted is None:
+        report.add(s, Result(WARN, "agent permissions", "could not test"))
+    elif held:
+        report.add(s, Result(WARN, "agent identity can change things", ", ".join(held),
+                             "an agent identity should be metadata only: ask the platform team"))
+    else:
+        report.add(s, Result(OK, "agent identity", "cannot release, run, read table data or deploy (by design: a "
+                                                    "person or CI does)"))
+
+
+def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report,
+                       as_agent: bool = False) -> None:
+    if as_agent:
+        _agent_permissions(uc, env, gcp, report)
+        return
     s = "Permissions of the identity running doctor (what `release` will need)"
     wanted = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload"]
     if uc.model["serving"]["enabled"] and uc.model["serving"]["target"] != "kserve":
@@ -794,10 +819,10 @@ def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: 
 
 
 def run(env: Environment, usecases: list[ResolvedUseCase], gcp: Gcp | None = None,
-        compile_check: bool = True) -> Report:
+        compile_check: bool = True, as_agent: bool = False) -> Report:
     gcp = gcp or Gcp()
     report = Report()
     check_environment(env, gcp, report)
     for uc in usecases:
-        check_usecase(uc, env, gcp, report, compile_check)
+        check_usecase(uc, env, gcp, report, compile_check, as_agent=as_agent)
     return report

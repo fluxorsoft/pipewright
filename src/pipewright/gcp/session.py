@@ -68,6 +68,9 @@ def credentials():
                     [gcloud, "config", "config-helper", "--format=json", f"--configuration={configuration}",
                      "--min-expiry=15m"],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    # Never the caller's stdin: inside `pipewright mcp` stdin is the MCP channel, and gcloud
+                    # inheriting it stalls the server (found live).
+                    stdin=subprocess.DEVNULL,
                 )
                 if out.returncode != 0:
                     raise ConfigError(f"gcloud could not issue a token: {out.stderr.strip()}")

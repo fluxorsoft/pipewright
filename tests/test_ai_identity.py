@@ -74,3 +74,53 @@ def test_the_manifest_carries_ai_and_the_agent_account(repo):
     assert e.ai == {"local_tools": "forbidden"}
     assert identity.agent_account(e, "churn") == "pw-agent-churn@acme.iam"
     assert not e.manifest_ignored
+
+
+def test_doctor_for_an_agent_wants_no_power_to_change_anything(repo):
+    from pipewright.checks import doctor
+    from pipewright.config import resolve_usecase
+    from tests.test_config_ml import ml_repo
+
+    ml_repo(repo)
+    uc = resolve_usecase(repo.write(), load_environment(repo.root, "dev"))
+    env = load_environment(repo.root, "dev")
+
+    class G:
+        def __init__(self, held):
+            self.held = held
+
+        def post(self, url, body, **params):
+            return Response(200, {"permissions": [p for p in body["permissions"] if p in self.held]})
+
+        def get(self, url, **params):
+            return Response(200, {"permissions": [p for p in params.get("permissions", []) if p in self.held]})
+
+    def results(held):
+        report = doctor.Report()
+        doctor._check_permissions(uc, env, G(held), report, as_agent=True)
+        return [(r.status, r.check) for rs in report.sections.values() for r in rs]
+
+    assert results(set()) == [(doctor.OK, "agent identity")]
+    assert results({"bigquery.tables.getData"}) == [(doctor.WARN, "agent identity can change things")]
+    assert results({"storage.objects.create"}) == [(doctor.WARN, "agent identity can change things")]
+
+
+def test_gcloud_never_inherits_stdin(monkeypatch):
+    """Inside `pipewright mcp` stdin is the MCP channel: gcloud inheriting it stalled the server (found live)."""
+    import subprocess
+
+    from pipewright.gcp import session
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"credential": {"access_token": "t", '
+                                                          '"token_expiry": "2030-01-01T00:00:00Z"}}', stderr="")
+
+    monkeypatch.setenv("GCLOUD_CONFIG", "x")
+    monkeypatch.delenv("GOOGLE_OAUTH_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    session._AGENT.clear()
+    session.credentials().refresh(None)
+    assert seen.get("stdin") is subprocess.DEVNULL
