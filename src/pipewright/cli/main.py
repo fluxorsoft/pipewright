@@ -68,7 +68,7 @@ def cmd_mcp(args) -> int:
 
     if args.print_config:
         env = load_environment(Path(args.root), args.env)
-        config = mcp.client_config(args.env, args.tenant, env)
+        config = mcp.client_config(args.env, args.tenant, env, direct=args.direct, agent=args.agent)
         if "proxy" not in config:            # a hosted tool server serves even where local tools are forbidden
             identity.allowed(env)
         print(json.dumps(config, indent=2))
@@ -953,6 +953,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--tenant", help="the team (default: the only tenant in the manifest)")
     sp.add_argument("--agent", help="the agent's name, recorded with every call (e.g. claude-code)")
     sp.add_argument("--print-config", action="store_true", help="print the MCP client settings to add, and exit")
+    sp.add_argument("--direct", action="store_true", help="with --print-config and a hosted server: straight to the "
+                                                         "service with your ID token, no local proxy")
     sp.set_defaults(func=cmd_mcp)
 
     sp = sub.add_parser("review", help="the review bundle for a change: a pull request description (1.3.0)")

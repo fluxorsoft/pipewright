@@ -219,7 +219,26 @@ def test_print_config_points_at_the_hosted_server(repo, capsys):
         "url": "http://pipewright-mcp-churn.pipewright.svc", "runtime": "gke", "service": "pipewright-mcp-churn"}
     repo.write()
     main(["mcp", "--root", str(repo.root), "--env", "dev", "--tenant", "churn", "--print-config"])
-    assert "kubectl port-forward" in json.loads(capsys.readouterr().out)["proxy"]
+    gke = json.loads(capsys.readouterr().out)
+    assert "kubectl port-forward" in gke["proxy"]
+    # the in-cluster server checks an ID token on every request: the settings send one (found in the demo rehearsal)
+    assert gke["mcpServers"]["pipewright"]["headers"] == {"Authorization": "Bearer ${PIPEWRIGHT_ID_TOKEN}"}
+
+
+def test_print_config_direct_to_the_hosted_service(repo, capsys):
+    from pipewright.cli.main import main
+
+    ml_repo(repo)
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {
+        "url": "https://pw-mcp-churn-1.a.run.app/", "runtime": "cloud_run", "service": "pw-mcp-churn"}
+    repo.write()
+    assert main(["mcp", "--root", str(repo.root), "--env", "dev", "--tenant", "churn", "--print-config", "--direct",
+                 "--agent", "claude-code"]) == 0
+    cfg = json.loads(capsys.readouterr().out)
+    assert cfg["mcpServers"]["pipewright"] == {
+        "type": "http", "url": "https://pw-mcp-churn-1.a.run.app/mcp",
+        "headers": {"Authorization": "Bearer ${PIPEWRIGHT_ID_TOKEN}", "X-Pipewright-Agent": "claude-code"}}
+    assert "gcloud auth print-identity-token" in cfg["token"] and "proxy" not in cfg
 
 
 def test_a_command_answering_a_list_is_wrapped_for_the_protocol(server, monkeypatch):

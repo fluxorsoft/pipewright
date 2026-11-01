@@ -476,19 +476,40 @@ def serve(root: Path, env_name: str, tenant: str | None, agent: str | None) -> N
     build_app(server).run(transport="stdio")
 
 
-def client_config(env_name: str, tenant: str | None, env=None, port: int = 8765) -> dict:
-    """The MCP client settings: the local server over stdio, or the tenant's hosted tool server (Enterprise) through
-    a local proxy that signs each request as the person, when the manifest names one."""
+TOKEN_ENV = "PIPEWRIGHT_ID_TOKEN"
+
+
+def client_config(env_name: str, tenant: str | None, env=None, port: int = 8765, direct: bool = False,
+                  agent: str | None = None) -> dict:
+    """The MCP client settings: the local server over stdio, or the tenant's hosted tool server (Enterprise) when the
+    manifest names one: through a local proxy that signs each request as the person (Cloud Run), straight to the
+    service with the person's ID token (`direct`: where its ingress lets the caller in), or through a port-forward
+    with the ID token (GKE, where the server verifies it)."""
     hosted = ((env.tenants or {}).get(tenant or "") or {}).get("agent_server") if env is not None else None
     if not hosted:
         args = ["mcp", "--env", env_name, *(["--tenant", tenant] if tenant else [])]
         return {"mcpServers": {"pipewright": {"command": "pipewright", "args": args}}}
+    token = {"Authorization": f"Bearer ${{{TOKEN_ENV}}}"}
+    named = {"X-Pipewright-Agent": agent} if agent else {}
+    get_token = (f"export {TOKEN_ENV}=$(gcloud auth print-identity-token)   # lasts an hour; refresh it and "
+                 "restart the agent's MCP connection")
     if hosted["runtime"] == "gke":
         proxy = (f"kubectl port-forward -n {hosted.get('namespace', 'pipewright')} "
                  f"service/{hosted.get('service', 'pipewright-mcp')} {port}:80")
-    else:
-        proxy = (f"gcloud run services proxy {hosted.get('service', 'pipewright-mcp')} --project {env.project} "
-                 f"--region {env.region} --port {port}")
-    return {"mcpServers": {"pipewright": {"type": "http", "url": f"http://localhost:{port}/mcp"}},
+        return {"mcpServers": {"pipewright": {"type": "http", "url": f"http://localhost:{port}/mcp",
+                                              "headers": {**token, **named}}},
+                "proxy": proxy, "token": get_token,
+                "note": "This environment's tool server runs in the cluster: keep the port-forward running; the "
+                        "server checks your ID token on every request."}
+    if direct:
+        return {"mcpServers": {"pipewright": {"type": "http", "url": hosted["url"].rstrip("/") + "/mcp",
+                                              "headers": {**token, **named}}},
+                "token": get_token,
+                "note": "Straight to the hosted service with your ID token: works where its ingress lets you in "
+                        "(inside the network, or an environment set to ingress all). Otherwise use the proxy."}
+    proxy = (f"gcloud run services proxy {hosted.get('service', 'pipewright-mcp')} --project {env.project} "
+             f"--region {env.region} --port {port}")
+    return {"mcpServers": {"pipewright": {"type": "http", "url": f"http://localhost:{port}/mcp",
+                                          **({"headers": named} if named else {})}},
             "proxy": proxy, "note": ("This environment's tool server is hosted. Keep the proxy running while the "
                                      "agent works: it signs each request as you.")}
