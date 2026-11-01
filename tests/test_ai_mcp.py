@@ -176,3 +176,47 @@ def test_client_config_and_print_config(repo, capsys):
     assert main(["mcp", "--root", str(repo.root), "--env", "dev", "--tenant", "churn", "--print-config"]) == 0
     cfg = json.loads(capsys.readouterr().out)
     assert cfg["mcpServers"]["pipewright"]["args"] == ["mcp", "--env", "dev", "--tenant", "churn"]
+
+
+def test_an_offline_environment_refuses_every_live_tool(repo):
+    ml_repo(repo)
+    repo.manifests["dev"]["ai"] = {"data_classes": {"offline": True}}
+    repo.write()
+    fake = FakeGcp()
+    s = mcp.Server(repo.root, "dev", gcp_factory=lambda: fake)
+    for tool, args in [("inspect_table", {"table": "churn.t"}), ("list_features", {}), ("status", {}),
+                       ("doctor", {}), ("lineage", {"usecase": "x"})]:
+        assert "offline" in s.call(tool, **args)["refused"]
+    assert s.call("environment")["offline"] and s.call("explain", key="data.split")
+    assert not fake.calls
+
+
+def test_withheld_names_never_reach_the_agent(repo):
+    ml_repo(repo)
+    repo.manifests["dev"]["ai"] = {"data_classes": {"deny_names": ["*DATE*", "secret_*"]}}
+    repo.write()
+    s = mcp.Server(repo.root, "dev", gcp_factory=FakeGcp)
+    t = s.call("inspect_table", table="churn.t")
+    assert [c["name"] for c in t["columns"]] == ["customer_id", "churned"] and t["columns_withheld"] == 1
+    assert "withholds" in s.call("inspect_table", table="churn.secret_scores")["refused"]
+    assert "snapshot_date" not in json.dumps(s.call("list_features"))
+    assert s.call("environment")["names_withheld"]
+
+
+def test_print_config_points_at_the_hosted_server(repo, capsys):
+    from pipewright.cli.main import main
+
+    ml_repo(repo)
+    repo.manifests["dev"]["ai"] = {"local_tools": "forbidden"}
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {
+        "url": "https://pw-mcp-churn-1.a.run.app", "runtime": "cloud_run", "service": "pw-mcp-churn"}
+    repo.write()
+    assert main(["mcp", "--root", str(repo.root), "--env", "dev", "--tenant", "churn", "--print-config"]) == 0
+    cfg = json.loads(capsys.readouterr().out)
+    assert cfg["mcpServers"]["pipewright"] == {"type": "http", "url": "http://localhost:8765/mcp"}
+    assert cfg["proxy"].startswith("gcloud run services proxy pw-mcp-churn --project ")
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {
+        "url": "http://pipewright-mcp-churn.pipewright.svc", "runtime": "gke", "service": "pipewright-mcp-churn"}
+    repo.write()
+    main(["mcp", "--root", str(repo.root), "--env", "dev", "--tenant", "churn", "--print-config"])
+    assert "kubectl port-forward" in json.loads(capsys.readouterr().out)["proxy"]

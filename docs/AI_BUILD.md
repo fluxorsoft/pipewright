@@ -90,8 +90,12 @@ account are the record).
 - Features come from feature tables or Feature Store feature groups in the team's granted datasets
   (`data.features_from`); the use case's own table holds the entity rows and the label. A prepared table is allowed
   to start with, but is not the pattern. A missing feature goes back to the data team.
-- Judgement checks in `validate` warn about rows ordered in time with a non-time split, dates as features, and
-  features named after the label, and a team with feature datasets whose use case takes no feature from them. A platform can set gate minimums per environment (`policies.evaluation.min_gates`).
+- Judgement checks in `validate` warn about rows ordered in time with a non-time split, dates as features,
+  features named after the label, and a team with feature datasets whose use case takes no feature from them. A
+  platform can set gate minimums per environment (`policies.evaluation.min_gates`).
+- A platform can tighten what reaches an agent in the manifest's `ai.data_classes`: `offline: true` (no tool calls
+  Google Cloud; agents work from the manifest, the repository and the context pack) and `deny_names` (table and
+  column names withheld, as patterns such as `*ssn*`).
 - Agents never merge, release, approve or deploy: their identity cannot, and the playbooks say so.
 
 ## 5. Review

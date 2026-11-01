@@ -12,8 +12,9 @@ for more.
 
 - **Judgement checks in `validate`:** warnings for configuration that is valid but probably misleads a model: rows
   ordered in time with a split that is not a time split (the model learns from the future), a date or timestamp as
-  a feature, and features named after the label, which usually describe the outcome itself; and a team with feature datasets whose
-  use case reads every feature from its own table (the pattern is feature tables and groups through `data.features_from`).
+  a feature, features named after the label, which usually describe the outcome itself, and a team with feature
+  datasets whose use case reads every feature from its own table (the pattern is feature tables and groups through
+  `data.features_from`).
 - **Gate minimums per environment:** the manifest's `policies.evaluation.min_gates` sets the least each metric's
   gate may ask (`auc: 0.7`, or `{min, max}`); `validate` refuses a use case without such a gate, or with a weaker one.
 - **An agent identity per tenant:** `tenants.<t>.agent_service_account` in the manifest names a service account a coding
@@ -34,6 +35,11 @@ for more.
   always refuse: rows never reach an agent, and aggregates are not offered. Descriptions written by other people come
   back marked as untrusted data. Every call is logged in `.pipewright/mcp-log.jsonl` (transparency, not evidence).
   `pipewright mcp --print-config` prints the client settings to add.
+- **Platform data rules for agents** (manifest `ai.data_classes`): `offline: true` refuses every tool that calls
+  Google Cloud; `deny_names` withholds matching table and column names from every tool (and says how many were
+  withheld). `ai.certified_agents` and `ai.approved_models` are shown to agents. A tenant's `agent_server` names a
+  hosted tool server (Pipewright Enterprise); `--print-config` then prints the client settings for it and the proxy
+  command that signs each request as the person.
 - **Bootstrap from an entity table and feature sources:** `bootstrap_usecase` (and the drafting behind
   `new-usecase --from-bq`) can take feature groups or feature tables: the draft's contract covers the entity columns
   and the chosen features, `data.features_from` joins them at each row's cut-off, and the landing trigger is off. It

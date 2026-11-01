@@ -142,6 +142,41 @@
         "local_tools": {
           "enum": ["allowed", "forbidden"],
           "description": "allowed (the default): `pipewright mcp` and `pipewright context build` run against this environment; forbidden: they refuse (for example in production)."
+        },
+        "data_classes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What may reach an agent's model in this environment, beyond the fixed rules (rows never). Set by the platform (Pipewright Enterprise).",
+          "properties": {
+            "offline": {
+              "type": "boolean",
+              "description": "true: no live tools; agents work from the manifest, the repository and the context pack only."
+            },
+            "deny_names": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "description": "Table and column names withheld from agents, as case-insensitive patterns (*customer_ssn*). The tools leave them out and say how many were withheld."
+            },
+            "aggregates": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Aggregates (counts per value, null rates, min and max) for the `profile` tool; served only by Enterprise's hosted tool server.",
+              "properties": {
+                "allowed": {"type": "boolean"},
+                "min_group_size": {"type": "integer", "minimum": 1, "description": "Groups smaller than this are suppressed."}
+              }
+            }
+          }
+        },
+        "certified_agents": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "The coding agents certified for this environment (informational: the context pack and the review bundle name them)."
+        },
+        "approved_models": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "The model endpoints agents may use with this environment (informational, recorded for evidence)."
         }
       }
     },
@@ -343,6 +378,18 @@
           "agent_service_account": {
             "type": "string",
             "description": "AI build assistance (Pipewright 1.3.0): the service account a coding agent and `pipewright mcp` act as for this tenant, impersonated by the team's engineers, with metadata-only roles. Left out, the tools use the person's own credentials."
+          },
+          "agent_server": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url", "runtime"],
+            "description": "AI build assistance: the tenant's hosted tool server (Pipewright Enterprise), reached through `gcloud run services proxy` or `kubectl port-forward`; `pipewright mcp --print-config` prints the settings.",
+            "properties": {
+              "url": {"type": "string", "minLength": 1},
+              "runtime": {"enum": ["cloud_run", "gke"]},
+              "service": {"type": "string", "minLength": 1},
+              "namespace": {"type": "string", "minLength": 1}
+            }
           },
           "runner_service_account": {
             "type": "string",

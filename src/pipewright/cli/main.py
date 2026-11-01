@@ -68,8 +68,10 @@ def cmd_mcp(args) -> int:
 
     if args.print_config:
         env = load_environment(Path(args.root), args.env)
-        identity.allowed(env)
-        print(json.dumps(mcp.client_config(args.env, args.tenant), indent=2))
+        config = mcp.client_config(args.env, args.tenant, env)
+        if "proxy" not in config:            # a hosted tool server serves even where local tools are forbidden
+            identity.allowed(env)
+        print(json.dumps(config, indent=2))
         return 0
     mcp.serve(Path(args.root), args.env, args.tenant, args.agent)
     return 0
