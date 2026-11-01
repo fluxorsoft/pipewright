@@ -5,8 +5,19 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
-Additive: every new setting is off until it is set, and every new check is a warning unless a platform policy asks
-for more.
+## [1.3.0] - 2026-11-01
+
+AI build assistance: coding agents build and change use cases through Pipewright's tools, as a metadata-only identity,
+without ever seeing a row; a person still reviews, merges, approves and deploys. Additive: a 1.2.0 use case, manifest
+and release behave as before (the 1.2.0 examples compile to the same templates), every new setting is off until it is
+set, and every new check is a warning unless a platform policy asks for more.
+
+### Upgrading from 1.2.0
+
+Nothing to change: the pipeline components and examples are the same as in 1.2.0. The new judgement checks may print
+warnings from `validate` for use cases that were silent before; they refuse nothing. To get the review job in pull
+requests, run `pipewright ci init` again (or copy the `review` job from the new `pipewright-pr.yml`). Coding agents
+need the `mcp` extra: `pip install "pipewright-mlops[gcp,mcp]==1.3.0"`. The guide is [docs/AI_BUILD.md](docs/AI_BUILD.md).
 
 ### Added
 
