@@ -37,13 +37,14 @@ class Server:
     """The tools, independent of the MCP transport, so they are testable without a client."""
 
     def __init__(self, root: Path, env_name: str, tenant: str | None = None, agent: str | None = None,
-                 gcp_factory=None):
+                 gcp_factory=None, hosted: bool = False):
         from pipewright.ai import identity
         from pipewright.config import load_environment
 
         self.root = Path(root)
         self.env = load_environment(self.root, env_name)
-        identity.allowed(self.env)
+        if not hosted:                        # ai.local_tools governs local servers; a hosted one is the platform's
+            identity.allowed(self.env)
         self.tenant = tenant or self._only_tenant()
         self.agent = agent or "unknown"
         self.session_id = uuid.uuid4().hex[:12]
@@ -395,8 +396,9 @@ TOOLS = ("environment", "validate", "resolve", "explain", "doctor", "plan", "ins
          "bootstrap_usecase", "review_bundle")
 
 
-def build_app(server: Server):
-    """The FastMCP application exposing every tool (needs the mcp extra)."""
+def build_app(server: Server, tools: tuple[str, ...] = TOOLS, **settings):
+    """The FastMCP application exposing the tools (needs the mcp extra); settings go to FastMCP (a hosted server's
+    transport options)."""
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError:
@@ -406,7 +408,7 @@ def build_app(server: Server):
     app = FastMCP("pipewright", instructions=(
         f"Pipewright tools for environment {server.env.name}. Read and verify only: they never change Google Cloud. "
         "Rows of data are never returned. Propose changes as a pull request with review_bundle; never merge, "
-        "release, approve or deploy."))
+        "release, approve or deploy."), **settings)
 
     def safe(fn):
         def run(**kwargs):
@@ -428,7 +430,7 @@ def build_app(server: Server):
         run.__signature__ = inspect.signature(fn)
         return run
 
-    for name in TOOLS:
+    for name in tools:
         fn = getattr(server, name)
         app.add_tool(safe(functools.update_wrapper(functools.partial(server.call, name), fn)), name=name,
                      description=fn.__doc__)
