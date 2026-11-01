@@ -46,6 +46,22 @@ def _ignored_keys(env) -> str | None:
             f"{', '.join(env.manifest_ignored)}. Upgrade to use them")
 
 
+def cmd_context(args) -> int:
+    """`pipewright context build|check` (Pipewright 1.3.0): the context pack coding agents read on start."""
+    from pipewright.ai import context, identity
+
+    root = Path(args.root)
+    env = load_environment(root, args.env)
+    identity.allowed(env)
+    if args.context_action == "build":
+        for p in context.build(root, env):
+            print(f"wrote {p.relative_to(root).as_posix()}")
+        return 0
+    ok, message = context.check(root, env)
+    print(("OK    " if ok else "FAIL  ") + message)
+    return 0 if ok else 1
+
+
 def cmd_validate(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
@@ -892,6 +908,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("schemas", help="write editor schemas and point each YAML file at its schema")
     sp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
     sp.set_defaults(func=cmd_schemas)
+
+    sp = sub.add_parser("context", help="context packs for coding agents: build or check APP_CONTEXT.md (1.3.0)")
+    csub = sp.add_subparsers(dest="context_command", required=True)
+    for action, text in (("build", "write APP_CONTEXT.md, the playbooks and the pointer files' Pipewright block"),
+                         ("check", "fail when APP_CONTEXT.md is missing or stale (for CI)")):
+        cp = csub.add_parser(action, help=text)
+        cp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
+        cp.add_argument("--env", required=True, help="environment the pack describes")
+        cp.set_defaults(func=cmd_context, context_action=action)
 
     sp = sub.add_parser("explain", help="what a use case key means: description, type, allowed values, default")
     sp.add_argument("key", nargs="?", help="dotted key under spec, e.g. data.split.strategy")

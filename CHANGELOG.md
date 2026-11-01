@@ -19,6 +19,11 @@ for more.
   agent acts as, impersonated by the team's engineers, with metadata-only roles; manifest `ai.local_tools: forbidden`
   turns the AI build tools off in an environment. Calls made for an agent carry a `pipewright-mcp` user agent and
   BigQuery job labels, so Cloud Audit Logs show them apart.
+- **Context packs for coding agents:** `pipewright context build --env <env>` writes `APP_CONTEXT.md` (the
+  environment's teams, datasets, feature datasets, policies and rules, the use cases and where their features come
+  from), playbooks in `.pipewright/playbooks/`, and a marked Pipewright block in `AGENTS.md`, `CLAUDE.md` and
+  `GEMINI.md` (text outside the block is left alone). The pack is stamped; `pipewright context check` fails when the
+  manifest, a use case or Pipewright changed since it was built.
 
 ## [1.2.0] - 2026-10-31
 
