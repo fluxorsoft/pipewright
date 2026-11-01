@@ -34,7 +34,19 @@ def _require_gcp():
         raise ConfigError("this command needs the GCP extra: pip install 'pipewright-mlops[gcp]'") from None
 
 
+# AI build assistance (1.3.0): inside `pipewright mcp` every call acts as the agent's identity and is labelled, so
+# the commands the tools reuse need no changes. Set once by act_for_agent(); never set anywhere else.
+_AGENT: dict = {}
+
+
+def act_for_agent(creds, user_agent: str | None, job_labels: dict | None) -> None:
+    _AGENT.clear()
+    _AGENT.update(creds=creds, user_agent=user_agent, job_labels=job_labels or {})
+
+
 def credentials():
+    if _AGENT.get("creds") is not None:
+        return _AGENT["creds"]
     _require_gcp()
     import google.auth
     from google.auth import credentials as ga_credentials
@@ -87,8 +99,8 @@ class Gcp:
         self._creds = creds
         # AI build assistance (1.3.0): calls made for a coding agent say so. Cloud Audit Logs keep the user agent
         # (callerSuppliedUserAgent) and BigQuery keeps job labels, so the platform can tell them from other calls.
-        self.user_agent = user_agent
-        self.job_labels = job_labels or {}
+        self.user_agent = user_agent or _AGENT.get("user_agent")
+        self.job_labels = job_labels or _AGENT.get("job_labels") or {}
 
     @cached_property
     def session(self):

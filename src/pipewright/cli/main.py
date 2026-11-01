@@ -62,6 +62,33 @@ def cmd_context(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_mcp(args) -> int:
+    """`pipewright mcp` (Pipewright 1.3.0): the local MCP tool server, read and verify only."""
+    from pipewright.ai import identity, mcp
+
+    if args.print_config:
+        env = load_environment(Path(args.root), args.env)
+        identity.allowed(env)
+        print(json.dumps(mcp.client_config(args.env, args.tenant), indent=2))
+        return 0
+    mcp.serve(Path(args.root), args.env, args.tenant, args.agent)
+    return 0
+
+
+def cmd_review(args) -> int:
+    """`pipewright review` (Pipewright 1.3.0): the review bundle, Markdown for a pull request."""
+    from pipewright.ai import review
+
+    root = Path(args.root)
+    text = review.bundle(root, load_environment(root, args.env), base=args.base)
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+        print(f"wrote {args.output}")
+    else:
+        print(text, end="")
+    return 0
+
+
 def cmd_validate(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
@@ -917,6 +944,21 @@ def build_parser() -> argparse.ArgumentParser:
         cp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
         cp.add_argument("--env", required=True, help="environment the pack describes")
         cp.set_defaults(func=cmd_context, context_action=action)
+
+    sp = sub.add_parser("mcp", help="the MCP tool server for coding agents, over stdio (1.3.0; needs the mcp extra)")
+    sp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
+    sp.add_argument("--env", required=True, help="environment the tools work against")
+    sp.add_argument("--tenant", help="the team (default: the only tenant in the manifest)")
+    sp.add_argument("--agent", help="the agent's name, recorded with every call (e.g. claude-code)")
+    sp.add_argument("--print-config", action="store_true", help="print the MCP client settings to add, and exit")
+    sp.set_defaults(func=cmd_mcp)
+
+    sp = sub.add_parser("review", help="the review bundle for a change: a pull request description (1.3.0)")
+    sp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
+    sp.add_argument("--env", required=True, help="environment to check the change against")
+    sp.add_argument("--base", default="main", help="the revision to compare with (default: main)")
+    sp.add_argument("--output", help="write the Markdown here instead of printing it")
+    sp.set_defaults(func=cmd_review)
 
     sp = sub.add_parser("explain", help="what a use case key means: description, type, allowed values, default")
     sp.add_argument("key", nargs="?", help="dotted key under spec, e.g. data.split.strategy")

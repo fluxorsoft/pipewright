@@ -38,6 +38,9 @@ gcp = [
 ]
 
 launcher = ["flask>=3", "gunicorn>=22"]
+mcp = [
+    "mcp>=1.9,<2",
+]
 
 [project.urls]
 Homepage = "https://www.fluxorsoft.com/pipewright.html"

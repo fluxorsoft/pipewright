@@ -37,8 +37,9 @@ def parse_ref(ref: str) -> tuple[str, str, str]:
     return m.groups()
 
 
-def read_table(gcp, ref: str, label: str) -> tuple[list[dict], list | None]:
-    """(the table's schema fields, the label's distinct values; None when there are more than MAX_LABEL_VALUES)."""
+def read_table(gcp, ref: str, label: str, distinct_values: bool = True) -> tuple[list[dict], list | None]:
+    """(the table's schema fields, the label's distinct values; None when there are more than MAX_LABEL_VALUES).
+    distinct_values=False reads the schema only (an AI agent sees no data): the values come back None."""
     from pipewright.gcp.bigquery import BQ, query, rows
     from pipewright.gcp.session import error_text
 
@@ -50,6 +51,8 @@ def read_table(gcp, ref: str, label: str) -> tuple[list[dict], list | None]:
     if label not in {f["name"] for f in fields}:
         raise ConfigError(f"table {project}.{dataset}.{table} has no column {label!r} for the label "
                           f"(columns: {', '.join(f['name'] for f in fields)})")
+    if not distinct_values:
+        return fields, None
     res = query(gcp, project, f"SELECT DISTINCT `{label}` AS v FROM `{project}.{dataset}.{table}` "
                               f"WHERE `{label}` IS NOT NULL LIMIT {MAX_LABEL_VALUES + 1}",
                 location=r.body.get("location"))
@@ -67,8 +70,14 @@ def _label_values(label: str, kind: str, values: list | None) -> list:
     return [0, 1]
 
 
-def draft(fields: list[dict], label: str, label_values: list | None, ref: str) -> tuple[str, list[dict], list[str]]:
-    """(config/data.yaml text, the raw table's schema, notes for the person running the command)."""
+def draft(fields: list[dict], label: str, label_values: list | None, ref: str,
+          feature_sources: list[dict] | None = None) -> tuple[str, list[dict], list[str]]:
+    """(config/data.yaml text, the raw table's schema, notes for the person running the command).
+
+    feature_sources (Pipewright 1.3.0, the recommended pattern): the table is an entity table (who, as of when, the
+    label) and the features come from feature tables or Feature Store groups: [{"feature_group": name} or
+    {"table": "bq://p.d.t"}, "features": [names], "fields": [{name, type}] of those features]. The contract then
+    covers the entity columns and the features, and data.features_from joins them at each row's cut-off."""
     columns, skipped, notes = [], [], []
     for f in fields:
         kind = CONTRACT_TYPES.get(f["type"])
@@ -85,10 +94,27 @@ def draft(fields: list[dict], label: str, label_values: list | None, ref: str) -
     time_column = next((n for n, k, _ in columns if k in ("date", "timestamp") and n != label), None)
     exclude = [n for n, k, _ in columns if n not in (label, time_column) and k not in NUMERIC]
     features = [n for n, k, _ in columns if n not in (label, time_column) and k in NUMERIC]
-    if not features:
+    identifiers = [n for n, _, _ in columns if IDENTIFIER.search(n.lower())]
+    if feature_sources:
+        if not time_column:
+            raise ConfigError(f"table {ref} has no date or timestamp column: an entity table needs its cut-off, so "
+                              "features are read as they were at each row's date")
+        key = next((n for n, k, req in columns if n in identifiers), None) or next(
+            (n for n, k, req in columns if req and n not in (label, time_column)), None)
+        if not key:
+            raise ConfigError(f"table {ref} has no key column (an ID) to join features on")
+        known = {name for name, _, _ in columns}
+        for src in feature_sources:
+            for f in src.get("fields") or []:
+                kind = CONTRACT_TYPES.get(f["type"])
+                if kind and f["name"] in (src.get("features") or []) and f["name"] not in known:
+                    columns.append((f["name"], kind, False))
+                    known.add(f["name"])
+        features = [f for src in feature_sources for f in src.get("features") or []]
+        exclude = []
+    elif not features:
         raise ConfigError(f"table {ref} has no numeric columns besides the label: the example's model needs at "
                           "least one numeric feature")
-    identifiers = [n for n, _, _ in columns if IDENTIFIER.search(n.lower())]
 
     width = max(len(n) for n, _, _ in columns) + 1
     lines = [f"# Drafted by `pipewright new-usecase --from-bq {ref}`: review it before the first run.",
@@ -105,9 +131,18 @@ def draft(fields: list[dict], label: str, label_values: list | None, ref: str) -
     lines.append(f"  label: {{ column: {label} }}")
     lines.append(f"  split: {{ strategy: time, time_column: {time_column} }}       # the newest rows are the test set"
                  if time_column else "  split: { strategy: stratified }      # keeps the label's proportions")
-    lines += ["", "features:"]
-    lines.append(f"  exclude: [{', '.join(exclude)}]" + ("       # not numeric: the example's model takes numbers"
-                                                        if exclude else ""))
+    if feature_sources:
+        lines += ["  features_from:                       # features as they were at each row's cut-off",
+                  f"    entity: {{ columns: [{key}], time_column: {time_column} }}", "    sources:"]
+        for src in feature_sources:
+            where = (f"feature_group: {src['feature_group']}" if src.get("feature_group")
+                     else f"table: {src['table']}")
+            lines.append(f"      - {{ {where}, features: [{', '.join(src.get('features') or [])}] }}")
+        lines += ["", "features:", f"  include: [{', '.join(features)}]"]
+    else:
+        lines += ["", "features:"]
+        lines.append(f"  exclude: [{', '.join(exclude)}]" + ("       # not numeric: the example's model takes numbers"
+                                                            if exclude else ""))
     lines += ["", "data_protection:",
               "  personal_data_columns: []             # columns that identify a person: never features, erasable"]
     if identifiers:

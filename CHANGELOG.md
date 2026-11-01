@@ -24,6 +24,22 @@ for more.
   from), playbooks in `.pipewright/playbooks/`, and a marked Pipewright block in `AGENTS.md`, `CLAUDE.md` and
   `GEMINI.md` (text outside the block is left alone). The pack is stamped; `pipewright context check` fails when the
   manifest, a use case or Pipewright changed since it was built.
+- **`pipewright mcp`, an MCP tool server for coding agents** (the `mcp` extra): runs locally over stdio, as the
+  tenant's agent identity when the manifest names one. Read and verify only: `environment`, `validate`, `resolve`,
+  `explain`, `doctor`, `plan` (tables, schedules and alerts dry runs), `inspect_table` (schema, row count,
+  partitioning; personal columns flagged), `list_features` (Feature Store groups, their features and online views,
+  and the tables in the team's feature datasets: definitions, never values), `status`, `model_list`,
+  `monitor_status`, `retrain_list`, `lineage`, `bootstrap_usecase` and `review_bundle`. `sample_rows` and `profile`
+  always refuse: rows never reach an agent, and aggregates are not offered. Descriptions written by other people come
+  back marked as untrusted data. Every call is logged in `.pipewright/mcp-log.jsonl` (transparency, not evidence).
+  `pipewright mcp --print-config` prints the client settings to add.
+- **Bootstrap from an entity table and feature sources:** `bootstrap_usecase` (and the drafting behind
+  `new-usecase --from-bq`) can take feature groups or feature tables: the draft's contract covers the entity columns
+  and the chosen features, `data.features_from` joins them at each row's cut-off, and the landing trigger is off. It
+  reads schemas only.
+- **`pipewright review`:** the review bundle for a change, Markdown for a pull request: what a release would change
+  in Google Cloud, the settings that moved against the base revision, the checks and their warnings, where the
+  features come from, the context pack's state, and a section for the author's judgement calls.
 
 ## [1.2.0] - 2026-10-31
 
