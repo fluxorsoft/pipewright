@@ -77,7 +77,7 @@ agent account (or as you, if the manifest names none, and it says so).
 | `doctor`, `plan` | live read-only checks; what a release would change (tables, schedules, alerts) |
 | `inspect_table` | schema, row count, partitioning; personal columns flagged; descriptions marked untrusted |
 | `list_features` | Feature Store feature groups (features, online views) and the team's feature tables: definitions only |
-| `status`, `model_list`, `monitor_status`, `retrain_list`, `lineage` | what is running and how it is doing |
+| `status`, `runs`, `model_list`, `monitor_status`, `retrain_list`, `lineage` | what is live, the latest runs (failed steps and their value-free first error line; step logs are not read), and how models are doing |
 | `bootstrap_usecase` | drafts a use case from an entity table and chosen feature sources (schemas only) |
 | `review_bundle` | the pull request description for the current branch |
 | `sample_rows`, `profile` | always refuse: rows never reach an agent; aggregates are not offered |

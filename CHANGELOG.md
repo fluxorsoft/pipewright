@@ -30,7 +30,8 @@ for more.
   tenant's agent identity when the manifest names one. Read and verify only: `environment`, `validate`, `resolve`,
   `explain`, `doctor`, `plan` (tables, schedules and alerts dry runs), `inspect_table` (schema, row count,
   partitioning; personal columns flagged), `list_features` (Feature Store groups, their features and online views,
-  and the tables in the team's feature datasets: definitions, never values), `status`, `model_list`,
+  and the tables in the team's feature datasets: definitions, never values), `status`, `runs` (the latest pipeline
+  runs, with failed steps and their value-free first error line), `model_list`,
   `monitor_status`, `retrain_list`, `lineage`, `bootstrap_usecase` and `review_bundle`. `sample_rows` and `profile`
   always refuse: rows never reach an agent, and aggregates are not offered. Descriptions written by other people come
   back marked as untrusted data. Every call is logged in `.pipewright/mcp-log.jsonl` (transparency, not evidence).

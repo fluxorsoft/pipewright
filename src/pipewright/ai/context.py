@@ -73,8 +73,8 @@ def render(root: Path, env, playbooks: list[str]) -> tuple[str, str]:
          "guess names, project IDs or policies.",
          "- Write configuration as YAML under `usecases/<name>/`. Refer to platform resources by name "
          "(`${resources.bigquery_dataset}`, `${buckets.landing}`), never by value.",
-         "- Before proposing a change, run `validate`, `doctor` and `plan` through the tools, fix what fails, then open "
-         "a pull request with `pipewright review` as its description. A person approves; never merge, release, "
+         "- Before proposing a change, run `validate`, `doctor` and `plan` through the tools, fix what fails, then "
+         "open a pull request with `pipewright review` as its description. A person approves; never merge, release, "
          "approve or deploy yourself.",
          "- Rows of data are never sent to you. Do not ask for them, and do not paste data into the conversation.", "",
          "## The rules this environment holds every use case to", ""]

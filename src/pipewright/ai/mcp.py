@@ -299,9 +299,41 @@ class Server:
     # -- tools: what is running ---------------------------------------------------------------------------------
 
     def status(self, usecase: str | None = None) -> dict:
-        """What is live and the latest runs, with failed steps and their (value-free) errors."""
+        """Which release is live per use case: since when, by whom, how it was approved, its pipelines."""
         self.log("status", "configuration", "ok", usecase=usecase)
         return self._cli("status", *(["--usecase", usecase] if usecase else []), "--json")
+
+    def runs(self, usecase: str, limit: int = 5) -> dict:
+        """A use case's latest pipeline runs, newest first: state, release, and for a failed run the failed steps and
+        their first error line (the same value-free summary as the run.failed event). Step logs are not read: they
+        can hold data values; the person reads them in the console."""
+        from pipewright.launcher import watch
+
+        e = self.env
+        if e.orchestrator != "vertex":
+            self.log("runs", "metadata", "unsupported", usecase=usecase)
+            return {"ok": False, "error": "runs lists Agent Platform runs; on private-gke use the Kubeflow UI "
+                                          "(pipewright pipelines-ui) or the run.failed events"}
+        base = f"https://{e.region}-aiplatform.googleapis.com/v1/projects/{e.project}/locations/{e.region}"
+        r = self.gcp().get(f"{base}/pipelineJobs", filter=f'labels.pipewright-usecase="{usecase}"',
+                           orderBy="create_time desc", pageSize=max(1, min(int(limit), 20)))
+        if not r.ok:
+            self.log("runs", "metadata", "error", usecase=usecase)
+            return {"ok": False, "error": f"pipeline runs not readable ({r.status})"}
+        out = []
+        for job in r.body.get("pipelineJobs") or []:
+            labels = job.get("labels") or {}
+            run = {"run_id": labels.get("run-id"), "pipeline": labels.get("pipewright-pipeline"),
+                   "release": labels.get("pipewright-release"), "trigger": labels.get("trigger"),
+                   "state": job.get("state", "").removeprefix("PIPELINE_STATE_").lower(),
+                   "created": job.get("createTime"), "ended": job.get("endTime")}
+            if job.get("state") in watch.FAILED:
+                f = watch.failure(job)
+                run.update(failed_steps=f["failed_steps"], error=f["error"])
+            out.append(run)
+        self.log("runs", "metadata", "ok", usecase=usecase, runs=len(out))
+        return {"ok": True, "usecase": usecase, "runs": out,
+                "note": "a run that succeeded without a new model version did not pass its gates (see model_list)"}
 
     def model_list(self, usecase: str) -> dict:
         """The model's versions: metrics, gates, approval, which is the champion."""
@@ -394,7 +426,7 @@ class Server:
 
 
 TOOLS = ("environment", "validate", "resolve", "explain", "doctor", "plan", "inspect_table", "list_features",
-         "sample_rows", "profile", "status", "model_list", "monitor_status", "retrain_list", "lineage",
+         "sample_rows", "profile", "status", "runs", "model_list", "monitor_status", "retrain_list", "lineage",
          "bootstrap_usecase", "review_bundle")
 
 

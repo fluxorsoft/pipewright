@@ -234,3 +234,28 @@ def test_a_command_answering_a_list_is_wrapped_for_the_protocol(server, monkeypa
 
     monkeypatch.setattr(cli, "main", fake_main)
     assert server.status() == {"results": [{"usecase": "churn", "released": False}]}
+
+
+def test_runs_lists_the_latest_with_value_free_errors(server):
+    job = {"name": "projects/p/locations/l/pipelineJobs/churn-r1", "state": "PIPELINE_STATE_FAILED",
+           "labels": {"run-id": "r1", "pipewright-pipeline": "training", "pipewright-release": "abc"},
+           "jobDetail": {"taskDetails": [{"taskName": "ingest-data", "state": "FAILED",
+                                          "error": {"message": "replica exited 1\nmore"}}]}}
+    ok = {"name": "projects/p/locations/l/pipelineJobs/churn-r2", "state": "PIPELINE_STATE_SUCCEEDED",
+          "labels": {"run-id": "r2"}}
+    seen = {}
+
+    class G(FakeGcp):
+        def get(self, url, **params):
+            if url.endswith("/pipelineJobs"):
+                seen.update(params)
+                return Response(200, {"pipelineJobs": [ok, job]})
+            return super().get(url, **params)
+
+    server._gcp_factory = G
+    out = server.runs("churn")
+    assert seen["filter"] == 'labels.pipewright-usecase="churn"'
+    assert out["runs"][0] == {"run_id": "r2", "pipeline": None, "release": None, "trigger": None,
+                              "state": "succeeded", "created": None, "ended": None}
+    failed = out["runs"][1]
+    assert failed["failed_steps"] == ["ingest-data"] and failed["error"] == "ingest-data: replica exited 1"
