@@ -69,3 +69,17 @@ def test_the_cli_builds_checks_and_respects_a_forbidden_environment(repo, capsys
     repo.write()
     assert main(["context", "build", "--root", str(repo.root), "--env", "dev"]) != 0
     assert "ai.local_tools: forbidden" in capsys.readouterr().err
+
+
+def test_an_environment_with_a_hosted_server_gets_a_pack_that_says_how_to_use_it(repo, capsys):
+    ml_repo(repo)
+    repo.manifests["dev"]["ai"] = {"local_tools": "forbidden"}
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {
+        "url": "https://pw-mcp-churn-1.a.run.app", "runtime": "cloud_run", "service": "pw-mcp-churn"}
+    repo.write()
+    assert main(["context", "build", "--root", str(repo.root), "--env", "dev"]) == 0
+    pack = (repo.root / "APP_CONTEXT.md").read_text(encoding="utf-8")
+    assert "the team's hosted tool server" in pack and "--print-config" in pack
+    assert "no copy of this repository: run `pipewright validate --env dev`" in pack
+    assert "or the local `pipewright mcp`" not in pack      # local tools are forbidden here
+    assert main(["context", "check", "--root", str(repo.root), "--env", "dev"]) == 0

@@ -27,6 +27,11 @@ def allowed(env) -> None:
                           "use another environment, or ask the platform team")
 
 
+def hosted(env) -> bool:
+    """A tenant of this environment has a hosted tool server (Pipewright Enterprise)."""
+    return any((s or {}).get("agent_server") for s in (getattr(env, "tenants", None) or {}).values())
+
+
 def agent_account(env, tenant: str | None) -> str | None:
     if os.environ.get(AGENT_ENV):
         return os.environ[AGENT_ENV]

@@ -52,7 +52,8 @@ def cmd_context(args) -> int:
 
     root = Path(args.root)
     env = load_environment(root, args.env)
-    identity.allowed(env)
+    if not identity.hosted(env):             # a pack is names and rules: agents of a hosted server need it too
+        identity.allowed(env)
     if args.context_action == "build":
         for p in context.build(root, env):
             print(f"wrote {p.relative_to(root).as_posix()}")
