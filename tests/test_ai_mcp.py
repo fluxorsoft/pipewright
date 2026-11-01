@@ -220,3 +220,17 @@ def test_print_config_points_at_the_hosted_server(repo, capsys):
     repo.write()
     main(["mcp", "--root", str(repo.root), "--env", "dev", "--tenant", "churn", "--print-config"])
     assert "kubectl port-forward" in json.loads(capsys.readouterr().out)["proxy"]
+
+
+def test_a_command_answering_a_list_is_wrapped_for_the_protocol(server, monkeypatch):
+    """`status --json` prints a list; FastMCP checks a tool's result against its dict annotation (found live)."""
+    import sys
+
+    cli = sys.modules["pipewright.cli.main"]
+
+    def fake_main(argv):
+        print(json.dumps([{"usecase": "churn", "released": False}]))
+        return 0
+
+    monkeypatch.setattr(cli, "main", fake_main)
+    assert server.status() == {"results": [{"usecase": "churn", "released": False}]}

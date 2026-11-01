@@ -107,6 +107,8 @@ class Server:
             body = json.loads(text) if text else {}
         except json.JSONDecodeError:
             body = {"output": text}
+        if isinstance(body, list):           # tools answer objects (MCP output schemas): a list is wrapped
+            body = {"results": body}
         if code != 0:
             body = {"ok": False, "exit_code": code, "error": err.getvalue().strip()[-4000:], **body}
         return body
