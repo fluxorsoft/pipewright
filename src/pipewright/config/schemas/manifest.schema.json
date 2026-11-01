@@ -388,7 +388,8 @@
               "url": {"type": "string", "minLength": 1},
               "runtime": {"enum": ["cloud_run", "gke"]},
               "service": {"type": "string", "minLength": 1},
-              "namespace": {"type": "string", "minLength": 1}
+              "namespace": {"type": "string", "minLength": 1},
+              "service_account": {"type": "string", "minLength": 1, "description": "The server's own identity (metadata only; writes the audit)."}
             }
           },
           "runner_service_account": {
