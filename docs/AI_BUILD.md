@@ -26,6 +26,7 @@ let the team's engineers impersonate it:
 | `roles/storage.objectViewer` (conditional: `pipewright/` and `contracts/`) | the artifacts bucket | the manifest and release contracts |
 | `roles/aiplatform.viewer` | the project | models, pipeline runs (with their failed steps), feature group and view definitions |
 | `roles/cloudscheduler.viewer`, `roles/monitoring.viewer` | the project | the plan of a use case's schedules and alerts |
+| a custom role: `storage.buckets.get`, `artifactregistry.repositories.get`, `iam.serviceAccounts.get`, `run.services.get`, `pubsub.topics.get`, `pubsub.subscriptions.get` | the project | `doctor`'s checks of the platform's resources, read as configuration |
 | `roles/iam.serviceAccountTokenCreator` for the team's engineers | the agent account | impersonation |
 
 Name it in the manifest:
@@ -37,6 +38,11 @@ Name it in the manifest:
 
 `ai.local_tools: forbidden` turns the tools off in an environment (for example production). The starter's Terraform
 creates the account and the grants when `tenants.<t>.agent_identity = true`.
+
+Run for an agent, `doctor` also checks the identity cannot release, run, read table data, upload or deploy, and warns
+if it can. Refused attempts and BigQuery queries are always in Cloud Audit Logs; to record every metadata read too,
+turn on Data Access audit logs for BigQuery, Agent Platform and Cloud Storage (`agent_audit_logs = true` in the
+starter; billed by volume).
 
 Google Cloud's IAM then enforces "metadata only" on every route the agent might take, Pipewright's tools or not, and
 Cloud Audit Logs record each call as the agent account acting for the person. Calls through Pipewright's tools also
