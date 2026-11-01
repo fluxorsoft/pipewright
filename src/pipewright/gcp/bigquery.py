@@ -33,10 +33,13 @@ def dataset_location(gcp: Gcp, project: str, dataset: str) -> str | None:
 
 
 def query(gcp: Gcp, project: str, sql: str, params: list[dict] | None = None, location: str | None = None,
-          kms_key: str | None = None) -> dict:
+          kms_key: str | None = None, max_bytes: int | None = None) -> dict:
     """Runs SQL; returns the finished jobs.query response (rows, schema, numDmlAffectedRows). kms_key encrypts the
-    results (required where the CMEK organization policy covers BigQuery: manifest security.bigquery_kms_key)."""
+    results (required where the CMEK organization policy covers BigQuery: manifest security.bigquery_kms_key);
+    max_bytes caps the bytes billed (the query fails rather than bill more)."""
     body = {"query": sql, "useLegacySql": False, "timeoutMs": 60000}
+    if max_bytes:
+        body["maximumBytesBilled"] = str(max_bytes)
     if kms_key:
         body["destinationEncryptionConfiguration"] = {"kmsKeyName": kms_key}
     if params:
