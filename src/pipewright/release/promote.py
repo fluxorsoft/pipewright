@@ -237,6 +237,18 @@ def _sha256(gcp: Gcp, bucket: str, name: str) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def _evaluated(gcp: Gcp, artifact_uri: str | None) -> dict:
+    """The approval's `evaluation` field (Pipewright 1.3.1): the evaluation record copied with the model, by digest.
+    Empty when there is none or it cannot be read: a promotion never fails for it."""
+    from pipewright.models import gates
+
+    try:
+        found = gates.record_digest(gcp, artifact_uri)
+    except Exception:  # noqa: BLE001 - the digest adds to the trail; reading it must not block a promotion
+        return {}
+    return {"evaluation": found} if found else {}
+
+
 def copy_model_files(gcp: Gcp, source_uri: str, dest_uri: str, log=print) -> list[dict]:
     """Copies every file under the model's artifact URI (rewrite API: the destination bucket's key applies) and
     checks each copy's CRC32C, which does not depend on the key. Returns [{file, crc32c, size}]."""
@@ -568,7 +580,8 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     if model and first_version and manual:
         events.emit(events.event("model.approved", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None,
                                  model=model["name"], version=model["version"], previous=None, by=who,
-                                 via="promotion", source_environment=src_env.name), dst_env.observability.get(
+                                 via="promotion", source_environment=src_env.name,
+                                 **_evaluated(gcp, model.get("artifact_uri"))), dst_env.observability.get(
                                      "events_topic"), gcp, stream=_quiet(), region=dst_env.region)
     events.emit(events.event("release.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None, by=who,
                              previous=pointer.release_id if pointer else None, source_environment=src_env.name,

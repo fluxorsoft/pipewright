@@ -356,3 +356,33 @@ def test_a_first_model_version_needs_an_explicit_approval(setup):
     result = setup.run(approve=True)
     assert "event model.approved" in setup.calls
     assert any("approved by promoter@acme.example with the promotion" in p for p in result.record["policy"])
+
+# Pipewright 1.3.1 (FR-89): approving with the promotion records the evaluation copied with the model, by digest;
+# a record that cannot be read leaves the digest out and never stops the promotion.
+def test_a_promotion_approval_records_the_evaluation_it_copied(setup, monkeypatch):
+    from pipewright.models import gates
+
+    setup.dst_model = None
+    emitted = []
+    monkeypatch.setattr(promote.events, "emit", lambda event, *a, **k: emitted.append(event))
+    monkeypatch.setattr(promote, "promote_model", lambda *a, **k: {
+        "name": "churn-classifier", "source_version": "3", "version": "1", "files": [],
+        "artifact_uri": "gs://acme-ml-prod-artifacts/promoted/dev/abc123/v3/model"})
+    digest = {"record": "gs://acme-ml-prod-artifacts/promoted/dev/abc123/v3/model/evaluation.json",
+              "generation": 7, "sha256": "ab" * 32}
+    seen = []
+    monkeypatch.setattr(gates, "record_digest", lambda gcp, uri: seen.append(uri) or digest)
+    setup.run(approve=True)
+    approved = [e for e in emitted if e["event_type"] == "model.approved"]
+    assert approved[0]["data"]["evaluation"] == digest
+    assert seen == ["gs://acme-ml-prod-artifacts/promoted/dev/abc123/v3/model"]
+
+    def unreadable(gcp, uri):
+        raise RuntimeError("403 Forbidden")
+
+    emitted.clear()
+    setup.store.pop(("acme-ml-prod-artifacts", "contracts/churn/current.json"), None)
+    monkeypatch.setattr(gates, "record_digest", unreadable)
+    setup.run(approve=True)
+    approved = [e for e in emitted if e["event_type"] == "model.approved"]
+    assert approved and "evaluation" not in approved[0]["data"]

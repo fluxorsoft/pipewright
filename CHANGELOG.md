@@ -17,7 +17,8 @@ Nothing to change. Approvals made before 1.3.1 have no evaluation digest; `pipew
 ### Fixed
 
 - **An approval keeps the evaluation it was judged on (FR-89):** the `model.approved` event (first versions too)
-  now carries `evaluation`: the record's location, its Cloud Storage object generation and the SHA-256 of its bytes.
+  and an approval made with `pipewright promote --approve` now carry `evaluation`: the record's location, its Cloud
+  Storage object generation and the SHA-256 of its bytes.
   Before, the trail named who approved which version and how, but not which evaluation record the gates were checked
   against, so a record changed or removed later could not be told apart from the one approved. A record that cannot
   be read never blocks an approval; the event then has no digest.
