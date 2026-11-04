@@ -131,6 +131,25 @@ def read_record(gcp, artifact_uri: str | None) -> dict | None:
     return json.loads(text) if text else None
 
 
+def record_digest(gcp, artifact_uri: str | None) -> dict | None:
+    """What a decision was judged on (Pipewright 1.3.1): the evaluation record's location, its object generation and
+    the SHA-256 of its bytes. None when there is no record. A later check compares the digest with the record as it
+    is then, so an approval shows whether the evaluation the reviewer saw is the one on file."""
+    if not artifact_uri or not artifact_uri.startswith("gs://"):
+        return None
+    import hashlib
+
+    from pipewright.gcp import gcs_read
+
+    bucket, _, prefix = artifact_uri.removeprefix("gs://").partition("/")
+    name = f"{prefix.rstrip('/')}/{RECORD}".lstrip("/")
+    text, generation = gcs_read(gcp, bucket, name)
+    if text is None:
+        return None
+    return {"record": f"gs://{bucket}/{name}", "generation": generation,
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+
+
 def verify(gcp, artifact_uri: str | None, evaluation: dict, champion_expected: bool = False) -> list[str]:
     """check() on the version's stored record; a missing record is a problem when there is anything to check."""
     if not needs_record(evaluation):

@@ -130,6 +130,18 @@ def pending_approval(labels: dict | None) -> bool:
     return (labels or {}).get(APPROVAL_LABEL) == "pending"
 
 
+def _evaluated(creds, resource: str, version: str, uc: ResolvedUseCase) -> dict:
+    """The approval's `evaluation` field: the record the gates were checked against, by digest (Pipewright 1.3.1).
+    Empty when the version has no record or it cannot be read: the approval itself never fails for it."""
+    from pipewright.gcp import Gcp
+
+    try:
+        found = gates.record_digest(Gcp(creds), artifact_uri(resource, str(version), uc))
+    except Exception:  # noqa: BLE001 - the digest adds to the trail; reading it must not block an approval
+        return {}
+    return {"evaluation": found} if found else {}
+
+
 def _approve_first_version(uc: ResolvedUseCase, env: Environment, creds, resource: str, version: str,
                            identity: str | None, log=print) -> None:
     import io
@@ -145,7 +157,8 @@ def _approve_first_version(uc: ResolvedUseCase, env: Environment, creds, resourc
     if not resp.ok:
         raise ConfigError(f"recording the approval of v{version}: HTTP {resp.status}")
     events.emit(events.event("model.approved", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
-                             version=version, previous=None, by=identity, first_version=True),
+                             version=version, previous=None, by=identity, first_version=True,
+                             **_evaluated(creds, resource, version, uc)),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
     log(f"{uc.model['name']}: v{version}, the first version and already the default, is approved"
         + (f" by {identity}" if identity else ""))
@@ -183,7 +196,8 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
     from pipewright.observability import events
 
     events.emit(events.event("model.approved", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
-                             version=version, previous=previous, by=identity),
+                             version=version, previous=previous, by=identity,
+                             **_evaluated(creds, resource, version, uc)),
                 env.observability.get("events_topic"), Gcp(creds), stream=io.StringIO(), region=env.region)
     online = not ((uc.ml or {}).get("bqml") or {}).get("forecast")       # a forecast is never served online
     log(f"{uc.model['name']}: default v{previous} -> v{version}"

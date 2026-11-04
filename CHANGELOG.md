@@ -5,6 +5,25 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-04
+
+A fix to the decision trail: a model approval now records the evaluation it was judged on. Additive: nothing to
+change, and use cases, manifests and releases behave as in 1.3.0.
+
+### Upgrading from 1.3.0
+
+Nothing to change. Approvals made before 1.3.1 have no evaluation digest; `pipewright lineage` shows them as before.
+
+### Fixed
+
+- **An approval keeps the evaluation it was judged on (FR-89):** the `model.approved` event (first versions too)
+  now carries `evaluation`: the record's location, its Cloud Storage object generation and the SHA-256 of its bytes.
+  Before, the trail named who approved which version and how, but not which evaluation record the gates were checked
+  against, so a record changed or removed later could not be told apart from the one approved. A record that cannot
+  be read never blocks an approval; the event then has no digest.
+- **`pipewright lineage` checks it:** under each approval with a digest it shows the record's SHA-256 and generation,
+  and whether the record on file now is unchanged, changed or missing (`evaluation_now` in `--json`).
+
 ## [1.3.0] - 2026-11-01
 
 AI build assistance: coding agents build and change use cases through Pipewright's tools, as a metadata-only identity,

@@ -93,7 +93,27 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
                          or labels.get("release")))
     if snapshot:
         out.update(fingerprints(gcp, env, record.get("run_id"), (record.get("data") or {}).get("replay_of")))
+    check_evaluations(gcp, out, folder)
     return out
+
+
+def check_evaluations(gcp, out: dict, folder: str | None) -> None:
+    """For each approval that recorded its evaluation (Pipewright 1.3.1), whether the record is still the one the
+    reviewer was judged on: `unchanged`, `changed` (another digest now) or `missing`."""
+    judged = [d for d in out.get("decisions") or [] if (d.get("evaluation") or {}).get("sha256")]
+    if not judged:
+        return
+    from pipewright.models import gates
+
+    try:
+        now = gates.record_digest(gcp, folder)
+    except Exception as e:  # noqa: BLE001 - say what could not be checked
+        for d in judged:
+            d["evaluation_now"] = f"not checked: {str(e).splitlines()[0][:120]}"
+        return
+    for d in judged:
+        d["evaluation_now"] = ("missing" if now is None else
+                               "unchanged" if now["sha256"] == d["evaluation"]["sha256"] else "changed")
 
 
 def fingerprints(gcp, env: Environment, run_id: str | None, replay_of: str | None) -> dict:
@@ -159,7 +179,9 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
         out.append({"at": (row["published"] or "")[:19], "event": event.get("event_type"), "by": data.get("by"),
                     "approval": data.get("approval"), "version": data.get("version"),
                     "release": event.get("release"), "endpoint": data.get("endpoint"),
-                    "traffic_percent": data.get("traffic_percent")})
+                    "traffic_percent": data.get("traffic_percent"),
+                    # Pipewright 1.3.1: the evaluation record an approval was judged on, by digest
+                    **({"evaluation": data["evaluation"]} if isinstance(data.get("evaluation"), dict) else {})})
     return {"decisions": out}
 
 
@@ -245,3 +267,10 @@ def _render_decisions(info: dict, lines: list[str]) -> None:
         how = _how(d.get("approval"))
         lines.append(f"  {'decided' if i == 0 else '       '}  {d['at']}  {what}, by {d.get('by') or '?'}"
                      + (f" ({how})" if how else ""))
+        ev = d.get("evaluation") or {}
+        if ev.get("sha256"):
+            state = {"unchanged": "unchanged since", "missing": "MISSING now",
+                     "changed": "CHANGED since: the record on file is not the one approved"}.get(
+                d.get("evaluation_now"), d.get("evaluation_now") or "not checked")
+            lines.append(f"           judged on evaluation sha256 {ev['sha256'][:16]} (generation "
+                         f"{ev.get('generation')}), {state}")
