@@ -267,7 +267,8 @@ class KServe:
 
 def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry_run: bool = False,
            log=print) -> dict:
-    from pipewright.models import gates
+    from pipewright.models import gates, integrity
+    from pipewright.models.registry import pending_approval
 
     if canary:
         raise ConfigError("model.serving.target kserve has no canary: KServe in Standard mode cannot split traffic "
@@ -278,7 +279,15 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     version = default_version(uc, env, gcp)
     vid = str(version["versionId"])
     earlier = vid.isdigit() and int(vid) > 1
-    problems = gates.verify(gcp, version["artifactUri"], uc.ml["evaluation"], earlier)
+    labels = version.get("labels") or {}
+    # Phase 6 (FR-96): the gates of the release that trained the version, not the working copy's.
+    rules = integrity.released_rules(uc, env, gcp, integrity.release_of(gcp, version.get("artifactUri"), labels))
+    problems = gates.verify(gcp, version["artifactUri"], rules.evaluation, earlier)
+    pending = pending_approval(labels)
+    check = integrity.verify(gcp, env, uc.name, vid, version.get("artifactUri"),
+                             (version.get("containerSpec") or {}).get("imageUri"), first_version_pending=pending)
+    if rules.note:
+        check.notes.append(rules.note)
     body = inference_service(uc, env, version, k.s)
     current = k.current()
     running = ((current or {}).get("metadata", {}).get("labels") or {}).get("pipewright.dev/version")
@@ -288,8 +297,17 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
         f"{serving['replicas']['max']}, exposure {k.s['exposure']})"
         + ("  [already live]" if running == _label(vid) else (f"; replaces v{running}" if running else "")))
     log("evaluation gates: " + ("pass" if not problems else "FAIL\n  " + "\n  ".join(problems)))
+    verdict = ("PENDING: nobody has approved this first version" if pending else "verified" if not check.problems
+               else "NOT what was approved\n  " + "\n  ".join(check.problems))
+    log(f"approval: {verdict}")
     if dry_run:
         return {"version": vid, "dry_run": True}
+    if pending:
+        raise ConfigError(f"approve it first: pipewright model approve --env {env.name} --usecase {uc.name} "
+                          f"--version {vid} --approve",
+                          source=f"v{vid} of {uc.model['name']} is not served: it became the default as the model's "
+                                 "first version, and nobody has approved it")
+    integrity.enforce(check, env, f"v{vid} of {uc.model['name']} is not served", log)
     if problems:
         raise ConfigError(problems + ["make a passing version the default (`pipewright model approve`), then deploy"],
                           source=f"v{vid} of {uc.model['name']} is not served: the default version does not pass "
@@ -304,19 +322,20 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     if k.s["exposure"] == "internal_lb":
         k.ensure_load_balancer(port)
     log(f"live: {k.name} serves {uc.model['name']} v{vid} ({', '.join(f'{a}: {u}' for a, u in k.endpoints().items())})")
-    _deployed(uc, env, gcp, vid, k)
+    _deployed(uc, env, gcp, vid, k, check)
     log(k.how_to_call() or "")
     return {"version": vid, "status": "deployed"}
 
 
-def _deployed(uc: ResolvedUseCase, env: Environment, gcp, version: str, k: KServe) -> None:
+def _deployed(uc: ResolvedUseCase, env: Environment, gcp, version: str, k: KServe, check=None) -> None:
     import io
 
     from pipewright.observability import events
 
     events.emit(events.event("model.deployed", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
                              version=version, endpoint=f"kserve:{k.s['namespace']}/{k.name}", traffic_percent=100,
-                             target="kserve", by=gcp.identity()),
+                             target="kserve", by=gcp.identity(),
+                             **({"integrity": check.summary()} if check is not None else {})),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
 
 

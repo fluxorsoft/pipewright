@@ -134,3 +134,24 @@ def test_gates_still_decide_what_is_served(repo, fake, monkeypatch):
     with pytest.raises(ConfigError, match="not served"):
         kserve.deploy(uc, env, SimpleNamespace(identity=lambda: None), log=lambda *_: None)
     assert fake.isvc is None
+
+
+# Phase 6: KServe serves only what was approved, as deploy-model on Agent Platform does.
+def test_kserve_refuses_a_first_version_nobody_approved(repo, fake, monkeypatch):
+    uc, env = serving_env(repo)
+    monkeypatch.setattr(kserve, "default_version", lambda uc, env, gcp: {**VERSION, "labels": {"approval": "pending"}})
+    with pytest.raises(ConfigError, match="nobody has approved it"):
+        kserve.deploy(uc, env, SimpleNamespace(identity=lambda: None), log=lambda *_: None)
+    assert fake.isvc is None
+
+
+def test_kserve_refuses_a_version_that_is_not_the_one_approved(repo, fake, monkeypatch):
+    from pipewright.models import integrity
+
+    uc, env = serving_env(repo)
+    check = integrity.Check(problems=["model.pt: changed after the approval (sha256 0123456789abcdef approved)"])
+    monkeypatch.setattr(integrity, "verify", lambda *a, **k: check)
+    said = []
+    with pytest.raises(ConfigError, match="not what was approved"):
+        kserve.deploy(uc, env, SimpleNamespace(identity=lambda: None), log=said.append)
+    assert fake.isvc is None and any(line.startswith("approval: NOT what was approved") for line in said)
