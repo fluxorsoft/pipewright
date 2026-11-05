@@ -14,7 +14,11 @@ BASE_IMAGE = "python:3.11-slim"
 
 # Prebuilt TorchServe runtime; serves <artifact_uri>/model.mar. Keep its minor version in step with torch in
 # requirements.txt.
-SERVING_IMAGE = "us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest"
+# By digest, not by tag (Pipewright phase 6, FR-94): a tag can move, and an approved model must keep running in the
+# image it was approved with. This is pytorch-cpu.2-4:latest as of 2026-11-05; to move to a newer one, change the
+# digest here, retrain and approve again.
+SERVING_IMAGE = ("us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4"
+                 "@sha256:dfee41bf10aed8d6f9463c5e7e617edda97de63dd1e7d36420860c1cd20ed233")
 
 
 def model_card(ml_config: dict, report: dict, run_id: str, source_uri: str) -> str:

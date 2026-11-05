@@ -32,6 +32,27 @@ def check(ml: dict, env, tenant: str | None = None) -> tuple[list[str], list[str
     return warnings, problems
 
 
+# An image reference by tag in component code: host/path:tag, not host/path@sha256:...
+_IMAGE_BY_TAG = re.compile(r"""["']((?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?/[a-z0-9._/-]+:[A-Za-z0-9._-]+)["']""")
+
+
+def serving_image_by_tag(components_dir) -> list[str]:
+    """Phase 6 (FR-94): a component that registers its serving container by tag. A tag can move after the model was
+    approved; a digest cannot. Image references are names, never data."""
+    from pathlib import Path
+
+    out = []
+    for path in sorted(Path(components_dir).glob("*.py")) if components_dir and Path(components_dir).is_dir() else []:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "serving_container_image_uri" not in text and "imageUri" not in text:
+            continue
+        for image in sorted(set(_IMAGE_BY_TAG.findall(text))):
+            out.append(f"{path.name} registers the serving image by tag ({image}): register it by digest "
+                       "(image@sha256:...), so an approved model keeps the image it was approved with; a moved tag "
+                       "is refused at deploy (judgement check)")
+    return out
+
+
 def time_column(data: dict, columns: dict) -> str | None:
     """The column that orders the rows in time, when there is one: the entity's cut-off, the split's time column,
     or a required date or timestamp column in the contract."""

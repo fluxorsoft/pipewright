@@ -392,3 +392,29 @@ def test_scoring_with_an_unapproved_default_is_flagged(monkeypatch):
     assert "nobody has approved it" in problem
     monkeypatch.setattr(integrity, "approval_events", lambda *a: [{"at": "x", "by": "a@x"}])
     assert integrity.inference_check(_registry(), manifest, CONTRACT) == ("refuse", None)
+
+
+# -- validate: a serving image by tag (FR-94) ----------------------------------------------------------------------
+
+def test_validate_warns_about_a_serving_image_registered_by_tag(tmp_path):
+    from pipewright.config import judgement
+
+    tagged = 'SERVING_IMAGE = "us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest"'
+    (tmp_path / "register.py").write_text(tagged + "\nm.upload(serving_container_image_uri=SERVING_IMAGE)\n",
+                                          encoding="utf-8")
+    (tmp_path / "train.py").write_text('IMAGE = "europe-docker.pkg.dev/p/r/trainer:1.0"\n', encoding="utf-8")
+    found = judgement.serving_image_by_tag(tmp_path)
+    assert len(found) == 1 and "register.py registers the serving image by tag" in found[0]
+    (tmp_path / "register.py").write_text('SERVING_IMAGE = "us-docker.pkg.dev/vertex-ai/prediction/x@sha256:'
+                                          + "a" * 64 + '"\nm.upload(serving_container_image_uri=SERVING_IMAGE)\n',
+                                          encoding="utf-8")
+    assert judgement.serving_image_by_tag(tmp_path) == [] and judgement.serving_image_by_tag(None) == []
+
+
+def test_the_reference_example_registers_its_serving_image_by_digest():
+    from pathlib import Path
+
+    from pipewright.config import judgement
+
+    components = Path(__file__).resolve().parents[1] / "examples" / "churn" / "components"
+    assert judgement.serving_image_by_tag(components) == []
