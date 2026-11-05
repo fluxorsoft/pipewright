@@ -135,13 +135,16 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
 
     labels = dict(getattr(default, "labels", None) or {})
     gcp = Gcp(creds)
-    record = record_location(uc, default.uri, labels)
-    # Phase 6 (FR-96): the gates of the release that trained the version, not the working copy's.
-    rules = integrity.released_rules(uc, env, gcp, integrity.release_of(gcp, record, labels))
-    problems = gates.verify(gcp, record, rules.evaluation, earlier)
     spec = getattr(getattr(default, "gca_resource", None), "container_spec", None)
     check = integrity.verify(gcp, env, uc.name, str(default.version_id), default.uri,
                              getattr(spec, "image_uri", None) or None, first_version_pending=pending_approval(labels))
+    record = record_location(uc, default.uri, labels)
+    approved = ((check.approval or {}).get("evaluation") or {}).get("record")
+    if record is None and approved:          # a version that lost its labels: found by the record its approval names
+        record = approved.rsplit("/", 1)[0] + "/"
+    # Phase 6 (FR-96): the gates of the release that trained the version, not the working copy's.
+    rules = integrity.released_rules(uc, env, gcp, integrity.release_of(gcp, record, labels))
+    problems = gates.verify(gcp, record, rules.evaluation, earlier)
     if rules.note:
         check.notes.append(rules.note)
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
@@ -150,9 +153,21 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
                       labels, online_store_problem(uc, env, gcp, default), check, rules.release)
 
 
+def pending_approval_of(p: DeployPlan) -> bool:
+    from pipewright.models.registry import pending_approval
+
+    return pending_approval(p.labels)
+
+
 def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, log=print) -> None:
     ai = _aiplatform(env, creds)
     p = plan(uc, env, creds)
+    if p.integrity is not None and not pending_approval_of(p):
+        from pipewright.models import integrity
+
+        # Phase 6 (FR-93, FR-94): first, so a version that is not the one approved is reported as that; refuse (or
+        # warn) before anything changes on the endpoint.
+        integrity.enforce(p.integrity, env, f"v{p.version} of {p.model} is not served", log)
     if p.gate_problems:
         raise ConfigError(p.gate_problems + ["make a passing version the default (`pipewright model approve`), "
                                              "then deploy"],
@@ -167,11 +182,6 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                           f"--version {p.version} --approve",
                           source=f"v{p.version} of {p.model} is not served: it became the default as the model's "
                                  "first version, and nobody has approved it (approvals.promote_model manual)")
-    if p.integrity is not None:
-        from pipewright.models import integrity
-
-        # Phase 6 (FR-93, FR-94): refuse (or warn) before anything changes on the endpoint.
-        integrity.enforce(p.integrity, env, f"v{p.version} of {p.model} is not served", log)
     if p.already_deployed:
         log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return
