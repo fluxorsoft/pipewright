@@ -122,40 +122,53 @@ class _Version:
         self.version_id, self.version_aliases = vid, (["default"] if default else [])
 
 
-def test_an_approval_records_the_evaluation_it_was_judged_on(monkeypatch):
-    from pipewright.models import gates, registry
+def _approve_with(monkeypatch, known, record, emitted, aliased):
+    """approve() with the Model Registry, the gates and the lock faked; `record` is what _judged returns."""
+    import sys
 
-    emitted, aliased = [], []
+    from pipewright.models import gates, integrity, registry
 
     class FakeRegistry:
         def __init__(self, model):
             pass
 
         def list_versions(self):
-            return [_Version("3", True), _Version("4", False)]
+            return known
 
         def add_version_aliases(self, new_aliases, version):
             aliased.append((new_aliases, version))
 
-    digest = {"record": "gs://b/m4/evaluation.json", "generation": 7, "sha256": "ab" * 32}
-    import sys
     # a fake SDK module: importing the real one here would leave it loaded for later tests that fake it
     monkeypatch.setitem(sys.modules, "google.cloud.aiplatform", SimpleNamespace())
     monkeypatch.setitem(sys.modules, "google.cloud.aiplatform.models", SimpleNamespace(ModelRegistry=FakeRegistry))
-    monkeypatch.setattr(registry, "check_approval", lambda *a, **k: None)
     monkeypatch.setattr(registry, "_resource", lambda uc, env, creds: "projects/p/locations/r/models/m")
-    monkeypatch.setattr(registry, "gate_problems", lambda *a: [])
-    monkeypatch.setattr(registry, "artifact_uri", lambda resource, version, uc=None: f"gs://b/m{version}")
-    monkeypatch.setattr(gates, "record_digest", lambda gcp, uri: digest if uri == "gs://b/m4" else None)
-    monkeypatch.setattr("pipewright.gcp.Gcp", lambda creds=None: None)
+    monkeypatch.setattr(registry, "version_labels", lambda *a: {"3": {"approval": "pending"}})
+    rules = integrity.Rules({}, {}, "rel1", "release")
+    monkeypatch.setattr(registry, "_judged", lambda *a, **k: (rules, record, "gs://b/m4"))
+    monkeypatch.setattr(gates, "verify", lambda *a, **k: [])
+    monkeypatch.setattr(integrity, "lock", lambda *a, **k: {"locked": 3, "until": "2026-12-05T00:00:00Z"})
+    monkeypatch.setattr("pipewright.gcp.Gcp", lambda creds=None: SimpleNamespace(
+        get=lambda url, **k: SimpleNamespace(ok=True, body={"labels": {"approval": "pending"}}),
+        patch=lambda url, body, **k: SimpleNamespace(ok=True, status=200)))
     monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
-    uc = SimpleNamespace(name="churn", tenant="retail", model={"name": "churn-classifier"}, ml={"evaluation": {}})
-    env = SimpleNamespace(**{**ENV.__dict__, "region": "europe-west2"})
+    uc = SimpleNamespace(name="churn", tenant="retail", model={"name": "churn-classifier"}, ml={"evaluation": {}},
+                         approvals={}, environment="prod")
+    return uc, SimpleNamespace(**{**ENV.__dict__, "region": "europe-west2", "policies": {}})
+
+
+def test_an_approval_records_the_evaluation_it_was_judged_on(monkeypatch):
+    from pipewright.models import registry
+
+    emitted, aliased = [], []
+    digest = {"record": "gs://b/m4/evaluation.json", "generation": 7, "sha256": "ab" * 32}
+    record = {"evaluation": digest, "rules": {"release": "rel1", "source": "release"}}
+    uc, env = _approve_with(monkeypatch, [_Version("3", True), _Version("4", False)], record, emitted, aliased)
     registry.approve(uc, env, None, "4", "risk@acme", True, log=lambda *a: None)
     assert aliased == [(["default"], "4")]
     data = emitted[0]["data"]
     assert data["version"] == "4" and data["previous"] == "3" and data["by"] == "risk@acme"
-    assert data["evaluation"] == digest
+    assert data["evaluation"] == digest and data["rules"]["release"] == "rel1"
+    assert data["lock"] == {"locked": 3, "until": "2026-12-05T00:00:00Z"}
 
 
 def test_an_unreadable_evaluation_never_blocks_the_approval(monkeypatch):
@@ -190,10 +203,13 @@ def test_the_first_version_approval_records_its_evaluation_too(monkeypatch):
     monkeypatch.setattr("pipewright.gcp.Gcp", FakeGcp)
     monkeypatch.setattr(registry, "_evaluated", lambda creds, resource, version, uc: {"evaluation": {"sha256": "cd"}})
     monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
-    uc = SimpleNamespace(name="demand", tenant="supply", model={"name": "demand"})
-    registry._approve_first_version(uc, SimpleNamespace(name="prod", region="r", observability={}), None, "res", "1",
-                                    "lead@acme", lambda *a: None)
-    assert emitted[0]["data"]["first_version"] is True and emitted[0]["data"]["evaluation"] == {"sha256": "cd"}
+    uc = SimpleNamespace(name="demand", tenant="supply", model={"name": "demand"}, ml={"evaluation": {}}, approvals={})
+    env = SimpleNamespace(name="prod", region="r", observability={}, policies={})
+    registry._approve_first_version(uc, env, None, "res", "1", "lead@acme", lambda *a: None)
+    data = emitted[0]["data"]
+    assert data["first_version"] is True and data["evaluation"] == {"sha256": "cd"}
+    # Phase 6: a version that names no release is judged by the working copy's rules, and the approval says so
+    assert data["rules"]["source"] == "working copy" and data["rules"]["release"] is None
 
 
 def _approved(evaluation=None):
