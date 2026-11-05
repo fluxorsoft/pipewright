@@ -242,7 +242,7 @@ def _approve_first_version(uc: ResolvedUseCase, env: Environment, creds, resourc
     locked = integrity.lock(gcp, env, record.get("files"), log)
     _emit_approval(uc, env, creds, version, identity, {**record, **({"lock": locked} if locked else {})},
                    previous=None, first_version=True)
-    log(f"{uc.model['name']}: v{version}, the first version and already the default, is approved"
+    log(f"{uc.model['name']}: v{version}, already the default, is approved"
         + (f" by {identity}" if identity else ""))
 
 
