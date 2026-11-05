@@ -367,10 +367,11 @@ def test_lineage_renders_the_integrity_check_and_the_audit():
                            "audit": {"state": "no entry", "note": "no Admin Activity entry for this approval"}}],
             "integrity": {"result": "refused", "problems": 1,
                           "problems_found": ["model.pt: changed after the approval"], "notes": [],
-                          "lock": {"until": "2026-12-05T00:00:00Z", "mode": "unlocked"}}}
+                          "lock": {"until": "2026-12-05T00:00:00Z", "mode": "unlocked", "locked": 8,
+                                   "method": "retention"}}}
     text = lineage.render(info)
     assert "metrics.auc: 0.81 -> 0.92" in text and "audit log: NO ENTRY" in text
-    assert "integrity refused: 1 problem(s)" in text and "files locked until 2026-12-05T00:00:00Z" in text
+    assert "integrity refused: 1 problem(s)" in text and "8 approved files locked until 2026-12-05T00:00:00Z" in text
 
 
 # -- scoring with an unapproved default (policies.integrity.inference) ---------------------------------------------
@@ -430,3 +431,12 @@ def test_the_reference_example_registers_its_serving_image_by_digest():
 
     components = Path(__file__).resolve().parents[1] / "examples" / "churn" / "components"
     assert judgement.serving_image_by_tag(components) == []
+
+
+def test_lineage_says_a_hold_has_no_end_date():
+    from pipewright.models import lineage
+
+    lines = []
+    lineage._render_integrity({"integrity": {"result": "verified", "lock": {"locked": 8, "method": "hold",
+                                                                            "mode": "unlocked"}}}, lines)
+    assert lines[-1].strip() == "8 approved files on a temporary hold (no end date)"

@@ -312,8 +312,10 @@ def _render_integrity(info: dict, lines: list[str]) -> None:
         lines.append(f"           note: {n}")
     if i.get("lock"):
         lk = i["lock"]
-        lines.append(f"           files locked until {lk.get('until')} ({lk.get('mode')})"
-                     + (f"; not all: {lk['error']}" if lk.get("error") else ""))
+        how = ("on a temporary hold (no end date)" if lk.get("method") == "hold" else
+               f"locked until {lk.get('until')} ({lk.get('mode')} retention)" if lk.get("until") else "not locked")
+        lines.append(f"           {lk.get('locked', 0)} approved files {how}"
+                     + (f"; {lk['error']}" if lk.get("error") else ""))
 
 
 def _render_decisions(info: dict, lines: list[str]) -> None:
