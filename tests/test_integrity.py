@@ -354,7 +354,8 @@ def test_lineage_renders_the_integrity_check_and_the_audit():
                            "evaluation_diff": ["metrics.auc: 0.81 -> 0.92"],
                            "audit": {"state": "no entry", "note": "no Admin Activity entry for this approval"}}],
             "integrity": {"result": "refused", "problems": 1,
-                          "problems_found": ["model.pt: changed after the approval"], "notes": [], "lock": {"until": "2026-12-05T00:00:00Z", "mode": "unlocked"}}}
+                          "problems_found": ["model.pt: changed after the approval"], "notes": [],
+                          "lock": {"until": "2026-12-05T00:00:00Z", "mode": "unlocked"}}}
     text = lineage.render(info)
     assert "metrics.auc: 0.81 -> 0.92" in text and "audit log: NO ENTRY" in text
     assert "integrity refused: 1 problem(s)" in text and "files locked until 2026-12-05T00:00:00Z" in text
