@@ -100,7 +100,9 @@ def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, Templ
         labels=dict(uc.labels),
         pipelines=pipelines,
         metadata={"owner": uc.owner, "objective": uc.objective, "description": uc.description,
-                  "contacts": list(uc.contacts), "model": uc.model["name"]},
+                  "contacts": list(uc.contacts), "model": uc.model["name"],
+                  # Phase 6 (FR-96): approvals are judged by the release's rules, not a working copy's
+                  "approvals": dict(uc.approvals or {})},
         ray=({"image": ray_image, "ray_version": uc.ray["ray_version"], "steps": uc.ray["steps"],
               # the mode the release was built for (a standing release names its tenant's cluster)
               **({"mode": "standing", "standing": uc.ray.get("standing")} if uc.ray.get("mode") == "standing" else {})}

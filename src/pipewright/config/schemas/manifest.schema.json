@@ -358,6 +358,50 @@
               "description": "approver groups that must approve a synthetic release before it leaves (Pipewright Enterprise)"
             }
           }
+        },
+        "integrity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Phase 6: what runs is what was approved. Deploy and promote compare the version with its approval (the evaluation record, the model files and the serving image, or a BigQuery ML model), and approvals are judged by the released rules.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "refuse",
+                "warn"
+              ],
+              "default": "refuse",
+              "description": "refuse (the default): a version that is not the one approved is not deployed or promoted; warn: said, and it goes on."
+            },
+            "lock": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Lock the approved files with Cloud Storage object retention (the artifacts bucket needs object retention enabled).",
+              "properties": {
+                "days": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "mode": {
+                  "enum": [
+                    "unlocked",
+                    "locked"
+                  ],
+                  "default": "unlocked",
+                  "description": "locked: nobody can shorten or remove it, not even an owner."
+                }
+              }
+            },
+            "inference": {
+              "enum": [
+                "off",
+                "warn",
+                "refuse"
+              ],
+              "default": "off",
+              "description": "A scoring run whose default version has no approval: off (as before), warn (the launcher logs it) or refuse (the run is not submitted)."
+            }
+          }
         }
       }
     },

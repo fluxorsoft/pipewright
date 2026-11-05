@@ -249,6 +249,30 @@ def _evaluated(gcp: Gcp, artifact_uri: str | None) -> dict:
     return {"evaluation": found} if found else {}
 
 
+def _judged_copy(gcp: Gcp, dst_env: Environment, model: dict, rules, log=print) -> dict:
+    """Phase 6: what a promotion's approval approved in the destination (its copied files and the serving image,
+    by fingerprint, and the rules), and the lock on those files. A fingerprint that cannot be taken is said and
+    left out: the files were checked byte for byte while copying."""
+    from pipewright.models import integrity
+
+    out = {"rules": rules.record()} if rules else {}
+    try:
+        files = integrity.model_files(gcp, model.get("artifact_uri"))
+    except Exception as e:  # noqa: BLE001 - the copy was checked byte for byte; the record is extra
+        log(f"integrity: the promoted files were not fingerprinted ({e})")
+        return out
+    if files:
+        out["files"] = files
+        locked = integrity.lock(gcp, dst_env, files, log)
+        if locked:
+            out["lock"] = locked
+    if model.get("serving_image"):
+        image = integrity.serving_image(gcp, model["serving_image"])
+        if image:
+            out["serving_image"] = image
+    return out
+
+
 def copy_model_files(gcp: Gcp, source_uri: str, dest_uri: str, log=print) -> list[dict]:
     """Copies every file under the model's artifact URI (rewrite API: the destination bucket's key applies) and
     checks each copy's CRC32C, which does not depend on the key. Returns [{file, crc32c, size}]."""
@@ -359,7 +383,8 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     dst_version = str(done.get("modelVersionId") or "1")
     log(f"model: {name} v{version} ({src_env.name}) -> v{dst_version} ({dst_env.name}), a candidate")
     return {"name": name, "source_version": str(version), "source_artifact_uri": chosen["artifactUri"],
-            "artifact_uri": dest_uri, "version": dst_version, "files": files}
+            "artifact_uri": dest_uri, "version": dst_version, "files": files,
+            "serving_image": (spec or {}).get("imageUri")}
 
 
 def _promote_loop_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
@@ -520,6 +545,16 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     if first_version:
         policy.append(f"first version in {dst_env.name}: approved by {who} with the promotion"
                       if manual else f"first version in {dst_env.name}: the default (promote_model auto)")
+    released_rules = None
+    if first_version and manual:
+        # Phase 6 (FR-96): the approvers of the release being promoted, not the working copy's.
+        from pipewright.models import integrity
+
+        released_rules = integrity.released_rules(uc_dst, src_env, gcp, rid)
+        users = [a.split(":", 1)[1] for a in released_rules.approvals.get("approvers", []) if a.startswith("user:")]
+        if users and who not in users:
+            raise ConfigError(f"{who} is not an approver of release {rid} for {uc_dst.name} (approvers: "
+                              f"{', '.join(released_rules.approvals['approvers'])}); nothing was promoted")
 
     # The model version is checked now too (the default, trained by this release), before anything is copied.
     if mode == "model":
@@ -584,8 +619,9 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
         events.emit(events.event("model.approved", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None,
                                  model=model["name"], version=model["version"], previous=None, by=who,
                                  via="promotion", source_environment=src_env.name,
-                                 **_evaluated(gcp, model.get("artifact_uri"))), dst_env.observability.get(
-                                     "events_topic"), gcp, stream=_quiet(), region=dst_env.region)
+                                 **_evaluated(gcp, model.get("artifact_uri")),
+                                 **_judged_copy(gcp, dst_env, model, released_rules, log)),
+                    dst_env.observability.get("events_topic"), gcp, stream=_quiet(), region=dst_env.region)
     events.emit(events.event("release.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None, by=who,
                              previous=pointer.release_id if pointer else None, source_environment=src_env.name,
                              source_contract_sha256=source_sha, component_image=dst_image,
