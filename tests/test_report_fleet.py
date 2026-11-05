@@ -54,3 +54,17 @@ def test_the_cli_command_is_there():
 
     args = build_parser().parse_args(["report", "fleet", "--out", "f.html", "--mask"])
     assert args.report_command == "fleet" and args.mask and args.out == "f.html"
+
+
+def test_pipeline_hours_add_up_each_use_case_s_runs_only():
+    from types import SimpleNamespace
+
+    jobs = [{"displayName": "churn-r1-customers", "startTime": "2026-11-05T19:47:08Z",
+             "endTime": "2026-11-05T20:05:08Z"},
+            {"displayName": "churnbq-r2", "startTime": "2026-11-05T19:47:19Z", "endTime": "2026-11-05T19:57:19Z"},
+            {"displayName": "churn-r3-customers", "startTime": "2026-11-05T20:17:28.123456789Z"}]
+    gcp = SimpleNamespace(get=lambda url, **k: SimpleNamespace(ok=True, body={"pipelineJobs": jobs}))
+    env = SimpleNamespace(region="r", project="p")
+    churn = fleet._hours(gcp, env, "churn")
+    assert churn["runs"] == 2 and abs(churn["hours"] - 0.3) < 1e-9          # 18 minutes; a running job adds a run
+    assert fleet._hours(gcp, env, "churnbq") == {"hours": 10 / 60, "runs": 1}

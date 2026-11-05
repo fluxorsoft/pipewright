@@ -47,7 +47,8 @@ def _api_time(value: str) -> datetime:
 
 def _hours(gcp, env, usecase: str) -> dict:
     api = f"https://{env.region}-aiplatform.googleapis.com/v1/projects/{env.project}/locations/{env.region}"
-    r = gcp.get(f"{api}/pipelineJobs", filter=f'display_name:"{usecase}-r"', pageSize=200)
+    # No server-side filter: Agent Platform's job filter does not match a display-name prefix (found live).
+    r = gcp.get(f"{api}/pipelineJobs", pageSize=200, orderBy="create_time desc")
     hours, runs = 0.0, 0
     for j in (r.body or {}).get("pipelineJobs", []) if r.ok else []:
         if not j.get("displayName", "").startswith(f"{usecase}-r"):
