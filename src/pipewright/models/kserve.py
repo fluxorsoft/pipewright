@@ -305,8 +305,8 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     if pending:
         raise ConfigError(f"approve it first: pipewright model approve --env {env.name} --usecase {uc.name} "
                           f"--version {vid} --approve",
-                          source=f"v{vid} of {uc.model['name']} is not served: it became the default as the model's "
-                                 "first version, and nobody has approved it")
+                          source=f"v{vid} of {uc.model['name']} is not served: it is the default and labelled "
+                                 "approval=pending: nobody has approved it (approvals.promote_model manual)")
     integrity.enforce(check, env, f"v{vid} of {uc.model['name']} is not served", log)
     if problems:
         raise ConfigError(problems + ["make a passing version the default (`pipewright model approve`), then deploy"],

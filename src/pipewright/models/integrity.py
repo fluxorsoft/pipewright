@@ -489,7 +489,7 @@ def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
         return mode, f"the default version of {name} cannot be read (HTTP {default.status})"
     version = str((default.body or {}).get("versionId"))
     if ((default.body or {}).get("labels") or {}).get("approval") == "pending":
-        return mode, f"v{version} of {name} is the default as the first version, and nobody has approved it"
+        return mode, f"v{version} of {name} is the default and labelled approval=pending: nobody has approved it"
     env = SimpleNamespace(name=contract.environment, project=contract.project,
                           observability=manifest.get("observability") or {}, security=manifest.get("security") or {})
     try:
