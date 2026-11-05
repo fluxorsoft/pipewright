@@ -502,8 +502,16 @@ def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
 
 # -- the retention lock (FR-97) -----------------------------------------------------------------------------------
 
+def _bucket_has_retention(gcp, bucket: str) -> bool:
+    r = gcp.session.get(f"{GCS}/b/{bucket}", params={"fields": "objectRetention"}, timeout=60)
+    return r.status_code == 200 and ((r.json() or {}).get("objectRetention") or {}).get("mode") == "Enabled"
+
+
 def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
-    """Locks the approved files with Cloud Storage object retention for policies.integrity.lock.days. Returns what
+    """Locks the approved files for policies.integrity.lock.days. With object retention on the bucket (a bucket
+    created with it: Cloud Storage cannot add it later), each file gets retention until then, `unlocked` or
+    `locked`. Without it, an `unlocked` lock is a temporary hold on each file (any bucket; released by someone who
+    may update objects, with no end date); a `locked` lock cannot be had and is recorded as not done. Returns what
     was done; never fails an approval (the files' fingerprints are recorded either way)."""
     import datetime
 
@@ -512,22 +520,35 @@ def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
         return None
     until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=cfg["days"])).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
-    mode = "Locked" if cfg["mode"] == "locked" else "Unlocked"
     bucket, _, prefix = files["folder"].removeprefix("gs://").partition("/")
     prefix = prefix.rstrip("/") + "/"
+    retention = _bucket_has_retention(gcp, bucket)
+    if not retention and cfg["mode"] == "locked":
+        reason = ("a locked lock needs object retention on the bucket, which Cloud Storage only sets when the "
+                  "bucket is created")
+        log(f"integrity: the approved files were not locked: {reason}; their fingerprints are recorded")
+        return {"locked": 0, "until": until, "mode": "locked", "method": "none", "error": reason}
+    if retention:
+        body, method = {"retention": {"mode": "Locked" if cfg["mode"] == "locked" else "Unlocked",
+                                      "retainUntilTime": until}}, "retention"
+    else:
+        body, method = {"temporaryHold": True}, "hold"
     locked, refused = 0, None
     for f in files["files"]:
         name = prefix + f["file"]
         r = gcp.session.patch(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}",
-                              params={"generation": str(f["generation"])},
-                              json={"retention": {"mode": mode, "retainUntilTime": until}}, timeout=60)
+                              params={"generation": str(f["generation"])}, json=body, timeout=60)
         if r.status_code != 200:
             refused = f"HTTP {r.status_code}: {(r.text or '')[:160]}"
             break
         locked += 1
+    out = {"locked": locked, "mode": cfg["mode"], "method": method,
+           **({"until": until} if method == "retention" else {})}
     if refused:
-        log(f"integrity: the approved files could not be locked ({refused}); their fingerprints are recorded. "
-            "Object retention must be enabled on the bucket (the starter and blueprint do it for new environments)")
-        return {"locked": locked, "until": until, "mode": mode.lower(), "error": refused[:160]}
-    log(f"integrity: {locked} approved files locked until {until} ({mode.lower()} retention)")
-    return {"locked": locked, "until": until, "mode": mode.lower()}
+        log(f"integrity: the approved files could not all be locked ({refused}); their fingerprints are recorded")
+        return {**out, "error": refused[:160]}
+    log(f"integrity: {locked} approved files locked"
+        + (f" until {until} ({cfg['mode']} retention)" if method == "retention" else
+           " with a temporary hold (the bucket has no object retention: a hold has no end date, release it when the "
+           "version is retired)"))
+    return out

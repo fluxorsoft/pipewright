@@ -51,11 +51,15 @@ policies:
 
 - **mode:** `refuse` is the default. A check that fails means what would run is not what was approved. Set `warn` for an
   environment that needs to keep going while you find out why, never as a standing setting in production.
-- **lock:** after an approval, the approved files get Cloud Storage object retention until `days` from now. `unlocked`
-  can be shortened or removed by someone with `storage.objects.overrideUnlockedRetention`; `locked` cannot be shortened
-  or removed by anyone, including project owners, and keeps the bucket from being deleted until it ends. The artifacts
-  bucket needs object retention enabled: the starter and the Enterprise blueprint enable it when a lock is configured.
-  On an existing environment, read the Terraform plan first.
+- **lock:** after an approval, the approved files cannot be overwritten or deleted. On a bucket created with object
+  retention (the starter and the Enterprise blueprint create the artifacts bucket with it when a lock is configured
+  from the start), each file gets retention until `days` from now: `unlocked` can be shortened or removed by someone
+  with `storage.objects.overrideUnlockedRetention`; `locked` cannot be shortened or removed by anyone, including
+  project owners. Cloud Storage cannot add object retention to an existing bucket, so on an environment built before
+  the lock was configured, an `unlocked` lock is a **temporary hold** on each file instead (no end date: release it
+  with `gcloud storage objects update --no-temporary-hold` when the version is retired), and a `locked` lock is not
+  possible and is recorded as not done. Terraform ignores the retention setting after the bucket exists, so turning the
+  lock on never replaces the bucket.
 - **inference:** with `warn` or `refuse`, the launcher checks before each scoring run that the default version was
   approved, and records `run.integrity` when it was not. The launcher then reads the event log.
 

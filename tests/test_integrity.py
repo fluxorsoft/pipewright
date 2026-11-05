@@ -47,6 +47,9 @@ class Store:
 
         class Session:
             def get(self, url, params=None, stream=False, timeout=None):
+                if "/o/" not in url:                                   # the bucket: object retention or not
+                    mode = {"mode": "Enabled"} if getattr(store, "retention", False) else {}
+                    return SimpleNamespace(status_code=200, json=lambda: {"objectRetention": mode} if mode else {})
                 name = url.split("/o/", 1)[1].replace("%2F", "/")
                 gen, data = store.files[name]
                 assert params["generation"] == str(gen)
@@ -203,18 +206,27 @@ def test_enforce_refuses_by_default_and_warns_when_the_policy_says_so():
 
 # -- the retention lock (FR-97) ------------------------------------------------------------------------------------
 
-def test_approved_files_are_locked_for_the_policy_s_days():
+def test_approved_files_are_locked_with_retention_or_a_hold():
     s = store()
     files = integrity.model_files(s, FOLDER)
     assert integrity.lock(s, env(), files, log=lambda m: None) is None             # no lock policy: nothing
     said = []
+    s.retention = True                                     # a bucket created with object retention
     done = integrity.lock(s, env(integrity={"lock": {"days": 30}}), files, log=said.append)
-    assert done["locked"] == 3 and done["mode"] == "unlocked" and len(s.patched) == 3
+    assert done["locked"] == 3 and done["method"] == "retention" and done["until"]
     url, params, body = s.patched[0]
     assert params == {"generation": "2"} and body["retention"]["mode"] == "Unlocked"
-    s.refuse_patch = True
+    s.retention, s.patched = False, []                     # an existing bucket: Cloud Storage cannot add retention
+    done = integrity.lock(s, env(integrity={"lock": {"days": 30}}), files, log=said.append)
+    assert done["method"] == "hold" and s.patched[0][2] == {"temporaryHold": True} and "until" not in done
+    assert "temporary hold" in said[-1]
+    s.patched = []
     done = integrity.lock(s, env(integrity={"lock": {"days": 30, "mode": "locked"}}), files, log=said.append)
-    assert done["locked"] == 0 and "HTTP 412" in done["error"] and "could not be locked" in said[-1]
+    assert done["locked"] == 0 and done["method"] == "none" and s.patched == []
+    assert "only sets when the" in done["error"]
+    s.retention, s.refuse_patch = True, True
+    done = integrity.lock(s, env(integrity={"lock": {"days": 30}}), files, log=said.append)
+    assert done["locked"] == 0 and "HTTP 412" in done["error"]
 
 
 # -- deploy-model refuses before it touches the endpoint (FR-93) ---------------------------------------------------
