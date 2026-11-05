@@ -393,6 +393,19 @@ def cmd_model_list(args) -> int:
     return 0
 
 
+def cmd_features_register(args) -> int:
+    """Phase 6 (FR-75): the data team registers feature groups from a spec file."""
+    from pipewright.data import feature_groups
+    from pipewright.gcp import Gcp
+
+    env = load_environment(Path(args.root), args.env)
+    specs = feature_groups.load_spec(Path(args.file))
+    done = feature_groups.register(Gcp(), env, specs, args.names or None, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps(done, indent=2))
+    return 0
+
+
 def cmd_lineage(args) -> int:
     import contextlib
 
@@ -995,6 +1008,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--env", required=True)
     sp.add_argument("--port", type=int, default=8080)
     sp.set_defaults(func=cmd_pipelines_ui)
+
+    sp = sub.add_parser("features", help="feature groups: the data team registers feature tables (FR-75)")
+    fsub = sp.add_subparsers(dest="features_command", required=True)
+    sp = fsub.add_parser("register", help="create the feature groups and features a spec file lists; existing ones "
+                                          "are left as they are")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--env", required=True)
+    sp.add_argument("--file", required=True, help="YAML: per group, table, entity, description, features")
+    sp.add_argument("names", nargs="*", help="only these groups (default: every group in the file)")
+    sp.add_argument("--dry-run", action="store_true", help="say what would be created; create nothing")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_features_register)
 
     sp = sub.add_parser("lineage", help="a model version back to its run, release, rows and sources (FR-55)")
     one(sp)
