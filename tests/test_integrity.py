@@ -412,7 +412,7 @@ def test_scoring_with_an_unapproved_default_is_flagged(monkeypatch):
 def test_validate_warns_about_a_serving_image_registered_by_tag(tmp_path):
     from pipewright.config import judgement
 
-    tagged = 'SERVING_IMAGE = "us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest"'
+    tagged = 'SERVING_IMAGE = "europe-docker.pkg.dev/acme-ml/serving/churn-server:1.2"'
     (tmp_path / "register.py").write_text(tagged + "\nm.upload(serving_container_image_uri=SERVING_IMAGE)\n",
                                           encoding="utf-8")
     (tmp_path / "train.py").write_text('IMAGE = "europe-docker.pkg.dev/p/r/trainer:1.0"\n', encoding="utf-8")
@@ -440,3 +440,13 @@ def test_lineage_says_a_hold_has_no_end_date():
     lineage._render_integrity({"integrity": {"result": "verified", "lock": {"locked": 8, "method": "hold",
                                                                             "mode": "unlocked"}}}, lines)
     assert lines[-1].strip() == "8 approved files on a temporary hold (no end date)"
+
+
+def test_agent_platform_prebuilt_images_are_used_by_tag_without_a_warning(tmp_path):
+    from pipewright.config import judgement
+
+    # Found live (phase 6): Agent Platform refuses to deploy a prebuilt prediction image given by digest.
+    lines = ['IMAGE = "us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest"',
+             "m.upload(serving_container_image_uri=IMAGE)"]
+    (tmp_path / "register.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert judgement.serving_image_by_tag(tmp_path) == []

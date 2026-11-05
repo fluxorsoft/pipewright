@@ -36,7 +36,8 @@ refused by `deploy-model` and `promote`: approve it with `pipewright model appro
   on; each approval against Cloud Audit Logs' Admin Activity entry, flagging one with no entry or another principal.
 - **A scoring check** (`policies.integrity.inference`: off, warn or refuse): the launcher checks that a scoring run's
   default version was approved, and records `run.integrity`.
-- **`validate` warns about a serving image registered by tag**; the churn example registers its image by digest.
+- **`validate` warns about a serving image registered by tag**, except Agent Platform's prebuilt images, which it
+  refuses to deploy by digest (found live): for those, the digest recorded at approval is checked at deploy.
 - **`pipewright features register`** (FR-75): the data team registers feature groups from a spec file.
 - **`pipewright report fleet`** (FR-86): every use case in every environment on one read-only HTML page, with each
   champion's integrity.

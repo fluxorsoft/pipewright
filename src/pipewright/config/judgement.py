@@ -47,6 +47,8 @@ def serving_image_by_tag(components_dir) -> list[str]:
         if "serving_container_image_uri" not in text and "imageUri" not in text:
             continue
         for image in sorted(set(_IMAGE_BY_TAG.findall(text))):
+            if "/vertex-ai/prediction/" in image:
+                continue             # Agent Platform's prebuilt images: used by tag only (it refuses a digest)
             out.append(f"{path.name} registers the serving image by tag ({image}): register it by digest "
                        "(image@sha256:...), so an approved model keeps the image it was approved with; a moved tag "
                        "is refused at deploy (judgement check)")

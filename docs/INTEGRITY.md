@@ -33,7 +33,9 @@ phase 6 records its gates but not its approvers; its approvers then come from th
 
 A file is compared by its generation first (Cloud Storage gives every write a new one), then, if it was rewritten, by
 its SHA-256, so a rewrite with identical bytes still matches. A serving image registered by tag is resolved again: a tag
-that now points elsewhere is a change. Register serving images by digest; `validate` warns about a tag.
+that now points elsewhere is a change. Register your own serving images by digest (`validate` warns about a tag);
+Agent Platform's prebuilt serving images can only be used by tag (it refuses one given by digest), so for those the
+approval's recorded digest is what keeps the image the approved one.
 
 Messages name records, files, digests, metrics and gates: never a row, a feature value or a slice value. What changed
 in an evaluation record is shown as its decision and top-level metrics; anything else that changed (slices, for
