@@ -358,7 +358,9 @@ def check_source(gcp, src_env: Environment, dst_env: Environment, usecase: str, 
     return check
 
 
-def enforce(check: Check, env: Environment, what: str, log=print) -> None:
+def enforce(check: Check, env: Environment, what: str, log=print,
+            reason: str = "what is on file is not what was approved",
+            remedy: str = "re-approve the version after review (`pipewright model approve`)") -> None:
     """Refuse (or, under policies.integrity.mode warn, say) what a check found."""
     for note in check.notes:
         log(f"integrity: {note}")
@@ -368,9 +370,8 @@ def enforce(check: Check, env: Environment, what: str, log=print) -> None:
         for p in check.problems:
             log(f"integrity WARNING (policies.integrity.mode warn): {p}")
         return
-    raise ConfigError(check.problems + ["re-approve the version after review (`pipewright model approve`), or, for "
-                                        "this environment only, set policies.integrity.mode: warn"],
-                      source=f"{what}: what is on file is not what was approved")
+    raise ConfigError(check.problems + [f"{remedy}, or, for this environment only, set policies.integrity.mode: "
+                                        "warn"], source=f"{what}: {reason}")
 
 
 # -- what changed, and who (FR-95), and who approved (FR-97) ------------------------------------------------------

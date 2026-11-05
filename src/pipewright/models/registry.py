@@ -185,11 +185,11 @@ def _check_rules(uc: ResolvedUseCase, env: Environment, rules, identity: str | N
     if rules.note:
         log(f"integrity: {rules.note}")
     if rules.differs:
-        check = integrity.Check(problems=[
-            f"the working copy's {key} differs from release {rules.release}'s, which trained v{version}: approve with "
-            "the rules it was built with (check out the release's commit), or release the change and retrain"
-            for key in rules.differs])
-        integrity.enforce(check, env, f"v{version} of {uc.model['name']}", log)
+        check = integrity.Check(problems=[f"the working copy's {key} differs from release {rules.release}'s, which "
+                                          f"trained v{version}" for key in rules.differs])
+        integrity.enforce(check, env, f"v{version} of {uc.model['name']} cannot be approved", log,
+                          reason="it is judged by the rules of the release that trained it",
+                          remedy="approve from that release's commit, or release the change and retrain")
     changes = {"approvals": rules.approvals, "ml": {**uc.ml, "evaluation": rules.evaluation}}
     if dataclasses.is_dataclass(uc):
         released = dataclasses.replace(uc, **changes)
