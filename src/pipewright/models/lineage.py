@@ -68,6 +68,16 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
         out["note"] = ("no lineage.json: trained before Pipewright 1.1, or by a register step that does not write "
                        "one (see the example's register.py)")
         out.update(decisions(gcp, env, uc.name, str(version), labels.get("release")))
+        # Phase 6: the checks still run. A version that lost its labels (a BigQuery ML model changed in BigQuery
+        # resyncs its registry entry without them, seen live) is found by the record its approval names.
+        approved = next((d["evaluation"]["record"] for d in reversed(out.get("decisions") or [])
+                         if (d.get("evaluation") or {}).get("record")), None)
+        folder = folder or (approved.rsplit("/", 1)[0] + "/" if approved else None)
+        if not labels and approved:
+            out["note"] += ("; the version has no labels now (a BigQuery ML model changed in BigQuery loses them): "
+                            "found by its approval's record")
+        check_evaluations(gcp, out, folder)
+        check_integrity(gcp, env, uc, out, resource, model)
         return out
     out["lineage"] = record
     release_id = record.get("release")
