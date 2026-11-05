@@ -80,3 +80,20 @@ def test_a_shown_default_is_not_also_set():
         for part in key.split("."):
             node = node.get(part) if isinstance(node, dict) else None
         assert node is None, f"{key} is set in the churn example and also shown as a default"
+
+
+# ---------------------------------------------- FR-99 (phase 6): the reference example shows the recommended feed --
+
+def test_the_churn_readme_shows_how_to_read_its_features_from_feature_tables():
+    import re
+
+    readme = (nu.examples_dir() / "churn" / "README.md").read_text(encoding="utf-8")
+    head = readme.split("## The recommended way to feed it: feature tables", 1)
+    assert len(head) == 2 and "(../features/)" in head[1], "the churn README must point to feature tables up front"
+    block = yaml.safe_load(re.search(r"```yaml\n(.*?)```", head[1], re.S).group(1))["data"]
+    data = yaml.safe_load((nu.examples_dir() / "churn" / "config" / "data.yaml").read_text(encoding="utf-8"))["data"]
+    contract = {c["name"] for c in data["contract"]["columns"]}
+    entity = set(block["features_from"]["entity"]["columns"]) | {block["features_from"]["entity"]["time_column"]}
+    from_tables = {f for s in block["features_from"]["sources"] for f in s["features"]}
+    assert from_tables | entity | {data["label"]["column"]} == contract      # every churn column has a source
+    assert block["split"] == {"strategy": "time", "time_column": "snapshot_date"}
