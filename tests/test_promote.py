@@ -386,3 +386,17 @@ def test_a_promotion_approval_records_the_evaluation_it_copied(setup, monkeypatc
     setup.run(approve=True)
     approved = [e for e in emitted if e["event_type"] == "model.approved"]
     assert approved and "evaluation" not in approved[0]["data"]
+
+
+# Phase 6 (found live): a source version that is not the one approved is refused before anything is copied, the
+# component image included.
+def test_a_source_that_is_not_the_one_approved_is_refused_before_any_copy(setup, monkeypatch):
+    from pipewright.models import integrity
+
+    def refuse(*a, **k):
+        raise ConfigError("v3 (dev) is not promoted: what is on file is not what was approved")
+
+    monkeypatch.setattr(integrity, "check_source", refuse)
+    with pytest.raises(ConfigError, match="not what was approved"):
+        setup.run()
+    assert setup.calls == []                        # no image copied, no model copied, nothing written

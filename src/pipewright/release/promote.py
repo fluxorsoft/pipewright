@@ -556,9 +556,13 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
             raise ConfigError(f"{who} is not an approver of release {rid} for {uc_dst.name} (approvers: "
                               f"{', '.join(released_rules.approvals['approvers'])}); nothing was promoted")
 
-    # The model version is checked now too (the default, trained by this release), before anything is copied.
+    # The model version is checked now too (the default, trained by this release), before anything is copied:
+    # phase 6 (FR-93) includes that it is the version approved in the source (found live: the image was copied first).
     if mode == "model":
-        source_version(gcp, src_env, uc_dst.model["name"], rid, model_version, loop_case)
+        checked_version, chosen = source_version(gcp, src_env, uc_dst.model["name"], rid, model_version, loop_case)
+        from pipewright.models import integrity
+
+        integrity.check_source(gcp, src_env, dst_env, uc_dst.name, checked_version, chosen, loop_case, log)
 
     # 5. The destination's tables, as a release creates them (configuration, additive only).
     if not skip_tables:
