@@ -406,6 +406,18 @@ def cmd_features_register(args) -> int:
     return 0
 
 
+def cmd_report_fleet(args) -> int:
+    """Phase 6 (FR-86): every use case in every environment on one read-only HTML page."""
+    from pipewright.gcp import Gcp
+    from pipewright.report import fleet
+
+    _quiet_agent_platform_sdk()
+    data = fleet.collect(Path(args.root), Gcp())
+    Path(args.out).write_text(fleet.render(data, args.mask), encoding="utf-8")
+    print(f"wrote {args.out}: {len(data['usecases'])} use cases in {len(data['envs'])} environments")
+    return 0
+
+
 def cmd_lineage(args) -> int:
     import contextlib
 
@@ -1020,6 +1032,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="say what would be created; create nothing")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_features_register)
+
+    sp = sub.add_parser("report", help="read-only reports from the records Pipewright keeps")
+    rsub = sp.add_subparsers(dest="report_command", required=True)
+    sp = rsub.add_parser("fleet", help="every use case in every environment on one HTML page (FR-86)")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--out", default="fleet.html")
+    sp.add_argument("--mask", action="store_true", help="replace email addresses with ...")
+    sp.set_defaults(func=cmd_report_fleet)
 
     sp = sub.add_parser("lineage", help="a model version back to its run, release, rows and sources (FR-55)")
     one(sp)
