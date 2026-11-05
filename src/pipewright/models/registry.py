@@ -201,6 +201,20 @@ def _check_rules(uc: ResolvedUseCase, env: Environment, rules, identity: str | N
     return released
 
 
+def _clear_pending(env: Environment, creds, resource: str, version: str) -> None:
+    """The register step labels a version approval=pending under a manual policy; once approved it is `approved`
+    (found live in phase 6: a later version kept `pending`, and deploy-model refused it as unapproved)."""
+    from pipewright.gcp import Gcp
+
+    gcp = Gcp(creds)
+    url = f"https://{env.region}-aiplatform.googleapis.com/v1/{resource}@{version}"
+    labels = (gcp.get(url).body or {}).get("labels") or {}
+    if labels.get(APPROVAL_LABEL) == "pending":
+        resp = gcp.patch(url, {"labels": {**labels, APPROVAL_LABEL: "approved"}}, updateMask="labels")
+        if not resp.ok:
+            raise ConfigError(f"recording the approval of v{version}: HTTP {resp.status}")
+
+
 def _emit_approval(uc, env, creds, version: str, identity, record: dict, **extra) -> None:
     import io
 
@@ -264,6 +278,7 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
     previous = next((k for k, v in known.items() if "default" in (v.version_aliases or [])), None)
     # Moving the `default` alias is what makes a version the default.
     registry.add_version_aliases(new_aliases=["default"], version=version)
+    _clear_pending(env, creds, resource, version)
     locked = integrity.lock(Gcp(creds), env, record.get("files"), log)
     _emit_approval(uc, env, creds, version, identity, {**record, **({"lock": locked} if locked else {})},
                    previous=previous)

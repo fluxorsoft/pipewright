@@ -147,9 +147,11 @@ def _approve_with(monkeypatch, known, record, emitted, aliased):
     monkeypatch.setattr(registry, "_judged", lambda *a, **k: (rules, record, "gs://b/m4"))
     monkeypatch.setattr(gates, "verify", lambda *a, **k: [])
     monkeypatch.setattr(integrity, "lock", lambda *a, **k: {"locked": 3, "until": "2026-12-05T00:00:00Z"})
+    patched = []
     monkeypatch.setattr("pipewright.gcp.Gcp", lambda creds=None: SimpleNamespace(
         get=lambda url, **k: SimpleNamespace(ok=True, body={"labels": {"approval": "pending"}}),
-        patch=lambda url, body, **k: SimpleNamespace(ok=True, status=200)))
+        patch=lambda url, body, **k: patched.append((url, body)) or SimpleNamespace(ok=True, status=200)))
+    aliased.append(patched)                  # the test reads it back: aliased[0] is the label patches
     monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
     uc = SimpleNamespace(name="churn", tenant="retail", model={"name": "churn-classifier"}, ml={"evaluation": {}},
                          approvals={}, environment="prod")
@@ -164,7 +166,10 @@ def test_an_approval_records_the_evaluation_it_was_judged_on(monkeypatch):
     record = {"evaluation": digest, "rules": {"release": "rel1", "source": "release"}}
     uc, env = _approve_with(monkeypatch, [_Version("3", True), _Version("4", False)], record, emitted, aliased)
     registry.approve(uc, env, None, "4", "risk@acme", True, log=lambda *a: None)
+    patched = aliased.pop(0)
     assert aliased == [(["default"], "4")]
+    # a later version approved is no longer labelled pending (found live: deploy-model refused it)
+    assert patched and patched[0][0].endswith("@4") and patched[0][1]["labels"]["approval"] == "approved"
     data = emitted[0]["data"]
     assert data["version"] == "4" and data["previous"] == "3" and data["by"] == "risk@acme"
     assert data["evaluation"] == digest and data["rules"]["release"] == "rel1"
