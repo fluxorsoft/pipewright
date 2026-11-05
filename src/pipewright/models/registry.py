@@ -167,6 +167,11 @@ def _judged(uc: ResolvedUseCase, env: Environment, creds, resource: str, version
         record["files"] = files
     if image:
         record["serving_image"] = image
+    if labels.get("pipewright-engine") == "bqml" and labels.get("pipewright-bq-model"):
+        dataset = (uc.resources or {}).get("bigquery_dataset")
+        model = integrity.bq_model(gcp, f"{env.project}.{dataset}.{labels['pipewright-bq-model']}")
+        if model:
+            record["bq_model"] = model
     return rules, record, folder
 
 

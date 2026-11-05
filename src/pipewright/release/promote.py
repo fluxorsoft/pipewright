@@ -329,6 +329,9 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     by the loop's production approval; it need not be the source's default."""
     name = uc_dst.model["name"]
     version, chosen = source_version(gcp, src_env, name, release_id, version, loop_case)
+    from pipewright.models import integrity
+
+    integrity.check_source(gcp, src_env, dst_env, uc_dst.name, version, chosen, loop_case, log)    # phase 6, FR-93
     dest_uri = (f"{publish.pipeline_root(dst_env, uc_dst)}/promoted/{src_env.name}/{release_id}/"
                 f"v{version}/model")
     files = copy_model_files(gcp, chosen["artifactUri"], dest_uri, log)

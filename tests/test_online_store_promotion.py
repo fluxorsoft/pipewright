@@ -55,6 +55,7 @@ def test_promotion_gives_the_model_the_destinations_store(monkeypatch):
         "imageUri": "serving:1", "env": [{"name": online.ENV_VAR, "value": online.env_value(lookup(TEST_STORE))}]}}
     monkeypatch.setattr(promote, "source_version", lambda *a, **k: ("10", source))
     monkeypatch.setattr(promote, "copy_model_files", lambda gcp, s, d, log=print: [])
+    monkeypatch.setattr("pipewright.models.integrity.check_source", lambda *a, **k: None)   # tested in test_integrity
     monkeypatch.setattr(promote, "_find_model", lambda gcp, env, name: None)
     monkeypatch.setattr(promote.publish, "pipeline_root", lambda env, uc: "gs://prod/root")
     monkeypatch.setattr(promote, "_wait", lambda gcp, env, body, what: {"modelVersionId": "2"})

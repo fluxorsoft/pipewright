@@ -30,7 +30,7 @@ _MANIFEST_TYPES = ", ".join([
 
 def policy(env: Environment) -> dict:
     """The environment's integrity policy, with its defaults: refuse, and no lock."""
-    p = dict((env.policies or {}).get("integrity") or {})
+    p = dict((getattr(env, "policies", None) or {}).get("integrity") or {})
     mode = p.get("mode", "refuse")
     if mode not in MODES:
         raise ConfigError(f"policies.integrity.mode must be one of {', '.join(MODES)}, not {mode!r}")
@@ -111,6 +111,43 @@ def compare_files(gcp, approved: dict, folder: str) -> list[str]:
         if _sha256(gcp, now[name]["bucket"], now[name]["name"], now[name]["generation"]) != was[name]["sha256"]:
             problems.append(f"{name}: changed after the approval (sha256 {was[name]['sha256'][:16]} approved)")
     return problems
+
+
+# -- a BigQuery ML model (FR-94): the model stays in BigQuery, so its etag and last change stand for files -----
+
+def bq_model(gcp, ref: str | None) -> dict | None:
+    """project.dataset.model -> {model, etag, modified}. None when there is no reference or it cannot be read."""
+    if not ref or ref.count(".") != 2:
+        return None
+    project, dataset, model = ref.split(".")
+    r = gcp.get(f"https://bigquery.googleapis.com/bigquery/v2/projects/{project}/datasets/{dataset}/models/{model}")
+    if not r.ok:
+        return None
+    body = r.body or {}
+    return {"model": ref, "etag": body.get("etag"), "modified": body.get("lastModifiedTime")}
+
+
+def compare_bq_model(gcp, approved: dict | None) -> list[str]:
+    if not approved or not approved.get("etag"):
+        return []
+    now = bq_model(gcp, approved.get("model"))
+    if now is None:
+        return [f"the BigQuery ML model {approved.get('model')} approved is missing, or cannot be read"]
+    if now["etag"] != approved["etag"]:
+        return [f"the BigQuery ML model {approved.get('model')} changed after the approval (replaced or retrained "
+                "in place)"]
+    return []
+
+
+def record_sha256(gcp, record: str | None) -> str | None:
+    """The SHA-256 of one object (the evaluation record an approval names), or None when it is not there."""
+    if not record or not record.startswith("gs://"):
+        return None
+    from pipewright.gcp import gcs_read
+
+    bucket, _, name = record.removeprefix("gs://").partition("/")
+    text, _ = gcs_read(gcp, bucket, name)
+    return None if text is None else hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # -- the serving image (FR-94) ------------------------------------------------------------------------------------
@@ -285,13 +322,14 @@ def verify(gcp, env: Environment, usecase: str, version: str, folder: str | None
     approval = check.approval = events[0]
     recorded = approval.get("evaluation") or {}
     if recorded.get("sha256"):
-        now = gates.record_digest(gcp, folder)
+        now = record_sha256(gcp, recorded.get("record")) if recorded.get("record") else (
+            (gates.record_digest(gcp, folder) or {}).get("sha256"))
         if now is None:
             check.problems.append(f"the evaluation record v{version} was approved on ({recorded.get('record')}) is "
                                   "missing")
-        elif now["sha256"] != recorded["sha256"]:
+        elif now != recorded["sha256"]:
             check.problems.append(f"the evaluation record changed after the approval: sha256 "
-                                  f"{recorded['sha256'][:16]} approved, {now['sha256'][:16]} on file")
+                                  f"{recorded['sha256'][:16]} approved, {now[:16]} on file")
     else:
         check.notes.append(f"the approval of v{version} ({approval.get('at')}) predates Pipewright 1.3.1 and "
                            "records no evaluation fingerprint")
@@ -301,6 +339,22 @@ def verify(gcp, env: Environment, usecase: str, version: str, folder: str | None
     elif folder:
         check.notes.append("the approval records no model files (approved before phase 6)")
     check.problems += compare_image(gcp, approval.get("serving_image"), image)
+    check.problems += compare_bq_model(gcp, approval.get("bq_model"))
+    return check
+
+
+def check_source(gcp, src_env: Environment, dst_env: Environment, usecase: str, version: str, chosen: dict,
+                 loop_case: str | None, log=print) -> Check | None:
+    """Before a promotion copies anything: the source version is the one approved in the source environment
+    (FR-93). Enforced with the destination's policy. A closed retrain loop's candidate is approved by the loop's
+    production approval instead, so only its files are compared with what the loop validated: not here."""
+    if loop_case:
+        log(f"integrity: v{version} is the candidate of retrain loop {loop_case}: approved by the loop's production "
+            "approval, not in the source")
+        return None
+    check = verify(gcp, src_env, usecase, version, chosen.get("artifactUri"),
+                   (chosen.get("containerSpec") or {}).get("imageUri"))
+    enforce(check, dst_env, f"v{version} ({src_env.name}) is not promoted", log)
     return check
 
 

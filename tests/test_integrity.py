@@ -152,22 +152,20 @@ def test_approval_is_judged_by_the_released_rules(monkeypatch):
 # -- verify and enforce (FR-93) ------------------------------------------------------------------------------------
 
 def test_verify_compares_what_is_on_file_with_the_approval(monkeypatch):
-    from pipewright.models import gates
-
     approved_files = integrity.model_files(store(), FOLDER)
     approval = {"at": "2026-11-05T10:00:00", "by": "risk@acme", "files": approved_files,
                 "evaluation": {"record": FOLDER + "/evaluation.json", "sha256": "ab" * 32}}
     monkeypatch.setattr(integrity, "approval_events", lambda gcp, env, uc, v: [approval])
-    monkeypatch.setattr(gates, "record_digest", lambda gcp, folder: {"sha256": "ab" * 32})
+    monkeypatch.setattr(integrity, "record_sha256", lambda gcp, record: "ab" * 32)
     ok = integrity.verify(store(), env(), "churn", "4", FOLDER, None)
     assert ok.problems == [] and ok.summary() == {"result": "verified", "problems": 0,
                                                   "approved_at": "2026-11-05T10:00:00", "approved_by": "risk@acme"}
-    monkeypatch.setattr(gates, "record_digest", lambda gcp, folder: {"sha256": "cd" * 32})
+    monkeypatch.setattr(integrity, "record_sha256", lambda gcp, record: "cd" * 32)
     bad = integrity.verify(store(**{"pipeline-root/churn/run1/model/model.pt": (9, b"x")}), env(), "churn", "4",
                            FOLDER, None)
     assert bad.problems[0].startswith("the evaluation record changed after the approval: sha256 abababababababab")
     assert bad.problems[1].startswith("model.pt: changed after the approval")
-    monkeypatch.setattr(gates, "record_digest", lambda gcp, folder: None)
+    monkeypatch.setattr(integrity, "record_sha256", lambda gcp, record: None)
     assert "is missing" in integrity.verify(store(), env(), "churn", "4", FOLDER, None).problems[0]
 
 
@@ -259,3 +257,35 @@ def test_the_deployed_event_records_the_integrity_result(monkeypatch):
     deploy._deployed(uc, SimpleNamespace(name="prod", region="r", observability={}), None, "4", 100, check)
     assert emitted[0]["data"]["integrity"] == {"result": "verified", "problems": 0,
                                                "approved_at": "2026-11-05T10:00:00", "approved_by": "risk@acme"}
+
+
+# -- BigQuery ML: the model in BigQuery, by etag (FR-94) -----------------------------------------------------------
+
+def test_a_bigquery_ml_model_replaced_after_approval_is_caught():
+    bodies = {"m": {"etag": "e1", "lastModifiedTime": "1"}}
+    gcp = SimpleNamespace(get=lambda url, **k: SimpleNamespace(ok="models/" in url and bool(bodies),
+                                                               body=dict(bodies.get("m") or {})))
+    approved = integrity.bq_model(gcp, "p.ds.churn_model")
+    assert approved == {"model": "p.ds.churn_model", "etag": "e1", "modified": "1"}
+    assert integrity.compare_bq_model(gcp, approved) == []
+    bodies["m"] = {"etag": "e2", "lastModifiedTime": "2"}               # CREATE OR REPLACE MODEL
+    assert "changed after the approval" in integrity.compare_bq_model(gcp, approved)[0]
+    bodies.clear()
+    assert "is missing" in integrity.compare_bq_model(gcp, approved)[0]
+    assert integrity.bq_model(gcp, None) is None and integrity.compare_bq_model(gcp, None) == []
+
+
+# -- promotions check the source before copying (FR-93) ------------------------------------------------------------
+
+def test_a_promotion_checks_the_source_with_the_destination_s_policy(monkeypatch):
+    monkeypatch.setattr(integrity, "approval_events", lambda *a: [])            # nobody approved it in the source
+    chosen = {"artifactUri": FOLDER, "containerSpec": {"imageUri": None}}
+    with pytest.raises(ConfigError, match="is not promoted"):
+        integrity.check_source(store(), env(), env(), "churn", "4", chosen, None, log=lambda m: None)
+    said = []
+    check = integrity.check_source(store(), env(), env(integrity={"mode": "warn"}), "churn", "4", chosen, None,
+                                   log=said.append)
+    assert check.problems and said[0].startswith("integrity WARNING")
+    # a retrain loop's candidate is approved by the loop's production approval instead
+    assert integrity.check_source(store(), env(), env(), "churn", "4", chosen, "rc-1", log=said.append) is None
+    assert "retrain loop rc-1" in said[-1]

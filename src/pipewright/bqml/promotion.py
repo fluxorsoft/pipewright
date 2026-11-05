@@ -164,6 +164,9 @@ def promote_bqml_model(gcp, src_env, dst_env, uc_src, uc_dst, release_id: str, v
     if labels.get("pipewright-bq-imported") == "true":
         raise ConfigError(f"v{version} of {registry_id} was itself promoted by files: promote from where it was "
                           "trained")
+    from pipewright.models import integrity
+
+    integrity.check_source(gcp, src_env, dst_env, uc_dst.name, str(version), chosen, loop_case, log)  # phase 6
     run, bq_model = labels["pipewright-run"], labels["pipewright-bq-model"]
     src_ref = f"{src_env.project}.{uc_src.resources['bigquery_dataset']}.{bq_model}"
     dst_ref = f"{dst_env.project}.{uc_dst.resources['bigquery_dataset']}.{bq_model}"
