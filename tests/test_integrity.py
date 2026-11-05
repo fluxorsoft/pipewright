@@ -289,3 +289,72 @@ def test_a_promotion_checks_the_source_with_the_destination_s_policy(monkeypatch
     # a retrain loop's candidate is approved by the loop's production approval instead
     assert integrity.check_source(store(), env(), env(), "churn", "4", chosen, "rc-1", log=said.append) is None
     assert "retrain loop rc-1" in said[-1]
+
+
+# -- what changed and who (FR-95), who approved (FR-97) ------------------------------------------------------------
+
+def test_the_diff_shows_metrics_and_the_decision_never_slice_values():
+    approved = {"decision": "approve", "primary_metric": "auc", "value": 0.81, "metrics": {"auc": 0.81, "f1": 0.6},
+                "slices": {"postcode=SW1A 1AA": {"auc": 0.7}}, "reasons": []}
+    now = {**approved, "value": 0.92, "metrics": {"auc": 0.92, "f1": 0.6},
+           "slices": {"postcode=SW1A 1AA": {"auc": 0.95}}}
+    diff = integrity.evaluation_diff(json.dumps(approved), json.dumps(now))
+    assert diff == ["value: 0.81 -> 0.92", "metrics.auc: 0.81 -> 0.92",
+                    "also changed (not shown: they can hold data values): slices"]
+    assert "SW1A" not in json.dumps(diff)
+    assert integrity.evaluation_diff("{}", "not json") == ["the record is no longer valid JSON"]
+    assert integrity.evaluation_diff('{"a": 1}', '{"a": 1}') == ["the bytes changed, the metrics and decision did not"]
+
+
+def _logging(entries=None, status=200):
+    seen = []
+
+    def post(url, body):
+        seen.append(body)
+        return SimpleNamespace(ok=status == 200, status=status, body={"entries": entries or []})
+
+    return SimpleNamespace(post=post), seen
+
+
+def test_each_approval_is_checked_against_the_admin_activity_log():
+    entry = {"timestamp": "2026-11-05T13:37:42.1Z", "protoPayload": {
+        "methodName": "google.cloud.aiplatform.v1.ModelService.MergeVersionAliases",
+        "authenticationInfo": {"principalEmail": "risk@acme"}}}
+    gcp, seen = _logging([entry])
+    found = integrity.approval_audit(gcp, env(), "projects/p/locations/r/models/123", "2026-11-05 13:37:42",
+                                     "risk@acme")
+    assert found["state"] == "matched" and found["principal"] == "risk@acme"
+    assert 'resourceName:"models/123"' in seen[0]["filter"] and "2026-11-05T13:27:42Z" in seen[0]["filter"]
+    assert integrity.approval_audit(gcp, env(), "m/123", "2026-11-05 13:37:42", "intruder@acme")["state"] == \
+        "other principal"
+    nobody, _ = _logging([])
+    assert integrity.approval_audit(nobody, env(), "m/123", "2026-11-05 13:37:42", "a@x")["state"] == "no entry"
+    denied, _ = _logging(status=403)
+    assert integrity.approval_audit(denied, env(), "m/123", "2026-11-05 13:37:42", "a@x")["state"] == "not checked"
+
+
+def test_who_wrote_the_record_comes_from_data_access_logs_when_they_are_on():
+    entry = {"timestamp": "2026-11-05T14:00:00Z", "protoPayload": {
+        "methodName": "storage.objects.create", "authenticationInfo": {"principalEmail": "someone@acme"}}}
+    gcp, seen = _logging([entry])
+    found = integrity.who_wrote(gcp, env(), "gs://art/m/evaluation.json", "2026-11-05 13:37:42")
+    assert found["entries"][0]["principal"] == "someone@acme"
+    assert 'objects/m/evaluation.json"' in seen[0]["filter"]
+    off, _ = _logging([])
+    assert "data access logs off" in integrity.who_wrote(off, env(), "gs://art/m/evaluation.json",
+                                                          "2026-11-05 13:37:42")["note"]
+
+
+def test_lineage_renders_the_integrity_check_and_the_audit():
+    from pipewright.models import lineage
+
+    info = {"model": "churn-classifier", "version": "4", "environment": "prod", "lineage": None, "note": "n",
+            "decisions": [{"at": "2026-11-05 13:37:42", "event": "model.approved", "version": "4", "by": "a@x",
+                           "evaluation": {"sha256": "ab" * 32, "generation": 7}, "evaluation_now": "changed",
+                           "evaluation_diff": ["metrics.auc: 0.81 -> 0.92"],
+                           "audit": {"state": "no entry", "note": "no Admin Activity entry for this approval"}}],
+            "integrity": {"result": "refused", "problems": 1,
+                          "problems_found": ["model.pt: changed after the approval"], "notes": [], "lock": {"until": "2026-12-05T00:00:00Z", "mode": "unlocked"}}}
+    text = lineage.render(info)
+    assert "metrics.auc: 0.81 -> 0.92" in text and "audit log: NO ENTRY" in text
+    assert "integrity refused: 1 problem(s)" in text and "files locked until 2026-12-05T00:00:00Z" in text

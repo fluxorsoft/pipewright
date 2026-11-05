@@ -94,7 +94,29 @@ def lineage(uc: ResolvedUseCase, env: Environment, gcp, version: str | None = No
     if snapshot:
         out.update(fingerprints(gcp, env, record.get("run_id"), (record.get("data") or {}).get("replay_of")))
     check_evaluations(gcp, out, folder)
+    check_integrity(gcp, env, uc, out, resource, model)
     return out
+
+
+def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resource: str, model) -> None:
+    """Phase 6: the version against its approval (files, image, BigQuery ML model), and each approval against Cloud
+    Audit Logs (FR-97). Read-only; never fails lineage."""
+    from pipewright.models import integrity
+
+    spec = getattr(getattr(model, "gca_resource", None), "container_spec", None)
+    try:
+        check = integrity.verify(gcp, env, uc.name, out["version"], getattr(model, "uri", None) or None,
+                                 getattr(spec, "image_uri", None) or None)
+        out["integrity"] = {**check.summary(), "problems_found": check.problems, "notes": check.notes}
+        if check.approval and check.approval.get("lock"):
+            out["integrity"]["lock"] = check.approval["lock"]
+    except Exception as e:  # noqa: BLE001 - lineage still shows everything else
+        out["integrity"] = {"result": f"not checked: {str(e).splitlines()[0][:160]}"}
+    for d in out.get("decisions") or []:
+        if d.get("event") == "model.approved":
+            d["audit"] = integrity.approval_audit(gcp, env, resource, d["at"], d.get("by"))
+            if d.get("evaluation_now") in ("changed", "missing") and (d.get("evaluation") or {}).get("record"):
+                d["changed_by"] = integrity.who_wrote(gcp, env, d["evaluation"]["record"], d["at"])
 
 
 def check_evaluations(gcp, out: dict, folder: str | None) -> None:
@@ -114,6 +136,30 @@ def check_evaluations(gcp, out: dict, folder: str | None) -> None:
     for d in judged:
         d["evaluation_now"] = ("missing" if now is None else
                                "unchanged" if now["sha256"] == d["evaluation"]["sha256"] else "changed")
+        if d["evaluation_now"] in ("changed", "missing"):
+            explain_change(gcp, d)
+
+
+def explain_change(gcp, d: dict) -> None:
+    """FR-95: what changed in an approved evaluation record (metrics and decision only) and who wrote it."""
+    from pipewright.gcp import gcs_read
+    from pipewright.models import integrity
+
+    ev = d["evaluation"]
+    record, generation = ev.get("record"), ev.get("generation")
+    if not record:
+        return
+    try:
+        approved = integrity.read_generation(gcp, record, generation) if generation else None
+        bucket, _, name = record.removeprefix("gs://").partition("/")
+        now, _ = gcs_read(gcp, bucket, name)
+        if approved is None:
+            d["evaluation_diff"] = ["the approved version of the record is no longer kept (bucket versioning off, or "
+                                    "past its retention)"]
+        elif now is not None:
+            d["evaluation_diff"] = integrity.evaluation_diff(approved, now)
+    except Exception as e:  # noqa: BLE001 - say what could not be shown
+        d["evaluation_diff"] = [f"not shown: {str(e).splitlines()[0][:120]}"]
 
 
 def fingerprints(gcp, env: Environment, run_id: str | None, replay_of: str | None) -> dict:
@@ -206,6 +252,7 @@ def render(info: dict) -> str:
     if not record:
         lines.append(f"  {info.get('note')}")
         _render_decisions(info, lines)
+        _render_integrity(info, lines)
         return "\n".join(lines)
     lines.append(f"  run      {record.get('run_id')}  (recorded {record.get('recorded_at')})")
     release = info.get("release") or {"release_id": record.get("release")}
@@ -250,7 +297,23 @@ def render(info: dict) -> str:
                  + (f" vs champion v{ev['champion'].get('version')} {ev['champion'].get('value')}"
                     if ev.get("champion") else "") + f"  ({ev.get('record')})")
     _render_decisions(info, lines)
+    _render_integrity(info, lines)
     return "\n".join(lines)
+
+
+def _render_integrity(info: dict, lines: list[str]) -> None:
+    i = info.get("integrity")
+    if not i:
+        return
+    lines.append(f"  integrity {i.get('result')}" + (f": {i['problems']} problem(s)" if i.get("problems") else ""))
+    for p in i.get("problems_found") or []:
+        lines.append(f"           {p}")
+    for n in i.get("notes") or []:
+        lines.append(f"           note: {n}")
+    if i.get("lock"):
+        lk = i["lock"]
+        lines.append(f"           files locked until {lk.get('until')} ({lk.get('mode')})"
+                     + (f"; not all: {lk['error']}" if lk.get("error") else ""))
 
 
 def _render_decisions(info: dict, lines: list[str]) -> None:
@@ -274,3 +337,13 @@ def _render_decisions(info: dict, lines: list[str]) -> None:
                 d.get("evaluation_now"), d.get("evaluation_now") or "not checked")
             lines.append(f"           judged on evaluation sha256 {ev['sha256'][:16]} (generation "
                          f"{ev.get('generation')}), {state}")
+        for change in d.get("evaluation_diff") or []:
+            lines.append(f"             {change}")
+        for entry in ((d.get("changed_by") or {}).get("entries") or [])[:3]:
+            lines.append(f"             written by {entry['principal']} at {entry['at']} ({entry['method']})")
+        audit = d.get("audit") or {}
+        if audit:
+            lines.append("           audit log: " + {
+                "matched": f"{audit.get('method')} by {audit.get('principal')} at {audit.get('at')}",
+                "other principal": f"MISMATCH: {audit.get('note')}",
+                "no entry": f"NO ENTRY: {audit.get('note')}"}.get(audit.get("state"), audit.get("note") or "?"))

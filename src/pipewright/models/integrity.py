@@ -373,6 +373,97 @@ def enforce(check: Check, env: Environment, what: str, log=print) -> None:
                       source=f"{what}: what is on file is not what was approved")
 
 
+# -- what changed, and who (FR-95), and who approved (FR-97) ------------------------------------------------------
+
+DIFF_KEYS = ("decision", "primary_metric", "value")     # top-level keys a diff may show; slices and rows never
+
+
+def read_generation(gcp, record: str, generation) -> str | None:
+    """One generation of an object (the approved evaluation record, kept by bucket versioning). None if gone."""
+    bucket, _, name = record.removeprefix("gs://").partition("/")
+    r = gcp.session.get(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}",
+                        params={"alt": "media", "generation": str(generation)}, timeout=60)
+    return r.text if r.status_code == 200 else None
+
+
+def evaluation_diff(approved: str, now: str) -> list[str]:
+    """The metrics and the decision that differ between two evaluation records: names and numbers only. Slices,
+    reasons and anything else are counted, never shown (a slice can be named after a data value)."""
+    try:
+        a, b = json.loads(approved), json.loads(now)
+    except ValueError:
+        return ["the record is no longer valid JSON"]
+    out = []
+    for key in DIFF_KEYS:
+        if a.get(key) != b.get(key) and (key in a or key in b):
+            out.append(f"{key}: {a.get(key)} -> {b.get(key)}")
+    ma, mb = a.get("metrics") or {}, b.get("metrics") or {}
+    for name in sorted(set(ma) | set(mb)):
+        va, vb = ma.get(name), mb.get(name)
+        if va != vb and all(isinstance(v, (int, float)) or v is None for v in (va, vb)):
+            out.append(f"metrics.{name}: {va} -> {vb}")
+    other = sorted(k for k in set(a) | set(b) if k not in DIFF_KEYS and k != "metrics" and a.get(k) != b.get(k))
+    if other:
+        out.append(f"also changed (not shown: they can hold data values): {', '.join(other)}")
+    return out or ["the bytes changed, the metrics and decision did not"]
+
+
+def _audit(gcp, env: Environment, filter_: str, limit: int = 5) -> list[dict]:
+    r = gcp.post("https://logging.googleapis.com/v2/entries:list",
+                 {"resourceNames": [f"projects/{env.project}"], "filter": filter_, "orderBy": "timestamp desc",
+                  "pageSize": limit})
+    if not r.ok:
+        raise ConfigError(f"Cloud Audit Logs: HTTP {r.status}")
+    return [{"at": e.get("timestamp", "")[:19], "method": (e.get("protoPayload") or {}).get("methodName"),
+             "principal": ((e.get("protoPayload") or {}).get("authenticationInfo") or {}).get("principalEmail")}
+            for e in (r.body or {}).get("entries", [])]
+
+
+def _window(at: str, minutes: int) -> tuple[str, str]:
+    import datetime
+
+    t = datetime.datetime.fromisoformat(at.replace(" ", "T")[:19]).replace(tzinfo=datetime.timezone.utc)
+    d = datetime.timedelta(minutes=minutes)
+    return ((t - d).strftime("%Y-%m-%dT%H:%M:%SZ"), (t + d).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+
+def who_wrote(gcp, env: Environment, record: str, after: str) -> dict:
+    """Who wrote the record after the approval, from Cloud Storage Data Access audit logs (when they are on)."""
+    bucket, _, name = record.removeprefix("gs://").partition("/")
+    start, _ = _window(after, 0)
+    try:
+        found = _audit(gcp, env, f'protoPayload.serviceName="storage.googleapis.com" AND '
+                                 f'protoPayload.resourceName="projects/_/buckets/{bucket}/objects/{name}" AND '
+                                 f'protoPayload.methodName=("storage.objects.create" OR "storage.objects.delete") AND '
+                                 f'timestamp>="{start}"')
+    except ConfigError as e:
+        return {"note": f"not checked: {e}"}
+    return {"entries": found} if found else {
+        "note": "no Data Access audit entry (Cloud Storage data access logs off, or kept elsewhere)"}
+
+
+def approval_audit(gcp, env: Environment, model: str, at: str, by: str | None) -> dict:
+    """The Admin Activity entry (always on, cannot be turned off) for the change an approval made: the `default`
+    alias moved (MergeVersionAliases) or a first version's approval label (UpdateModel). Compares the principal with
+    the event's `by`: an event with no entry, or another principal, is flagged."""
+    model_id = model.rsplit("/", 1)[-1].split("@")[0]
+    start, end = _window(at, 10)
+    try:
+        found = _audit(gcp, env, f'protoPayload.serviceName="aiplatform.googleapis.com" AND '
+                                 f'protoPayload.methodName:("MergeVersionAliases" OR "UpdateModel") AND '
+                                 f'protoPayload.resourceName:"models/{model_id}" AND '
+                                 f'timestamp>="{start}" AND timestamp<="{end}"', limit=10)
+    except ConfigError as e:
+        return {"state": "not checked", "note": str(e)}
+    if not found:
+        return {"state": "no entry", "note": "no Admin Activity entry for this approval: the event may not be genuine"}
+    match = next((e for e in found if by and e["principal"] == by), None)
+    if match:
+        return {"state": "matched", **match}
+    return {"state": "other principal", **found[0],
+            "note": f"the audit log names {found[0]['principal']}, the event says {by}"}
+
+
 # -- the retention lock (FR-97) -----------------------------------------------------------------------------------
 
 def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
