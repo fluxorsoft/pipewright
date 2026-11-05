@@ -80,6 +80,19 @@ def create_app(registry: Registry | None = None) -> Flask:
               hint: str = "", extra: dict | None = None, loop: str | None = None) -> dict:
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
+        if pipeline == "inference":
+            # Phase 6 (policies.integrity.inference, off by default): score only with an approved default version.
+            from pipewright.models import integrity
+
+            mode, problem = integrity.inference_check(getattr(reg(), "gcp", None), reg().manifest, contract)
+            if problem:
+                _event("run.integrity", contract, rid, pipeline=pipeline, trigger=trigger, mode=mode,
+                       problem=problem)
+                if mode == "refuse":
+                    log.warning("refused %s %s: %s", contract.usecase, pipeline, problem)
+                    return {"usecase": contract.usecase, "pipeline": pipeline, "status": "refused",
+                            "reason": problem}
+                log.warning("integrity (warn) %s %s: %s", contract.usecase, pipeline, problem)
         try:
             name = adapters.submit(contract, target, parameters_for(contract, target, source_uri, rid, extra), jid,
                                    labels_for(contract, trigger, rid, pipeline, loop), reg().manifest.get("security"),

@@ -359,3 +359,36 @@ def test_lineage_renders_the_integrity_check_and_the_audit():
     text = lineage.render(info)
     assert "metrics.auc: 0.81 -> 0.92" in text and "audit log: NO ENTRY" in text
     assert "integrity refused: 1 problem(s)" in text and "files locked until 2026-12-05T00:00:00Z" in text
+
+
+# -- scoring with an unapproved default (policies.integrity.inference) ---------------------------------------------
+
+def _registry(labels=None, version="4"):
+    def get(url, **params):
+        if url.endswith("/models"):
+            return SimpleNamespace(ok=True, body={"models": [{"name": "projects/p/locations/r/models/9"}]})
+        return SimpleNamespace(ok=True, status=200, body={"versionId": version, "labels": labels or {}})
+
+    return SimpleNamespace(get=get)
+
+
+CONTRACT = SimpleNamespace(metadata={"model": "churn-classifier"}, region="r", project="p", environment="prod",
+                           usecase="churn")
+
+
+def test_scoring_is_unchanged_unless_the_policy_asks(monkeypatch):
+    called = []
+    monkeypatch.setattr(integrity, "approval_events", lambda *a: called.append(1) or [])
+    assert integrity.inference_check(_registry(), {"policies": {}}, CONTRACT) == ("off", None)
+    assert called == []
+
+
+def test_scoring_with_an_unapproved_default_is_flagged(monkeypatch):
+    manifest = {"policies": {"integrity": {"inference": "refuse"}}, "observability": {"evidence_dataset": "ev"}}
+    monkeypatch.setattr(integrity, "approval_events", lambda *a: [])
+    mode, problem = integrity.inference_check(_registry(), manifest, CONTRACT)
+    assert mode == "refuse" and "became the default outside Pipewright" in problem
+    mode, problem = integrity.inference_check(_registry({"approval": "pending"}), manifest, CONTRACT)
+    assert "nobody has approved it" in problem
+    monkeypatch.setattr(integrity, "approval_events", lambda *a: [{"at": "x", "by": "a@x"}])
+    assert integrity.inference_check(_registry(), manifest, CONTRACT) == ("refuse", None)

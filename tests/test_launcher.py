@@ -206,3 +206,25 @@ def test_the_live_release_is_optional_in_a_run_request(repo):
 
     repo.write()
     assert launch.live_release(load_environment(repo.root, "dev"), "churn", gcp=Broken()) is None
+
+
+# Phase 6 (policies.integrity.inference): a scoring run with an unapproved default is refused, and recorded.
+def test_a_scoring_run_with_an_unapproved_default_is_refused_when_the_policy_says_so(monkeypatch):
+    from pipewright import adapters
+    from pipewright.launcher.app import create_app
+    from pipewright.models import integrity
+
+    submitted, emitted = [], []
+    monkeypatch.setattr(adapters, "submit", lambda *a, **k: submitted.append(a) or "job")
+    monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
+    monkeypatch.setattr(integrity, "inference_check",
+                        lambda gcp, manifest, contract: ("refuse", "v4 has no model.approved event"))
+    registry = FakeRegistry([V3])
+    registry.manifest["policies"] = {"integrity": {"inference": "refuse"}}
+    client = create_app(registry).test_client()
+    r = client.post("/run", json={"usecase": V3.usecase, "pipeline": "inference", "source_uri": "gs://x/y.csv"})
+    assert r.json["status"] == "refused" and "no model.approved event" in r.json["reason"] and submitted == []
+    assert emitted[-1]["event_type"] == "run.integrity" and emitted[-1]["data"]["mode"] == "refuse"
+    monkeypatch.setattr(integrity, "inference_check", lambda gcp, manifest, contract: ("warn", "v4 unapproved"))
+    r = client.post("/run", json={"usecase": V3.usecase, "pipeline": "inference", "source_uri": "gs://x/z.csv"})
+    assert r.json["status"] == "submitted" and len(submitted) == 1

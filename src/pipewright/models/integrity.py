@@ -464,6 +464,42 @@ def approval_audit(gcp, env: Environment, model: str, at: str, by: str | None) -
             "note": f"the audit log names {found[0]['principal']}, the event says {by}"}
 
 
+# -- scoring with an unapproved default (policies.integrity.inference) ---------------------------------------------
+
+def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
+    """(mode, problem): does the default version a scoring run will use have an approval? mode off (the default)
+    checks nothing. A first version still pending, or a default with no model.approved event, is a problem."""
+    from types import SimpleNamespace
+
+    mode = (((manifest.get("policies") or {}).get("integrity") or {}).get("inference")) or "off"
+    if mode == "off":
+        return mode, None
+    name = (contract.metadata or {}).get("model")
+    if not name:
+        return mode, None
+    api = f"https://{contract.region}-aiplatform.googleapis.com/v1"
+    found = gcp.get(f"{api}/projects/{contract.project}/locations/{contract.region}/models",
+                    filter=f'display_name="{name}"')
+    models = (found.body or {}).get("models", []) if found.ok else []
+    if not models:
+        return mode, None                                  # nothing registered yet: the run fails on its own
+    default = gcp.get(f"{api}/{models[0]['name'].split('@')[0]}@default")
+    if not default.ok:
+        return mode, f"the default version of {name} cannot be read (HTTP {default.status})"
+    version = str((default.body or {}).get("versionId"))
+    if ((default.body or {}).get("labels") or {}).get("approval") == "pending":
+        return mode, f"v{version} of {name} is the default as the first version, and nobody has approved it"
+    env = SimpleNamespace(name=contract.environment, project=contract.project,
+                          observability=manifest.get("observability") or {}, security=manifest.get("security") or {})
+    try:
+        events = approval_events(gcp, env, contract.usecase, version)
+    except Exception as e:  # noqa: BLE001 - the launcher cannot read the log: the approval cannot be shown
+        return mode, f"the approval of v{version} cannot be shown: {str(e).splitlines()[0][:120]}"
+    if events == []:
+        return mode, f"v{version} of {name} has no model.approved event: it became the default outside Pipewright"
+    return mode, None
+
+
 # -- the retention lock (FR-97) -----------------------------------------------------------------------------------
 
 def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
