@@ -5,6 +5,44 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
+Phase 6: what runs is what was approved. An approval records what it approved, and nothing is deployed or promoted
+unless it is still that. One behaviour changes on upgrade, deliberately: these checks **refuse by default**
+(`policies.integrity.mode: warn` relaxes an environment). Everything else is additive and off until set. The guide is
+[docs/INTEGRITY.md](docs/INTEGRITY.md).
+
+### Upgrading
+
+Nothing to change in a use case. Approvals made before this release carry no file fingerprints; they deploy as before,
+with a note. A default version that has no `model.approved` event (made the default outside Pipewright) is now
+refused by `deploy-model` and `promote`: approve it with `pipewright model approve`, or set
+`policies.integrity.mode: warn` while you do. `model approve` refuses when your working copy's `ml.evaluation` or
+`approvals` differ from the release that trained the version: approve from the release's commit.
+
+### Added
+
+- **What an approval records** (FR-94, FR-96): every model file by generation and SHA-256, the serving image's digest,
+  a BigQuery ML model's etag, and the release whose rules it was judged by; with `policies.integrity.lock`, the
+  approved files are locked with Cloud Storage object retention.
+- **Checks before deploy and promote** (FR-93): `deploy-model` (Agent Platform and KServe) and `promote` compare the
+  version with its newest approval and refuse a changed evaluation record or model file, a moved serving image tag, a
+  replaced BigQuery ML model, a first version nobody approved, and a default with no approval. A promotion's own
+  approval is judged by the released approvers and records and locks the copied files. `model.deployed` records the
+  result.
+- **Approval by the released rules** (FR-96): the gates `model approve` re-checks and the approvers it allows come
+  from the release that trained the version; a first version's gates are re-checked too. New releases record their
+  approvals in the contract.
+- **`pipewright lineage` shows integrity** (FR-95, FR-97): the check and the lock; what changed in an approved
+  evaluation (its decision and metrics, never slice values) and who wrote it, where Cloud Storage data access logs are
+  on; each approval against Cloud Audit Logs' Admin Activity entry, flagging one with no entry or another principal.
+- **A scoring check** (`policies.integrity.inference`: off, warn or refuse): the launcher checks that a scoring run's
+  default version was approved, and records `run.integrity`.
+- **`validate` warns about a serving image registered by tag**; the churn example registers its image by digest.
+- **`pipewright features register`** (FR-75): the data team registers feature groups from a spec file.
+- **`pipewright report fleet`** (FR-86): every use case in every environment on one read-only HTML page, with each
+  champion's integrity.
+- **The churn example points to feature tables** (FR-99) and shows the change that moves it onto them.
+
+
 ## [1.3.1] - 2026-11-04
 
 A fix to the decision trail: a model approval now records the evaluation it was judged on. Additive: nothing to

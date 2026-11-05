@@ -489,6 +489,16 @@ group of a retrain case. `pipewright ci init` writes two workflows for it:
 The decision's event records the reviewers, their comment and the workflow run next to the CI identity that acted.
 Decisions made with the CLI by hand still work and are recorded as approved outside CI.
 
+## What runs is what was approved
+
+An approval records what it approved: the evaluation record, every model file and the serving image by fingerprint
+(a BigQuery ML model by its etag), and the release whose rules it was judged by. `deploy-model` (Agent Platform and
+KServe) and `promote` refuse a version that is not that: a changed file, a moved image tag, a first version nobody
+approved, a default made outside Pipewright. Approvals are judged by the released gates and approvers, not your
+working copy; approved files can be locked with object retention; `lineage` checks each approval against Cloud Audit
+Logs. The checks refuse by default (`policies.integrity.mode: warn` relaxes an environment). The guide:
+[docs/INTEGRITY.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/INTEGRITY.md).
+
 ## Lineage
 
 `pipewright lineage --env prod --usecase churn [--version 5]` leads a model version back to where it came from:
