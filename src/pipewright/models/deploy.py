@@ -33,6 +33,8 @@ class DeployPlan:
     gate_problems: list = None          # problems with the default version's evaluation record
     labels: dict = None                 # the default version's registry labels (BigQuery ML: run and model)
     store_problem: str | None = None    # online features: the model would read another environment's store (FR-76)
+    integrity: object = None            # phase 6: is the default version the one approved (models/integrity.Check)
+    rules_release: str | None = None    # the release whose gates were checked (FR-96)
 
 
 def endpoint_name(uc: ResolvedUseCase) -> str:
@@ -128,15 +130,24 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     from pipewright.models import gates
 
     earlier = str(default.version_id).isdigit() and int(default.version_id) > 1
-    from pipewright.models.registry import record_location
+    from pipewright.models import integrity
+    from pipewright.models.registry import pending_approval, record_location
 
-    record = record_location(uc, default.uri, getattr(default, "labels", None))
-    problems = gates.verify(Gcp(creds), record, uc.ml["evaluation"], earlier)
+    labels = dict(getattr(default, "labels", None) or {})
+    gcp = Gcp(creds)
+    record = record_location(uc, default.uri, labels)
+    # Phase 6 (FR-96): the gates of the release that trained the version, not the working copy's.
+    rules = integrity.released_rules(uc, env, gcp, integrity.release_of(gcp, record, labels))
+    problems = gates.verify(gcp, record, rules.evaluation, earlier)
+    spec = getattr(getattr(default, "gca_resource", None), "container_spec", None)
+    check = integrity.verify(gcp, env, uc.name, str(default.version_id), default.uri,
+                             getattr(spec, "image_uri", None) or None, first_version_pending=pending_approval(labels))
+    if rules.note:
+        check.notes.append(rules.note)
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
                       serving["replicas"], bool(current),
                       [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems,
-                      dict(getattr(default, "labels", None) or {}),
-                      online_store_problem(uc, env, Gcp(creds), default))
+                      labels, online_store_problem(uc, env, gcp, default), check, rules.release)
 
 
 def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, log=print) -> None:
@@ -156,6 +167,11 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                           f"--version {p.version} --approve",
                           source=f"v{p.version} of {p.model} is not served: it became the default as the model's "
                                  "first version, and nobody has approved it (approvals.promote_model manual)")
+    if p.integrity is not None:
+        from pipewright.models import integrity
+
+        # Phase 6 (FR-93, FR-94): refuse (or warn) before anything changes on the endpoint.
+        integrity.enforce(p.integrity, env, f"v{p.version} of {p.model} is not served", log)
     if p.already_deployed:
         log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return
@@ -198,13 +214,13 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     if share < 100:
         log(f"canary: v{p.version} serves {share}%, {', '.join(f'v{d.model_version_id}' for d in previous)} the "
             "rest. Watch it, then `pipewright deploy-model --promote` (or --undeploy-canary).")
-        _deployed(uc, env, creds, p.version, share)
+        _deployed(uc, env, creds, p.version, share, p.integrity)
         return
     for old in previous:
         log(f"undeploying previous {old.id} (v{old.model_version_id})")
         endpoint.undeploy(deployed_model_id=old.id)
     log(f"live: {p.endpoint} serves {p.model} v{p.version}")
-    _deployed(uc, env, creds, p.version, 100)
+    _deployed(uc, env, creds, p.version, 100, p.integrity)
 
 
 def _bqml_parity(uc: ResolvedUseCase, env: Environment, creds, p: DeployPlan, endpoint, previous: list,
@@ -232,7 +248,7 @@ def _bqml_parity(uc: ResolvedUseCase, env: Environment, creds, p: DeployPlan, en
                       f"({why})" + ("; the previous version serves all traffic again" if previous else ""))
 
 
-def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: int) -> None:
+def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: int, check=None) -> None:
     import io
 
     from pipewright.gcp import Gcp
@@ -241,7 +257,7 @@ def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: in
     gcp = Gcp(creds)
     events.emit(events.event("model.deployed", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
                              version=version, endpoint=endpoint_name(uc), traffic_percent=traffic,
-                             by=gcp.identity()),
+                             by=gcp.identity(), **({"integrity": check.summary()} if check is not None else {})),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
 
 

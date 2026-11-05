@@ -174,6 +174,21 @@ class Rules:
                 "approvals_sha256": _canonical(self.approvals)}
 
 
+def release_of(gcp, folder: str | None, labels: dict | None) -> str | None:
+    """The release that trained a version: its lineage.json, else its `release` label."""
+    if folder and folder.startswith("gs://"):
+        from pipewright.gcp import gcs_read
+
+        bucket, _, prefix = folder.removeprefix("gs://").partition("/")
+        try:
+            text, _ = gcs_read(gcp, bucket, f"{prefix.rstrip('/')}/lineage.json".lstrip("/"))
+            if text and json.loads(text).get("release"):
+                return json.loads(text)["release"]
+        except Exception:  # noqa: BLE001 - no lineage record: the label says it, or nothing does
+            pass
+    return (labels or {}).get("release")
+
+
 def released_rules(uc: ResolvedUseCase, env: Environment, gcp, release_id: str | None) -> Rules:
     """The gates (ml.evaluation) and approvals of the release that trained a version. A release from before phase 6
     has the gates (its ml_config) but not the approvers: those then come from the working copy, with a note. The

@@ -217,3 +217,45 @@ def test_approved_files_are_locked_for_the_policy_s_days():
     s.refuse_patch = True
     done = integrity.lock(s, env(integrity={"lock": {"days": 30, "mode": "locked"}}), files, log=said.append)
     assert done["locked"] == 0 and "HTTP 412" in done["error"] and "could not be locked" in said[-1]
+
+
+# -- deploy-model refuses before it touches the endpoint (FR-93) ---------------------------------------------------
+
+def _plan(check):
+    from pipewright.models import deploy
+
+    return deploy.DeployPlan("churn-classifier", "4", "churn-endpoint", "n1-standard-2", {"min": 1, "max": 1}, False,
+                             [], [], {}, None, check, "rel1")
+
+
+def test_deploy_model_refuses_what_was_not_approved_before_touching_the_endpoint(monkeypatch):
+    from pipewright.models import deploy
+
+    touched = []
+    monkeypatch.setattr(deploy, "_aiplatform", lambda env, creds: touched.append("aiplatform") or SimpleNamespace(
+        Model=SimpleNamespace(list=lambda **k: touched.append("model") or []),
+        Endpoint=SimpleNamespace(list=lambda **k: touched.append("endpoint") or [])))
+    check = integrity.Check(problems=["model.pt: changed after the approval (sha256 0123456789abcdef approved)"])
+    monkeypatch.setattr(deploy, "plan", lambda uc, env, creds: _plan(check))
+    uc = SimpleNamespace(name="churn", model={"name": "churn-classifier"})
+    with pytest.raises(ConfigError, match="not what was approved") as e:
+        deploy.deploy(uc, env(), None, log=lambda m: None)
+    assert "model.pt" in str(e.value) and "endpoint" not in touched and "model" not in touched
+    # warn: the deploy goes on (here it stops at the fake registry), and says what it found
+    said = []
+    with pytest.raises(IndexError):                    # the fake registry has no model: past the check
+        deploy.deploy(uc, env(integrity={"mode": "warn"}), None, log=said.append)
+    assert said[0].startswith("integrity WARNING (policies.integrity.mode warn): model.pt")
+
+
+def test_the_deployed_event_records_the_integrity_result(monkeypatch):
+    from pipewright.models import deploy
+
+    emitted = []
+    monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
+    monkeypatch.setattr("pipewright.gcp.Gcp", lambda creds=None: SimpleNamespace(identity=lambda: "ops@acme"))
+    uc = SimpleNamespace(name="churn", tenant="retail", model={"name": "churn-classifier"})
+    check = integrity.Check(approval={"at": "2026-11-05T10:00:00", "by": "risk@acme"})
+    deploy._deployed(uc, SimpleNamespace(name="prod", region="r", observability={}), None, "4", 100, check)
+    assert emitted[0]["data"]["integrity"] == {"result": "verified", "problems": 0,
+                                               "approved_at": "2026-11-05T10:00:00", "approved_by": "risk@acme"}

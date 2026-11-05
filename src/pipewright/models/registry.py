@@ -145,8 +145,6 @@ def _evaluated(creds, resource: str, version: str, uc: ResolvedUseCase) -> dict:
 def _judged(uc: ResolvedUseCase, env: Environment, creds, resource: str, version: str, log=print):
     """What an approval is judged on and by (phase 6): the released rules, the evaluation record, every model file
     and the serving image. Returns (rules, record for the model.approved event, the version's record folder)."""
-    import json
-
     from pipewright.gcp import Gcp
     from pipewright.models import integrity
 
@@ -154,17 +152,7 @@ def _judged(uc: ResolvedUseCase, env: Environment, creds, resource: str, version
     body = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{resource}@{version}").body or {}
     labels = body.get("labels") or {}
     folder = record_location(uc, body.get("artifactUri"), labels)
-    lineage = {}
-    if folder and folder.startswith("gs://"):
-        from pipewright.gcp import gcs_read
-
-        bucket, _, prefix = folder.removeprefix("gs://").partition("/")
-        try:
-            text, _ = gcs_read(gcp, bucket, f"{prefix.rstrip('/')}/lineage.json".lstrip("/"))
-            lineage = json.loads(text) if text else {}
-        except Exception:  # noqa: BLE001 - no lineage record: the release comes from the version's label
-            lineage = {}
-    rules = integrity.released_rules(uc, env, gcp, lineage.get("release") or labels.get("release"))
+    rules = integrity.released_rules(uc, env, gcp, integrity.release_of(gcp, folder, labels))
     record = {**_evaluated(creds, resource, version, uc), "rules": rules.record()}
     try:
         files = integrity.model_files(gcp, body.get("artifactUri"))

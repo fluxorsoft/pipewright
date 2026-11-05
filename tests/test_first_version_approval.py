@@ -46,8 +46,9 @@ def test_approve_records_the_approval_of_the_first_version(monkeypatch):
     monkeypatch.setattr("pipewright.gcp.Gcp", FakeGcp)
     monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
     monkeypatch.setattr(registry, "artifact_uri", lambda *a, **k: None)  # no Vertex AI call for the 1.3.1 digest
-    uc = SimpleNamespace(name="demand-forecast", tenant="retail", model={"name": "demand-forecast"})
-    env = SimpleNamespace(name="prod", region="europe-west2", observability={})
+    uc = SimpleNamespace(name="demand-forecast", tenant="retail", model={"name": "demand-forecast"},
+                         ml={"evaluation": {}}, approvals={})
+    env = SimpleNamespace(name="prod", region="europe-west2", observability={}, policies={})
     lines = []
     registry._approve_first_version(uc, env, None, "projects/p/locations/r/models/m", "1", "lead@acme",
                                     lines.append)
