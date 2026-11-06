@@ -893,6 +893,36 @@ rollback. A person carries the case across.
 scheduled retraining with run observability and concurrency control; phase 3 automated candidate gating with human
 approval for production; phase 4 monitoring-driven retraining with deduplication and safeguards.
 
+**Phase 6 design (user, 2026-11-06):** the four items not yet done, each behind a setting that is off by default, so
+an upgrade changes nothing until a setting asks.
+
+1. **BigQuery ML in the loop (D-115).** With `retraining.loop.enabled` on a BigQuery ML use case, the loop trains in
+   test with BigQuery ML, compares with the version production serves, validates with a scoring run in test, and
+   promotes by files (export, copy, import, parity); production never trains. Linear and logistic regression only:
+   `validate` refuses the loop for other model types (their export scores differently), naming why.
+2. **The online canary with automatic rollback (D-108).** `retraining.loop.canary` (`percent`, `soak_minutes`,
+   `max_error_rate_increase`, `max_latency_increase`) for a model served on an Agent Platform endpoint: after the
+   production approval the loop deploys the candidate as a canary, not a full rollout. After the soak window it
+   checks the canary's error rate and latency (Cloud Monitoring) against the current version's, and sends the
+   validation rows to the canary as a probe: their scores must match what test scored. Healthy: the canary takes all
+   traffic and the case closes; otherwise the canary is undeployed and the previous version is the default again,
+   automatically. No request or response is logged or stored: the probe compares scores in memory and records only
+   counts and the largest difference. KServe stays refused (no canary there).
+3. **The loop's data from production.** `retraining.loop.data: production` (default `test`, as before): the training
+   run in test reads production's feature tables and label window (production's configuration of `data`), through
+   the read-only `loop_readers` grant, instead of test's. The Enterprise blueprint grants the test runner read access
+   to production's landing prefix for the tenant when `loop_readers` is set, so a file landed in production can
+   train the loop.
+4. **Safeguards for monitoring-driven retraining.** `retraining.loop.safeguards`, for loops started without a
+   person (`retraining.mode: candidate`): a rate limit (`max_loops`, `per_days`: later alerts join the case as
+   observations), a circuit breaker (`pause_after_failures`: after that many automatic loops in a row end rejected,
+   failed, validation-failed, verification-failed or rolled back, automatic retraining pauses until a person resumes
+   it, with an alert), drift on consecutive runs (`drift_runs`: a drift trigger counts only when that many scoring
+   runs in a row alerted), and `pipewright loop pause | resume --env <production> --usecase <u> --reason <text>`
+   (recorded with who and why). Performance triggers keep their minimum labelled volume
+   (`monitoring.performance.labels`). With `safeguards: {}`, the conservative defaults: 1 loop per 7 days, pause
+   after 2 failures, drift on 2 runs.
+
 ### 8.14 Running on Kubernetes: private GKE, and on premises on request (design note, 2026-10-15; `private-gke` built: section 8.15)
 
 Two targets, very different in size:
