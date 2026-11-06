@@ -253,6 +253,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                       env.approver_groups if env.manifest_source else None, problems)
     _feature_policy(ml, env, tenant, problems)
     _retraining_policy(ml["retraining"], approvals, env, problems)
+    _loop_settings(ml["retraining"], model, bqml_spec, problems)
     from pipewright.config import judgement  # Pipewright 1.3.0: valid, but probably not what the model needs
 
     judged_warnings, judged_problems = judgement.check(ml, env, tenant)
@@ -556,6 +557,26 @@ def _feature_policy(ml: dict, env: Environment, tenant: str, problems: list[str]
         if outside:
             problems.append(f"{env.name} requires every model feature from data.features_from (features.required); "
                             f"not from a feature table: {', '.join(outside)}")
+
+
+def _loop_settings(retraining: dict, model: dict, bqml_spec: dict | None, problems: list[str]) -> None:
+    """FR-48 phase 6: what the closed retrain loop's settings need of the use case."""
+    loop = retraining.get("loop") or {}
+    if not loop.get("enabled"):
+        if any(loop.get(k) is not None for k in ("safeguards", "canary", "data")):
+            problems.append("retraining.loop: safeguards, canary and data apply only with retraining.loop.enabled")
+        return
+    if bqml_spec and model.get("promotion") != "model":
+        problems.append(f"retraining.loop: a BigQuery ML use case's loop promotes its candidate by files (production "
+                        f"never trains), so it needs model.promotion: model, which supports linear_reg and "
+                        f"logistic_reg; a {bqml_spec.get('model_type')} is promoted by retraining")
+    if loop.get("canary") is not None:
+        serving = model.get("serving") or {}
+        if not serving.get("enabled"):
+            problems.append("retraining.loop.canary: the model is not served online (model.serving.enabled)")
+        elif serving.get("target") == "kserve":
+            problems.append("retraining.loop.canary: KServe has no canary; the loop's canary needs an Agent Platform "
+                            "endpoint (model.serving.target vertex)")
 
 
 def _retraining_policy(retraining: dict, approvals: dict, env: Environment, problems: list[str]) -> None:

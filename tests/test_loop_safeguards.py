@@ -85,3 +85,30 @@ def test_the_service_pauses_after_failures_and_a_person_resumes(gcs):  # noqa: F
     pointer = json.loads(gcs["cases/churn/current.json"][0])
     assert "paused" not in pointer and pointer["resumed"]["by"] == "safeguards"
     assert pointer["open"] == got["case_id"]                     # the open case is untouched
+
+
+# -- what the loop's settings need of the use case (FR-48 phase 6) ------------------------------------------------
+
+def test_a_bigquery_ml_loop_promotes_by_files(repo):
+    from tests.test_bqml_config import bqml_repo, problems, resolve
+
+    bqml_repo(repo, model_type="logistic_reg")
+    repo.usecase["spec"]["retraining"] = {"mode": "propose", "loop": {"enabled": True, "data": "production"}}
+    repo.usecase["spec"]["model"]["promotion"] = "model"
+    uc = resolve(repo)
+    assert uc.ml["retraining"]["loop"] == {"enabled": True, "data": "production"}
+    repo.usecase["spec"]["model"].pop("promotion")
+    assert "loop promotes its candidate by files" in problems(repo)
+    bqml_repo(repo)                                                     # boosted trees: by retraining only
+    repo.usecase["spec"]["retraining"] = {"mode": "propose", "loop": {"enabled": True}}
+    assert "a boosted_tree_classifier is promoted by retraining" in problems(repo)
+
+
+def test_the_loops_settings_need_the_loop_and_an_endpoint_for_the_canary(repo):
+    from tests.test_config_ml import ml_repo, problems
+
+    ml_repo(repo)
+    repo.usecase["spec"]["retraining"] = {"mode": "propose", "loop": {"safeguards": {}}}
+    assert "apply only with retraining.loop.enabled" in problems(repo)
+    repo.usecase["spec"]["retraining"] = {"mode": "propose", "loop": {"enabled": True, "canary": {"percent": 10}}}
+    assert "not served online" in problems(repo)
