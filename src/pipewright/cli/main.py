@@ -790,7 +790,10 @@ def cmd_promote(args) -> int:
         return 0
     for c in result.checks:
         print(f"  verified: {c}")
-    if result.model_version:
+    if result.model_version and result.model_default:
+        print(f"model v{result.model_version} is the default in {dst.name}: its first version there"
+              + (", approved with this promotion" if args.approve else ""))
+    elif result.model_version:
         approve = dst.policies.get("promote_model", "manual")
         print(f"model v{result.model_version} is a candidate in {dst.name}: "
               + ("make it the default with `pipewright model approve --env " + dst.name + " --usecase " + args.usecase

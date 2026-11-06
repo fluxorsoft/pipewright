@@ -356,6 +356,7 @@ def test_a_first_model_version_needs_an_explicit_approval(setup):
     result = setup.run(approve=True)
     assert "event model.approved" in setup.calls
     assert any("approved by promoter@acme.example with the promotion" in p for p in result.record["policy"])
+    assert result.model_default                     # found live: the CLI called this default version a candidate
 
 # Pipewright 1.3.1 (FR-89): approving with the promotion records the evaluation copied with the model, by digest;
 # a record that cannot be read leaves the digest out and never stops the promotion.

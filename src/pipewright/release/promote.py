@@ -45,6 +45,7 @@ class Promotion:
     model_version: str | None = None
     checks: list[str] = field(default_factory=list)
     unchanged: bool = False          # the promotion had been done already: nothing was copied or moved
+    model_default: bool = False      # the promoted version is the destination's default (its first, approved with it)
 
 
 # ------------------------------------------------------------------ images --
@@ -381,7 +382,8 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
         raise ConfigError(f"model upload in {dst_env.name} failed: {r.status} {str(r.body)[:300]}")
     done = _wait(gcp, dst_env, r.body, f"model upload in {dst_env.name}")
     dst_version = str(done.get("modelVersionId") or "1")
-    log(f"model: {name} v{version} ({src_env.name}) -> v{dst_version} ({dst_env.name}), a candidate")
+    log(f"model: {name} v{version} ({src_env.name}) -> v{dst_version} ({dst_env.name}), "
+        + ("its first version there, so the default" if dst_model is None else "a candidate"))
     return {"name": name, "source_version": str(version), "source_artifact_uri": chosen["artifactUri"],
             "artifact_uri": dest_uri, "version": dst_version, "files": files,
             "serving_image": (spec or {}).get("imageUri")}
@@ -633,4 +635,4 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
                              model=({k: model[k] for k in ("name", "source_version", "version")} if model else None)),
                 dst_env.observability.get("events_topic"), gcp, stream=_quiet(), region=dst_env.region)
     return Promotion(contract, f"gs://{dst_env.artifacts_bucket}/{name}", pointer.release_id if pointer else None,
-                     record, model["version"] if model else None, checks)
+                     record, model["version"] if model else None, checks, model_default=bool(model and first_version))
