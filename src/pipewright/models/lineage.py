@@ -117,7 +117,13 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
     try:
         check = integrity.verify(gcp, env, uc.name, out["version"], getattr(model, "uri", None) or None,
                                  getattr(spec, "image_uri", None) or None, model=resource)
-        out["integrity"] = {**check.summary(), "problems_found": check.problems, "notes": check.notes}
+        if not check.approval and not out.get("default") and check.problems and all(
+                "no model.approved event" in p for p in check.problems):
+            # QA finding: a candidate nobody approved yet is not "the default made outside Pipewright".
+            out["integrity"] = {"result": "not approved yet (a candidate)", "problems_found": [],
+                                "notes": check.notes}
+        else:
+            out["integrity"] = {**check.summary(), "problems_found": check.problems, "notes": check.notes}
         if check.approval and check.approval.get("lock"):
             out["integrity"]["lock"] = check.approval["lock"]
         if not check.approval and check.problems and out.get("default"):

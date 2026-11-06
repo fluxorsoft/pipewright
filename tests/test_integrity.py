@@ -570,3 +570,19 @@ def test_deploy_and_promote_cross_check_the_approval_with_cloud_audit_logs(monke
     assert not old.problems and "older than Cloud Audit Logs keep" in old.notes[0]
     approval["at"] = now
     assert not integrity.verify(None, env, "churn", "2", None, None).problems     # no model given: as before
+
+
+def test_lineage_calls_a_candidate_nobody_approved_not_approved_yet(monkeypatch):
+    """QA finding: lineage of a candidate said 'it became the default outside Pipewright'."""
+    from pipewright.models import lineage
+
+    monkeypatch.setattr(integrity, "verify", lambda *a, **k: integrity.Check(
+        problems=["v4 has no model.approved event: it became the default outside Pipewright (the console, gcloud or "
+                  "the API), so nobody approved it here"]))
+    out = {"version": "4", "default": False, "decisions": []}
+    lineage.check_integrity(None, SimpleNamespace(), SimpleNamespace(name="churn"), out, "m", None)
+    assert out["integrity"]["result"] == "not approved yet (a candidate)" and not out["integrity"]["problems_found"]
+    monkeypatch.setattr(integrity, "who_made_default", lambda *a: {"note": "no alias change"})
+    out = {"version": "4", "default": True, "decisions": []}
+    lineage.check_integrity(None, SimpleNamespace(), SimpleNamespace(name="churn"), out, "m", None)
+    assert out["integrity"]["result"] == "refused"                    # the default: it is a problem
