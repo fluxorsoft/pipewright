@@ -78,6 +78,7 @@ class Settings:
                    safeguards=safeguards((r.get("loop") or {}).get("safeguards")))
 
 
+DRIFT_SHORT = "drift on fewer runs in a row than asked"
 SAFEGUARD_DEFAULTS = {"max_loops": 1, "per_days": 7, "pause_after_failures": 2, "drift_runs": 2}
 LOOP_FAILURES = ("rejected", "failed", "validation-failed", "verification-failed", "rolled-back")
 AUTOMATIC = "retraining.mode candidate"      # who started a loop without a person
@@ -125,8 +126,8 @@ def hold(s: Settings, g: dict | None, obs: dict, fired: list) -> str | None:
     if set(fired) <= {"drift"} and sg["drift_runs"] > 1:
         earlier = [r for r in obs.get("recent") or [] if isinstance(r, dict)][-(sg["drift_runs"] - 1):]
         if len(earlier) < sg["drift_runs"] - 1 or not all(r.get("alert") for r in earlier):
-            return (f"drift on this run only: safeguards.drift_runs asks for {sg['drift_runs']} scoring runs in a row "
-                    "that alerted")
+            return (f"{DRIFT_SHORT}: safeguards.drift_runs asks for {sg['drift_runs']} scoring runs in a row that "
+                    "alerted")
     return None
 
 
@@ -212,6 +213,11 @@ def observe(current: dict | None, last_approved_at: str | None, obs: dict, s: Se
         _log(case, now, "proposed", by=ctx.get("requested_by"), run_id=ctx.get("run_id"), triggers=fired)
         submit = None
         held = hold(s, guarded, obs, fired) if s.mode == "candidate" and s.loop else None
+        if held and held.startswith(DRIFT_SHORT):
+            # Found live in QA: a first alert held for a person opened a case that every later alert joined, so drift
+            # could never start a loop by itself. Below the streak, the alert opens no case: the monitoring history
+            # keeps it, and the next run that alerts counts it.
+            return Outcome(None, status=f"no case yet: {held}")
         if held:
             # Phase 6 safeguards: the case opens for a person to decide, as under retraining.mode propose.
             case["mode"], case["held"] = "propose", held

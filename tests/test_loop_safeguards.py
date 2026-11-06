@@ -28,9 +28,10 @@ def test_off_by_default_and_the_conservative_defaults():
 
 
 def test_drift_must_repeat_on_consecutive_runs():
-    held = rc.observe(None, None, DRIFT, AUTO, T0, CTX, {"recent": 0, "failures": 0})
-    assert held.case["state"] == "open" and held.case["mode"] == "propose" and "loop" not in held.case
-    assert "2 scoring runs in a row" in held.case["held"] and held.events[0][1]["held"] == held.case["held"]
+    # Found live in QA: a held first alert opened a case every later alert joined, so drift never started a loop.
+    # Below the streak no case opens; the monitoring history keeps the alert for the next run.
+    first = rc.observe(None, None, DRIFT, AUTO, T0, CTX, {"recent": 0, "failures": 0})
+    assert first.case is None and "2 scoring runs in a row" in first.status and first.status.startswith("no case yet")
     started = rc.observe(None, None, STREAK, AUTO, T0, CTX, {"recent": 0, "failures": 0})
     assert started.case["loop"]["state"] == "approved"
     # An explicit request (a schedule or a landing) is not drift: no streak needed.

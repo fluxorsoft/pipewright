@@ -223,7 +223,7 @@ retraining.loop.safeguards: "Limits on loops started without a person (retrainin
 retraining.loop.safeguards.max_loops: "Automatic loops allowed per period (default 1)."
 retraining.loop.safeguards.per_days: "The period for max_loops, in days (default 7)."
 retraining.loop.safeguards.pause_after_failures: "Automatic loops in a row that end rejected, failed or rolled back before automatic retraining pauses until `pipewright loop resume` (default 2)."
-retraining.loop.safeguards.drift_runs: "A drift trigger starts a loop only when this many scoring runs in a row alerted (default 2)."
+retraining.loop.safeguards.drift_runs: "A drift trigger starts a loop only when this many scoring runs in a row alerted (default 2); before that, no case opens and the next run that alerts counts it."
 retraining.loop.canary: "The online canary with automatic rollback, for a model served on an Agent Platform endpoint: after the production approval the loop deploys the candidate as a canary, checks it after the soak window, then gives it all traffic or rolls it back. Off when not set."
 retraining.loop.canary.percent: "The canary's share of traffic, in percent (default 10)."
 retraining.loop.canary.soak_minutes: "How long the canary serves before it is checked (default 30)."

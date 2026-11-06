@@ -463,7 +463,8 @@ Four settings under `retraining.loop` (new in phase 6; each off until set, in pr
 - **`safeguards`**, for loops started without a person (`retraining.mode: candidate`): at most `max_loops` per
   `per_days`; after `pause_after_failures` automatic loops in a row end rejected, failed or rolled back, automatic
   retraining pauses (`loop.paused`) until `pipewright loop resume`; a drift trigger counts only after `drift_runs`
-  scoring runs in a row alerted. Held by one, the case opens for a person instead. `safeguards: {}` gives 1 loop per 7
+  scoring runs in a row alerted (before that, no case opens: the next run counts it). Held by the rate limit, the
+  pause or the circuit breaker, the case opens for a person instead. `safeguards: {}` gives 1 loop per 7
   days, a pause after 2 failures and drift on 2 runs. `pipewright loop pause | resume --env prod --usecase churn
   --reason "..."` pauses it by hand, recorded with your name.
 - **`canary`**, for a model on an Agent Platform endpoint: the production approval deploys the candidate as a canary
