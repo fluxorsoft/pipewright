@@ -1,0 +1,510 @@
+{
+  "bucket": "pw-ebook-spike-lockperm-11062229",
+  "started": "2026-11-06T22:31:32+00:00",
+  "tests": [
+    {
+      "test": 1,
+      "title": "get alone: read metadata (inside models/)",
+      "as": "get",
+      "http": 200,
+      "answer": "2026-11-06T23:31:35.000Z",
+      "after": null,
+      "result": "PASS: metadata readable"
+    },
+    {
+      "test": "1b",
+      "title": "get alone: read metadata OUTSIDE models/",
+      "as": "get",
+      "http": 403,
+      "answer": "sp-lp-get-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleap",
+      "after": null,
+      "result": "PASS: refused outside the condition"
+    },
+    {
+      "test": "1c",
+      "title": "get alone: try to extend retention (control)",
+      "as": "get",
+      "http": 403,
+      "answer": "sp-lp-get-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "2",
+        "retention": {
+          "retainUntilTime": "2026-11-06T23:31:35.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: refused"
+    },
+    {
+      "test": 2,
+      "title": "get+setRetention (no update): extend Unlocked retention",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "2",
+        "retention": {
+          "retainUntilTime": "2026-11-06T23:31:35.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "update needed (or other): see answer"
+    },
+    {
+      "test": 3,
+      "title": "get+setRetention+update: extend Unlocked retention",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: extended"
+    },
+    {
+      "test": 4,
+      "title": "extend a Locked retention to a later date",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "generation": "1794004295194624",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:02:15.000Z",
+          "mode": "Locked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: extended"
+    },
+    {
+      "test": 5,
+      "title": "stale ifMetagenerationMatch is refused",
+      "as": "retupd",
+      "http": 412,
+      "answer": "At least one of the pre-conditions you specified did not hold.",
+      "after": {
+        "generation": "1794004295691957",
+        "metageneration": "2",
+        "retention": {
+          "retainUntilTime": "2026-11-06T23:31:35.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: 412 and unchanged"
+    },
+    {
+      "test": "5b",
+      "title": "fresh ifMetagenerationMatch extends",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "generation": "1794004295691957",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:02:15.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: extended"
+    },
+    {
+      "test": "6-ret",
+      "title": "release a temporary hold",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295312469",
+        "metageneration": "2",
+        "retention": null,
+        "temporaryHold": true
+      },
+      "result": "PASS: cannot release"
+    },
+    {
+      "test": "6-retupd",
+      "title": "release a temporary hold",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "generation": "1794004295312469",
+        "metageneration": "3",
+        "retention": null,
+        "temporaryHold": false
+      },
+      "result": "FINDING: hold released"
+    },
+    {
+      "test": "7-ret",
+      "title": "shorten Unlocked retention",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot shorten"
+    },
+    {
+      "test": "7-ret-override",
+      "title": "shorten with overrideUnlockedRetention=true",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot shorten"
+    },
+    {
+      "test": "7-retupd",
+      "title": "shorten Unlocked retention",
+      "as": "retupd",
+      "http": 403,
+      "answer": "The unlocked object retention cannot be removed and its retention period cannot be shortened without overriding unlocked retention intent and permission.",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot shorten"
+    },
+    {
+      "test": "7-retupd-override",
+      "title": "shorten with overrideUnlockedRetention=true",
+      "as": "retupd",
+      "http": 403,
+      "answer": "sp-lp-retupd-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.overrideUnlockedRetention access to the Google Cloud Storage object. Permission 'storage.objects.overrideUnlockedRe",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot shorten"
+    },
+    {
+      "test": "7c-ret",
+      "title": "remove retention",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot remove"
+    },
+    {
+      "test": "7c-retupd",
+      "title": "remove retention",
+      "as": "retupd",
+      "http": 403,
+      "answer": "sp-lp-retupd-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.overrideUnlockedRetention access to the Google Cloud Storage object. Permission 'storage.objects.overrideUnlockedRe",
+      "after": {
+        "generation": "1794004295058363",
+        "metageneration": "3",
+        "retention": {
+          "retainUntilTime": "2026-11-07T00:07:12.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot remove"
+    },
+    {
+      "test": "7d",
+      "title": "change Unlocked to Locked (same date)",
+      "as": "retupd",
+      "http": 403,
+      "answer": "The unlocked object retention cannot be removed and its retention period cannot be shortened without overriding unlocked retention intent and permission.",
+      "after": {
+        "generation": "1794004295782151",
+        "metageneration": "2",
+        "retention": {
+          "retainUntilTime": "2026-11-06T23:31:35.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot change the mode"
+    },
+    {
+      "test": "8-ret-overwrite",
+      "title": "upload a replacement (no retention on the object)",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295573449",
+        "metageneration": "1",
+        "retention": null,
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot overwrite"
+    },
+    {
+      "test": "8-ret-delete",
+      "title": "delete the generation (no retention)",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.delete access to the Google Cloud Storage object. Permission 'storage.objects.delete' denied on resource '//storage.go",
+      "after": {
+        "generation": "1794004295573449",
+        "metageneration": "1",
+        "retention": null,
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot delete"
+    },
+    {
+      "test": "8-ret-metadata",
+      "title": "change content type and custom metadata",
+      "as": "ret",
+      "http": 403,
+      "answer": "sp-lp-ret-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.go",
+      "after": {
+        "contentType": "text/plain",
+        "metadata": null
+      },
+      "result": "PASS: cannot change metadata"
+    },
+    {
+      "test": "8-retupd-overwrite",
+      "title": "upload a replacement (no retention on the object)",
+      "as": "retupd",
+      "http": 403,
+      "answer": "sp-lp-retupd-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage",
+      "after": {
+        "generation": "1794004295573449",
+        "metageneration": "1",
+        "retention": null,
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot overwrite"
+    },
+    {
+      "test": "8-retupd-delete",
+      "title": "delete the generation (no retention)",
+      "as": "retupd",
+      "http": 403,
+      "answer": "sp-lp-retupd-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.delete access to the Google Cloud Storage object. Permission 'storage.objects.delete' denied on resource '//storage",
+      "after": {
+        "generation": "1794004295573449",
+        "metageneration": "1",
+        "retention": null,
+        "temporaryHold": false
+      },
+      "result": "PASS: cannot delete"
+    },
+    {
+      "test": "8-retupd-metadata",
+      "title": "change content type and custom metadata",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "contentType": "application/x-changed",
+        "metadata": {
+          "tampered": "yes"
+        }
+      },
+      "result": "FINDING: can change metadata"
+    },
+    {
+      "test": 9,
+      "title": "extend the approved generation while a newer one is live",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "approved_gen": {
+          "generation": "1794004295451625",
+          "metageneration": "3",
+          "retention": {
+            "retainUntilTime": "2026-11-07T00:02:20.000Z",
+            "mode": "Unlocked"
+          },
+          "temporaryHold": false
+        },
+        "live_gen": {
+          "generation": "1794004296732690",
+          "metageneration": "1",
+          "retention": null,
+          "temporaryHold": false
+        }
+      },
+      "result": "PASS: only the approved generation changed"
+    },
+    {
+      "test": "9b",
+      "title": "the same call WITHOUT ?generation=",
+      "as": "retupd",
+      "http": 200,
+      "answer": "",
+      "after": {
+        "approved_gen": {
+          "generation": "1794004295451625",
+          "metageneration": "3",
+          "retention": {
+            "retainUntilTime": "2026-11-07T00:02:20.000Z",
+            "mode": "Unlocked"
+          },
+          "temporaryHold": false
+        },
+        "live_gen": {
+          "generation": "1794004296732690",
+          "metageneration": "2",
+          "retention": {
+            "retainUntilTime": "2026-11-07T00:02:21.000Z",
+            "mode": "Unlocked"
+          },
+          "temporaryHold": false
+        }
+      },
+      "result": "NOTE: without a generation it applies to the live version"
+    },
+    {
+      "test": 10,
+      "title": "extend retention OUTSIDE models/",
+      "as": "retupd",
+      "http": 403,
+      "answer": "sp-lp-retupd-11062229@pw-ebook.iam.gserviceaccount.com does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage",
+      "after": {
+        "generation": "1794004295911443",
+        "metageneration": "2",
+        "retention": {
+          "retainUntilTime": "2026-11-06T23:31:35.000Z",
+          "mode": "Unlocked"
+        },
+        "temporaryHold": false
+      },
+      "result": "PASS: refused"
+    }
+  ],
+  "bucket_config": {
+    "versioning": {
+      "enabled": true
+    },
+    "objectRetention": {
+      "mode": "Enabled"
+    }
+  },
+  "setup": {
+    "u": {
+      "generation": "1794004295058363",
+      "metageneration": "2",
+      "retention": {
+        "retainUntilTime": "2026-11-06T23:31:35.000Z",
+        "mode": "Unlocked"
+      },
+      "temporaryHold": false
+    },
+    "l": {
+      "generation": "1794004295194624",
+      "metageneration": "2",
+      "retention": {
+        "retainUntilTime": "2026-11-06T23:31:35.000Z",
+        "mode": "Locked"
+      },
+      "temporaryHold": false
+    },
+    "h": {
+      "generation": "1794004295312469",
+      "metageneration": "2",
+      "retention": null,
+      "temporaryHold": true
+    },
+    "n": {
+      "generation": "1794004295451625",
+      "metageneration": "2",
+      "retention": {
+        "retainUntilTime": "2026-11-06T23:31:35.000Z",
+        "mode": "Unlocked"
+      },
+      "temporaryHold": false
+    },
+    "w": {
+      "generation": "1794004295573449",
+      "metageneration": "1",
+      "retention": null,
+      "temporaryHold": false
+    },
+    "p": {
+      "generation": "1794004295691957",
+      "metageneration": "2",
+      "retention": {
+        "retainUntilTime": "2026-11-06T23:31:35.000Z",
+        "mode": "Unlocked"
+      },
+      "temporaryHold": false
+    },
+    "k": {
+      "generation": "1794004295782151",
+      "metageneration": "2",
+      "retention": {
+        "retainUntilTime": "2026-11-06T23:31:35.000Z",
+        "mode": "Unlocked"
+      },
+      "temporaryHold": false
+    },
+    "o": {
+      "generation": "1794004295911443",
+      "metageneration": "2",
+      "retention": {
+        "retainUntilTime": "2026-11-06T23:31:35.000Z",
+        "mode": "Unlocked"
+      },
+      "temporaryHold": false
+    },
+    "n_gen2": {
+      "generation": "1794004296732690",
+      "metageneration": "1",
+      "retention": null,
+      "temporaryHold": false
+    }
+  },
+  "iam_propagation_seconds": 2,
+  "renewer_role": "retupd",
+  "finished": "2026-11-06T22:32:21+00:00"
+}

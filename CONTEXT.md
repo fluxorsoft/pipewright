@@ -1189,10 +1189,9 @@ bucket where a new version can be put over a locked file.
 7. **Every way back is checked like the way forward (P1).** `loop rollback` runs `integrity.verify` on the version it
    restores; `pipewright rollback` also checks that the old release's contract is still the fingerprinted one. Same
    `enforce` and messages as deploy and promote.
-8. **The lock lasts while the version is in use (P2).** With `lock.days` set, the watch renews the retention on the
-   approved generations (and the KServe copy) of every version that is a default or serving, `lock.days` ahead, and
-   stops renewing when the version is retired, so the lock then ends on its own. Renewing extends an Unlocked
-   retention, which needs no new role beyond what `approve` uses.
+8. **The lock lasts while the version is in use (P2).** Settled with the user 2026-11-06 after a live permission
+   spike: lock on activation, plus a daily renewal by a dedicated renewer identity (not the launcher), with
+   cross-identity detection and three health alerts. See "Lock renewal, settled" below.
 9. **The nudge and the response plan (P2).** `doctor` warns when a production environment has `lock.days: 0`,
    `mode: warn`, `inference: off` or `watch: off`. docs/INTEGRITY.md gains a response plan: who is paged (the use
    case's owners from `approvals`, the platform team), what refuses and what warns, the restore command
@@ -1257,10 +1256,10 @@ it the interval is a question of how soon people hear, not of money.
 | 5 Alerts and heartbeat | created by `alerts sync` when the watch is on | a broken watch is noticed (absence alert) | none | 3 policies and 3 log-based metrics per environment: within the free metric volume and time series; $0 at the prices read |
 | 6 `pipewright integrity check` | on demand | an exit code for CI | the caller's own read access | one cached lookup and a listing per version: under a cent a run |
 | 7 Rollbacks checked like deploys | follows `mode` | closes the way back | none | one check per rollback: $0 |
-| 8 Lock renewal while in use | `lock.renew: on` when `lock.days > 0` | the preventive control lasts as long as the model serves | the launcher needs to extend retention on model folders: a custom role with only `storage.objects.get` and `storage.objects.setRetention` on model folders (cannot write bytes or shorten a lock); alternative: renew only at deploy and promote, no launcher grant, but a model that serves for a year without a deploy is not renewed | Class A per file per renewal (100 versions x 5 files daily: $0.08 a month) plus retired models kept up to `lock.days` longer (5 GiB for 30 days: $0.12) |
+| 8 Lock renewal while in use | `lock.renew: on` when `lock.days > 0` (retention buckets only; hold-based buckets need none) | the preventive control lasts as long as the model is needed, plus `lock.days` | a dedicated renewer identity with `get` + `setRetention` + `update` on model folders (the spike showed `update` is required, and that it also allows releasing holds and changing metadata); the launcher keeps read-only access; detection by a cross-identity check and audit logs (see below) | Class A per file per renewal (100 versions x 5 files daily: $0.08 a month) plus retired models kept up to `lock.days` longer (5 GiB for 30 days: $0.12) |
 | 9 `doctor` nudge, restore command, response plan | always | people know when protection is off | none | $0 |
 | FR-102 (1) Audit retention | `observability.audit_retention_days: 0` (off) | the cross-check works for models older than 400 days | a locked log bucket cannot be emptied early, by anyone | Admin Activity for Agent Platform and one bucket is megabytes a month: ingestion within 50 GiB free, retention $0.01 per GiB-month (cents a year); a locked bucket's retention cannot be shortened, so it is a commitment |
-| FR-102 (2) DATA_WRITE audit logs on the artifacts bucket | starter `off`, blueprint `on` | names who wrote a file | entries hold object names and the writer's identity (an email is personal data: retention and access to follow the organisation's policy); no data values | scales with objects written (assumption: 300 per run, 1.5 KB each: 3,000 runs a month = 1.3 GiB, inside the 50 GiB free unless GKE or other logs use it up, then $0.50 per GiB); DATA_READ is not proposed (far larger) |
+| FR-102 (2) DATA_WRITE audit logs (switched on per project; a Cloud Logging exclusion keeps only the artifacts bucket's model folders, and excluded entries are not charged) | starter `off`, blueprint `on`; always on when lock renewal is on | names who wrote a file | entries hold object names and the writer's identity (an email is personal data: retention and access to follow the organisation's policy); no data values | scales with objects written (assumption: 300 per run, 1.5 KB each: 3,000 runs a month = 1.3 GiB, inside the 50 GiB free unless GKE or other logs use it up, then $0.50 per GiB); DATA_READ is not proposed (far larger) |
 | FR-102 (3) Time-boxed override | `mode: warn` needs `until` and `reason` | no permanent exception | recorded with who and why | $0 |
 | FR-102 (4) Who can write approved folders | `doctor` | least privilege made visible | `doctor`'s caller reads IAM policies (already needed) | $0 |
 
@@ -1269,15 +1268,150 @@ are on under `mode: refuse`, with `policies.integrity.pin: off` to opt out; (b) 
 is gone fails; (c) KServe uses the `emptyDir` route if the build-time check passes, else the copy; (d) the watch is off
 by default and runs hourly when turned on. **Every toggle's cost goes into docs/INTEGRITY.md as a table like the one
 above**, and `doctor` prints each integrity toggle with its state, so whoever turns one on sees the cost and the
-protection it buys. Still open for the user: the lock renewal identity (custom role on the launcher, recommended, or
-renew only at deploy and promote) and whether DATA_WRITE logs are on by default in the starter (recommended: off, on in
-the blueprint).
+protection it buys. Lock renewal and DATA_WRITE logs: settled (below).
+
+**Lock renewal, settled with the user (2026-11-06; design worked through with the user over several rounds, then a
+live permission spike).**
+
+*Invariant (for docs/INTEGRITY.md):* when `policies.integrity.lock` is on, every stored artifact needed to verify,
+serve, score or roll back an active approved model has effective protection before it becomes active, for as long as
+it is needed. "Stored" leaves out Agent Platform's own copy (Google's to hold, not ours to lock) and the event log
+(protected by 1.4.0's deletion protection and tenant-scoped writes, and by FR-102).
+
+*Principles:* (1) approval establishes the first protection; (2) operational dependency decides ongoing protection, not
+approval status; (3) activation (approve, deploy, promote, rollback) establishes protection synchronously, before it
+counts as done; (4) a daily reconciliation renews it; (5) exact generations always (`?generation=` on every call);
+(6) rollback eligibility is derived from live sources and the event log, with no second deployment-state store;
+(7) retirement stops renewal and never shortens a date; (8) temporary holds stay separate and are released only by an
+authorised, recorded command; (9) monitoring has three independent conditions; (10) cleanup is not Pipewright's job
+(retired files become deletable when their date passes; neither the starter nor the blueprint deletes model files).
+
+| Concern | Responsibility | Source of truth |
+|---|---|---|
+| Approval | first retention date | the approval (`integrity.lock`, as today) |
+| Operational use | which versions need protection | the live registry (defaults), endpoints (deployed models), KServe services |
+| Rollback eligibility | the immediately previous default, for a window | the event log, cross-checked with Admin Activity audit entries |
+| Protection | establish and renew retention | Cloud Storage (retention dates on exact generations) |
+| Retirement | stop renewing what is no longer needed | live operational state |
+| Hold release | release temporary holds | an explicit, authorised command (`pipewright model retire`), recorded with a name |
+
+*Discovery* returns a deduplicated set of protected artifacts, each with bucket, object, generation, type (model file,
+evaluation record, release contract, KServe copy) and reason (default, serving, rollback candidate, live contract).
+The previous default is rebuilt from the order of every event that made a version the default (`model.approved`
+records `previous`; registration with `set_default: on_approval`, the BigQuery ML runtime, loop rollback and the
+console do not), cross-checked with the Admin Activity audit log (as `who_made_default` does). *Failing safe means
+protecting more, never renewing nothing:* when a link is missing or the sources disagree, every candidate in the window
+is protected and the summary is `degraded`. A default that changes during a run needs no retry: the run protects
+everything it saw active, the next run settles it. Rollback window: `rollback_deadline = replaced_at +
+(lock.rollback_days or lock.days)`, only the most recent previous default; `rollback_days: 0` means no rollback window,
+while defaults and serving versions stay protected.
+
+*Reconciliation* per artifact: read the generation's metadata and metageneration; renew only when the remaining
+protection is under the threshold `T = max(lock.days / 2, 3 days)`; patch with `ifMetagenerationMatch`; on 412 re-read
+and, if the new date is enough, count it done, else retry a bounded number of times with fresh metadata; re-read and
+verify after every change; never shorten (in code, and Cloud Storage refuses it anyway). The patch body is only
+`{"retention": {...}}`; a unit test fails if any other field appears. A crash between extending and recording is
+harmless: the next run finds the date far enough out. `validate` warns when `lock.days` is under 5 and the docs
+recommend 7 or more: below that, continuous protection cannot be promised if runs are missed.
+
+*Lock on activation:* approve, deploy, promote and `pipewright rollback` / `loop rollback` establish or refresh the
+lock before the action counts as done, as the caller (who already has this access, as `approve` does today). Under
+`lock.days > 0` and `mode: refuse` they refuse when protection cannot be established (a change from 1.4.0, where
+`lock()` never fails an approval); under `mode: warn` they proceed, say so and record it; with `lock.days: 0` nothing
+changes. An expired but existing generation is protected again before activation; a deleted one cannot be, so the
+rollback refuses.
+
+**The permission spike (run live in pw-ebook 2026-11-06, torn down the same day; evidence, scripts and results in
+`docs/evidence/fr101-retention-permissions/`).** Three identities, each with one custom role on a throwaway bucket
+(object retention and versioning on), conditioned to `models/`; each result re-read from the object as an
+administrator. Permanent architectural finding:
+
+> Cloud Storage retention renewal requires `storage.objects.update` in addition to `storage.objects.get` and
+> `storage.objects.setRetention`. The update permission also permits temporary-hold release and changes to object
+> metadata. Consequently, renewal runs under a dedicated service identity, separate from the Pipewright launcher. Its
+> IAM scope is restricted to model storage folders, and DATA_WRITE audit logging detects unexpected hold changes.
+
+Verified facts: retention cannot be shortened or removed by the renewer, even with `overrideUnlockedRetention=true`
+(that needs `storage.objects.overrideUnlockedRetention`); Unlocked cannot be turned into Locked by it; Locked-mode
+retention can be extended; object contents cannot be overwritten or deleted; content type and custom metadata can be
+modified; temporary holds can be released; a stale `ifMetagenerationMatch` is refused with 412; generation-specific
+updates touch only the approved generation; omitting `generation` targets the live generation instead; nothing outside
+the `models/` condition can be read or changed; the conditional bindings took effect within seconds.
+
+*Tested role (the renewer's, custom):* `storage.objects.get`, `storage.objects.setRetention`, `storage.objects.update`,
+granted on the artifacts bucket with the condition `resource.name.startsWith("projects/_/buckets/<artifacts>/objects/
+<model folders>/")`. *Tested bucket configuration:* uniform bucket-level access, object retention enabled (only at
+creation; existing buckets use holds and get no renewer), versioning on.
+
+**Security architecture.** The launcher keeps `roles/storage.objectViewer` only and cannot renew retention or release
+holds. Renewal is `pipewright integrity renew --env <env>`, run daily by a dedicated Cloud Run job (the launcher image,
+pinned by digest, another command) under its own service account: the role above, `aiplatform.viewer` (not the
+launcher's `aiplatform.user`, so it cannot move a default, which keeps FR-100 away from it), read-only access to the
+event log, and a read of KServe services (the network path to private GKE is checked in the build; the `model.deployed`
+events are the fallback). It does only: discover, read exact-generation metadata, calculate, extend, re-read and verify,
+record. No deploy, promote, approve or rollback; no create, overwrite or delete; no IAM or bucket changes; no key files
+(the Cloud Run service identity). Discovery stays inside the renewer, so the launcher does not decide what is
+protected. Separate identities means separate principals: the launcher's service account has no binding on the
+renewer's.
+
+*Threat model.* (1) The renewer can release a hold within its scope, because `update` allows it. It never does so
+intentionally, and every exercise is observable, but this is detection, not prevention; legal holds are not claimed to
+be technically immutable. Guidance for anyone placing legal holds: keep them in a bucket or folder outside the
+renewer's scope (Pipewright itself never places holds on a bucket with object retention). (2) The real boundary for
+"no arbitrary command" is who may change the job: only Terraform (the platform team) holds `iam.serviceAccountUser`
+on the renewer's account and may update the job; the launcher and the tenant runners hold neither; `doctor` lists who
+can act as the renewer and fails when anyone else can. (3) A compromised launcher can move a default (FR-100) and so
+change what is renewed: a bounded availability and storage-cost risk, not an integrity bypass; it cannot shorten,
+delete or release anything.
+
+*Detection, two independent signals.* (a) Cross-identity check: the launcher's watch (read-only) records the hold state
+and metageneration of every protected artifact each day and alerts on a hold that disappeared or a metageneration change
+with no matching `model.lock.renewed` event, so a compromised renewer cannot hide its own changes. (b) Audit logs:
+Cloud Storage DATA_WRITE logs are switched on per project (they cannot be limited to a bucket or folder at the source),
+with a Cloud Logging exclusion that keeps only entries for the artifacts bucket's model folders (excluded entries are
+not charged); an alert on the renewer's `storage.objects.update` entries outside its scheduled run, and on any hold
+change, to the security and operations channels. The entries name the method and caller, not which fields changed
+(to confirm in the alert test), which is why (a) is the primary signal.
+
+*Events and monitoring.* `model.lock.renewed` (per artifact changed: bucket, object, generation, type, reason,
+previous and new date, actor) and `model.lock.failed`; no event for unchanged artifacts; one daily
+`model.lock.reconciliation` summary (status `healthy | degraded | failed`, protected, renewed and failed counts,
+least protection remaining in days, rollback candidates, contracts). A failed run never publishes `healthy`. Three
+independent alert conditions: summary missing within the expected interval (renewer or logging down); status not
+`healthy`; least protection remaining below two renewal intervals plus the threshold margin. An unhealthy summary does
+not suppress the low-protection alert.
+
+*Deployment gate, as code.* Terraform creates the renewer's Scheduler trigger only after the audit config, the
+exclusion, the alert policies and the cross-identity check exist; the job ships disabled; `doctor` reports the renewer
+unhealthy if any is missing. The live test releases a real hold on a test object and confirms both alerts arrive
+before the schedule is enabled in a real environment. DATA_WRITE logs: on whenever renewal is on (part of the gate);
+otherwise off in the starter and on in the blueprint.
+
+*Cost (London list prices, 2026-11-06):* the daily job about $0.05 a month (one minute, Cloud Run jobs tier 2); one
+more Scheduler job $0.10 a month unless within the billing account's 3 free; renewal operations about $0.08 a month
+for 100 versions; retired files kept up to `lock.days` longer (5 GiB for 30 days: $0.12); filtered DATA_WRITE logs
+within the free 50 GiB in most cases.
+
+*Build order for renewal:* (1) protected-artifact discovery (defaults, endpoints, KServe, rollback window, contracts,
+copies); (2) reconciliation with exact generations, the threshold minimum, metageneration preconditions and bounded
+retries; (3) lock on activation; (4) the renewer job, its identity, DATA_WRITE with the exclusion, the security alerts,
+the cross-identity check, the events, the summary and the three health alerts, as one stage, shipped disabled and
+enabled only after the live gate passes; (5) retirement; (6) the authorised hold-release command. The spike script
+becomes an integration test.
+
+*Acceptance tests:* `lock.days: 0`; outside and inside the threshold; Locked mode; an already-extended generation; a
+newer generation under the same name; a version removed from serving; a version reactivated after retirement; a failed
+storage call; a failed event write; two renewers at once (one patch wins, the other reconciles on fresh metadata);
+activation after expiry (protected again first); activation after the generation was deleted (refused); contract
+renewal; KServe copy renewal; `lock.days: 2` (threshold 3, `validate` warns); rollback window expiry; a missing
+replacement event (candidates over-protected, summary degraded, alert); a default changing during a run (protected,
+settled next run); the patch body holds only retention; a hold released on a test object (both alerts fire).
 
 **Live tests (pw-ebook pair and a rebuilt ent with GKE):** the spike's swap repeated against each path: scoring refuses
 a swapped file and runs with the approved one; a KServe scale-out after a swap starts no pod with the wrong bytes and
 the alert fires; Agent Platform approve refuses a folder changed after registration; the watch reports changed and
 restored once each; the heartbeat alert fires when the launcher is stopped; rollback paths refuse a changed version;
-lock renewal extends retention on a serving version; `integrity check` exit codes in a CI step.
+lock renewal extends retention on a serving version (with the acceptance tests and the deployment gate above); `integrity check` exit codes in a CI step.
 
 **Rules:** additive, nothing changes for a use case with integrity off; names, digests, generations and versions in
 every message, never a data value; the user reviews this design before it is built.
@@ -1422,7 +1556,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 
 ## 13. Roadmap
 
-**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence; phases 1 to 3 ship together as 1.1.0 (user, 2026-10-24), except AIOps (still to analyse). Phase 4 comes after 1.1.0, phase 5 after phase 4. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks. **After Pipewright 1.3.1 and Enterprise 1.3.3** (user, 2026-11-05): **phase 6** (released as 1.4.0, 2026-11-06): FR-93 to FR-97 (what was approved is what runs, and a trail that cannot be forged), the closed retrain loop's phases 2 and 3 (FR-48), `pipewright features register` (FR-75), `pipewright report fleet` (FR-86) and the recommended feature pattern in the reference example (FR-99); **phase 7** (the next release; user, 2026-11-06; phases 7 and 8 ship together as **1.4.1**: the user chose a patch number although they add keys, commands and events, which STABILITY.md reserves for minor versions, because adopters are few for now; revisit when there are many): know when an approved record changes between deploys (FR-101, starting with a spike on whether serving can pick up swapped files) and an audit trail that lasts (FR-102); **phase 8** (released together with phase 7, user 2026-11-06): immutable feature definitions and the complete ML release (FR-103, section 8.17); **phase 9**: online endpoints in Terraform (FR-92); **phase 10**: A/B testing (FR-57); **phase 11**: everything else, to be reviewed and prioritised (model serving observability FR-98, OpenTelemetry export, the SmartNoise engine, AIOps, and the items built when a customer needs it). The user reviews each phase's design before it is built.
+**Phases** (2026-10-22): phase 1 strengthens the core ML, phase 2 adds real time and trust, phase 3 platform scale and intelligence; phases 1 to 3 ship together as 1.1.0 (user, 2026-10-24), except AIOps (still to analyse). Phase 4 comes after 1.1.0, phase 5 after phase 4. Items marked "when a customer needs it" or "on demand" stay listed and are not phased: they are built when a customer asks. **After Pipewright 1.3.1 and Enterprise 1.3.3** (user, 2026-11-05): **phase 6** (released as 1.4.0, 2026-11-06): FR-93 to FR-97 (what was approved is what runs, and a trail that cannot be forged), the closed retrain loop's phases 2 and 3 (FR-48), `pipewright features register` (FR-75), `pipewright report fleet` (FR-86) and the recommended feature pattern in the reference example (FR-99); **phase 7** (the next release; user, 2026-11-06; phases 7 and 8 ship together as **1.4.1**: the user chose a patch number although they add keys, commands and events, which STABILITY.md reserves for minor versions, because adopters are few for now; revisit when there are many): know when an approved record changes between deploys (FR-101; spikes done, design settled in section 8.18) and an audit trail that lasts (FR-102); **phase 8** (released together with phase 7, user 2026-11-06): immutable feature definitions and the complete ML release (FR-103, section 8.17); **phase 9**: online endpoints in Terraform (FR-92); **phase 10**: A/B testing (FR-57); **phase 11**: everything else, to be reviewed and prioritised (model serving observability FR-98, OpenTelemetry export, the SmartNoise engine, AIOps, and the items built when a customer needs it). The user reviews each phase's design before it is built.
 
 **Phase 6 decisions** (user, 2026-11-05) (banking and insurance: nothing leaks into logs, and every decision is recorded so that it cannot be changed unnoticed): (1) the integrity checks (FR-93 the evaluation is the one approved, FR-94 the model files and serving image are the approved ones, FR-96 the released rules, a default with no approval) **refuse by default** from the release that ships them; a manifest policy may relax an environment to `warn`. This is the one deliberate exception to "an upgrade changes nothing until a setting asks": a failed check means what runs is not what was approved. Approvals from before 1.3.1, which carry no fingerprint, still deploy, with a note. (2) The trail is tamper-evident (fingerprints, the Cloud Audit Logs cross-check) **and approved model files are locked**: an approval places a retention lock on the version's model folder (Cloud Storage object retention, per object, for a period the platform sets), which needs object retention on the artifacts bucket. (3) FR-48's items are each behind a toggle, so nothing changes on upgrade. (4) No fingerprint, digest check or diff prints a data value: messages name records, digests, metrics and gates, never rows, feature values or slice values.
 
