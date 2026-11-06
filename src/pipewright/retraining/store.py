@@ -81,14 +81,15 @@ class CaseStore:
                 last = e
         raise last or RuntimeError("case update failed")
 
-    def set_paused(self, usecase: str, paused: dict | None) -> dict:
-        """Phase 6 safeguards: pause ({by, at, reason}) or resume (None) automatic retraining for a use case."""
+    def set_paused(self, usecase: str, paused: dict | None, resumed: dict | None = None) -> dict:
+        """Phase 6 safeguards: pause ({by, at, reason}) or resume (paused None; resumed {by, at, reason}) automatic
+        retraining for a use case. A resume records who, when and why, and the pause it ended."""
         def change(current, pointer):
             new = {k: v for k, v in pointer.items() if k != "paused"}
             if paused:
                 new["paused"] = paused
             else:
-                new["resumed"] = {k: v for k, v in (pointer.get("paused") or {}).items()}
+                new["resumed"] = {**(resumed or {}), "ended": pointer.get("paused")}
             return None, new
         _, pointer = self.update(usecase, change)
         return pointer or {}

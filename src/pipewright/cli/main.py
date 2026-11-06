@@ -565,8 +565,9 @@ def _pause(args) -> int:
     gcp = Gcp()
     who = gcp.identity()
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    paused = {"by": who, "at": now, "reason": args.reason} if args.loop_command == "pause" else None
-    client.store(production, gcp).set_paused(uc.name, paused)
+    record = {"by": who, "at": now, "reason": args.reason}
+    paused = record if args.loop_command == "pause" else None
+    client.store(production, gcp).set_paused(uc.name, paused, None if paused else record)
     events.emit(events.event(f"loop.{'paused' if paused else 'resumed'}", uc.name, production.name, uc.tenant, None,
                              None, by=who, reason=args.reason),
                 production.observability.get("events_topic"), gcp, stream=io.StringIO(), region=production.region)

@@ -81,9 +81,10 @@ def test_the_service_pauses_after_failures_and_a_person_resumes(gcs):  # noqa: F
     assert [e[0] for e in emitted] == ["retrain.proposed", "loop.paused"]
 
     s = store.CaseStore(None, "b")
-    s.set_paused("churn", None)
+    s.set_paused("churn", None, {"by": "lead@x", "at": "t", "reason": "fixed the feed"})
     pointer = json.loads(gcs["cases/churn/current.json"][0])
-    assert "paused" not in pointer and pointer["resumed"]["by"] == "safeguards"
+    assert "paused" not in pointer and pointer["resumed"]["by"] == "lead@x"          # found live: was the pause's
+    assert pointer["resumed"]["reason"] == "fixed the feed" and pointer["resumed"]["ended"]["by"] == "safeguards"
     assert pointer["open"] == got["case_id"]                     # the open case is untouched
 
 
