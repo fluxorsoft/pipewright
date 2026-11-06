@@ -53,7 +53,12 @@ policies:
 
 - **mode:** `refuse` is the default. A check that fails means what would run is not what was approved. Set `warn` for an
   environment that needs to keep going while you find out why, never as a standing setting in production.
-- **lock:** after an approval, the approved files cannot be overwritten or deleted. On a bucket created with object
+- **lock:** after an approval, the approved files cannot be destroyed: their approved generations cannot be deleted or
+  overwritten, by anyone the lock applies to. On a versioned bucket (the artifacts bucket is one), someone who may
+  write objects can still put a new version over a locked file, or delete the live copy: the approved generation then
+  becomes noncurrent and stays locked. The lock keeps the approved bytes; the checks above catch the swap and refuse
+  to deploy or promote until the approved bytes are back (`gcloud storage cp <file>#<approved generation> <file>`
+  restores one; a byte-identical copy passes the check). Tested live on private GKE. On a bucket created with object
   retention (the starter and the Enterprise blueprint create the artifacts bucket with it when a lock is configured
   from the start), each file gets retention until `days` from now: `unlocked` can be shortened or removed by someone
   with `storage.objects.overrideUnlockedRetention`; `locked` cannot be shortened or removed by anyone, including
