@@ -437,3 +437,16 @@ def test_a_repeated_promotion_reuses_the_version_it_registered():
     assert promote._promoted_already(gcp, env, model, "dev", "4", "abc123") == "1"
     assert promote._promoted_already(gcp, env, model, "dev", "4", "other") is None
     assert promote._promoted_already(gcp, env, None, "dev", "4", "abc123") is None
+
+
+def test_release_promoted_records_the_sha256_of_the_contract_on_file(setup, monkeypatch):
+    """QA finding: the event's SHA-256 came from the contract rebuilt in memory, which a repeat does not write, so
+    lineage called a genuine contract CHANGED."""
+    import hashlib
+
+    events = []
+    monkeypatch.setattr(promote.events, "emit", lambda event, *a, **k: events.append(event))
+    setup.run()
+    text, _ = setup.store[("acme-ml-prod-artifacts", "contracts/churn/abc123.json")]
+    promoted = next(e for e in events if e["event_type"] == "release.promoted")
+    assert promoted["data"]["contract_sha256"] == hashlib.sha256(text.encode()).hexdigest()

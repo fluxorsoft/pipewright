@@ -656,7 +656,8 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     from pipewright.models.integrity import contract_sha256
 
     events.emit(events.event("release.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None, by=who,
-                             contract_sha256=contract_sha256(contract.to_json()),
+                             # the bytes on file: a repeat does not rewrite the contract (found live in QA)
+                             contract_sha256=contract_sha256(existing_text or contract.to_json()),
                              previous=pointer.release_id if pointer else None, source_environment=src_env.name,
                              source_contract_sha256=source_sha, component_image=dst_image,
                              model=({k: model[k] for k in ("name", "source_version", "version")} if model else None)),

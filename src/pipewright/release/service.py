@@ -244,7 +244,9 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
     from pipewright.models.integrity import contract_sha256
 
     events.emit(events.event("release.live", uc.name, env.name, uc.tenant, release_id, None, by=who,
-                             contract_sha256=contract_sha256(contract.to_json()),
+                             # the bytes on file (a reused contract is not re-serialised; found live in QA)
+                             contract_sha256=contract_sha256(existing_text if existing is not None
+                                                             else contract.to_json()),
                              previous=pointer.release_id if pointer else None, pipelines=contract.pipeline_names,
                              component_image=component_image), env.observability.get("events_topic"), gcp,
                 stream=_quiet(), region=env.region)
