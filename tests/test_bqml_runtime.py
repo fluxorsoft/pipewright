@@ -218,3 +218,10 @@ def test_a_champion_whose_model_is_gone_is_named():
         rt.require_champion(jobs, "p.d.m", "2", "churn-bqml-classifier")
     jobs.client.get_model = lambda ref: object()
     rt.require_champion(jobs, "p.d.m", "2", "churn-bqml-classifier")       # exists: nothing to say
+
+
+def test_a_champion_whose_labels_were_removed_is_named():
+    """Found live in phase 6: ALTER MODEL outside Pipewright drops the registry labels; every later version failed
+    the champion gate with no reason given."""
+    with pytest.raises(ValueError, match=r"v1 of churn-bqml-p6-classifier, has no pipewright-bq-model label"):
+        rt.unlabelled_champion({"versionId": "1", "labels": {}}, "churn-bqml-p6-classifier")

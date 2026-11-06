@@ -175,6 +175,8 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     if champion_version and champion is None:
         raise ValueError(f"champion_version {champion_version}: {section['registry_id']} has no such version")
     champion_model = ((champion or {}).get("labels") or {}).get("pipewright-bq-model")
+    if champion and not champion_model and not forecast:
+        rt.unlabelled_champion(champion, section["registry_id"])
     if forecast:
         # ARIMA_PLUS forecasts from its own training end, so it has no champion (config refuses one); an AI.FORECAST
         # champion is its approved settings, run on this run's history.
