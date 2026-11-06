@@ -59,7 +59,7 @@ def id_token(audience: str) -> str:
 
 def body(usecase: str, pipeline: str | None, source_uri: str | None, schedule: str | None,
          run_key: str | None, replay: bool = False, champion_version: str | None = None,
-         model_version: str | None = None, loop: str | None = None) -> dict:
+         model_version: str | None = None, loop: str | None = None, loop_data: dict | None = None) -> dict:
     if not schedule and not source_uri:
         raise ConfigError("give --source-uri (or --schedule to run a schedule now)")
     from pipewright.runs import sources
@@ -69,7 +69,7 @@ def body(usecase: str, pipeline: str | None, source_uri: str | None, schedule: s
     out = {"usecase": usecase}
     for key, value in (("pipeline", pipeline), ("source_uri", source_uri), ("schedule", schedule),
                        ("run_key", run_key), ("champion_version", champion_version),
-                       ("model_version", model_version), ("loop", loop)):
+                       ("model_version", model_version), ("loop", loop), ("loop_data", loop_data)):
         if value:
             out[key] = value
     return out

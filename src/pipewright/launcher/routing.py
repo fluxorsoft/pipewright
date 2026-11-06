@@ -175,9 +175,12 @@ class Run:
     trigger: str
     overrides: tuple = ()             # (name, value) pairs from RUN_OVERRIDES
     loop: str | None = None
+    ml_config: dict | None = None     # a loop's training run on production's data (validated: loop_data)
+    recorded: tuple = ()              # what the run event records about it (table names only)
 
 
-def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = None) -> Run:
+def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = None,
+                manifest: dict | None = None) -> Run:
     """For /run: a schedule (its own pipeline) or an API call (body "pipeline", default training)."""
     schedule = body.get("schedule")
     if schedule:
@@ -193,6 +196,8 @@ def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = No
         if sources.problem(source):
             raise BadRequest(sources.problem(source))
         key = body.get("run_key") or minute_key(now)
+        if body.get("loop_data"):
+            raise BadRequest("loop_data is for a closed retrain loop's training run only, not a schedule")
         extra = tuple(overrides(target_for(contract, pipeline), body).items())
         return Run(pipeline, source, run_id(contract.usecase, "schedule", schedule, key), "schedule", extra,
                    loop_case(body))
@@ -209,4 +214,82 @@ def resolve_run(contract: ReleaseContract, body: dict, now: datetime | None = No
     key = body.get("run_key") or minute_key(now)
     parts = ["api", source, key] if pipeline == "training" else ["api", pipeline, source, key]
     loop = loop_case(body)
-    return Run(pipeline, source, run_id(contract.usecase, *parts), "loop" if loop else "api", extra, loop)
+    ml, recorded = loop_data(contract, target_for(contract, pipeline), body, loop, manifest)
+    return Run(pipeline, source, run_id(contract.usecase, *parts), "loop" if loop else "api", extra, loop, ml,
+               recorded)
+
+
+_TABLE = re.compile(r"^(?:bq://)?([a-z][a-z0-9-]{4,28}[a-z0-9])\.([A-Za-z0-9_]{1,1024})\.([A-Za-z0-9_$-]{1,1024})$")
+_LABEL_FIXED = ("key", "time_column", "cutoff_column")
+
+
+def _production_table(value, project: str, what: str) -> str:
+    m = _TABLE.match(str(value or ""))
+    if not m:
+        raise BadRequest(f"loop_data: {what} is not project.dataset.table")
+    if m.group(1) != project:
+        raise BadRequest(f"loop_data: {what} is in project {m.group(1)}, not the loop's production project {project}")
+    return f"bq://{m.group(1)}.{m.group(2)}.{m.group(3)}"          # as the runtime reads tables
+
+
+def loop_data(contract: ReleaseContract, target: PipelineTarget, body: dict, loop: str | None,
+              manifest: dict | None) -> tuple[dict | None, tuple]:
+    """FR-48 phase 6 (retraining.loop.data: production): the release's ml_config with production's feature tables and
+    label window, for a loop's training run only. Accepted only in the production project test's manifest names for
+    the tenant (tenants.<t>.loop_production_project), with the release's own features, order, prefixes and label
+    columns: only where the data is read from, and the label window, can differ. Returns (ml_config, recorded)."""
+    data = body.get("loop_data")
+    if not data:
+        return None, ()
+    if not loop or target.name != "training":
+        raise BadRequest("loop_data is for a closed retrain loop's training run only")
+    project = (((manifest or {}).get("tenants") or {}).get(contract.tenant) or {}).get("loop_production_project")
+    if not project:
+        raise BadRequest(f"loop_data: this environment's manifest names no loop_production_project for tenant "
+                         f"{contract.tenant}, so no production data is accepted")
+    import copy
+
+    ml = copy.deepcopy(target.static_parameters.get("ml_config") or {})
+    released = ml.get("data") or {}
+    tables = []
+    if data.get("features_from") is not None:
+        mine = (released.get("features_from") or {}).get("sources") or []
+        theirs = (data["features_from"] or {}).get("sources") or []
+        if not mine or len(theirs) != len(mine):
+            raise BadRequest(f"loop_data: {len(theirs)} feature sources, the release has {len(mine)}")
+        sources = []
+        for i, (m, t) in enumerate(zip(mine, theirs, strict=True)):
+            if list(t.get("features") or []) != list(m.get("features") or []) or t.get("prefix") != m.get("prefix"):
+                raise BadRequest(f"loop_data: feature source {i} must have the release's features and prefix")
+            columns = t.get("columns") or {}
+            if set(columns) != set(m["features"]) or not all(isinstance(v, str) and v for v in columns.values()):
+                raise BadRequest(f"loop_data: feature source {i} must map each of its features to a column")
+            entity = t.get("entity_columns")
+            if not entity or not all(isinstance(c, str) and c for c in entity) or not isinstance(
+                    t.get("time_column"), str):
+                raise BadRequest(f"loop_data: feature source {i} needs its entity and time columns")
+            table = _production_table(t.get("table"), project, f"feature source {i}")
+            tables.append(table)
+            sources.append({"table": table, "entity_columns": list(entity), "time_column": t["time_column"],
+                            "features": list(m["features"]), "columns": dict(columns),
+                            **({"prefix": m["prefix"]} if m.get("prefix") else {})})
+            # No feature_group key: a source with one is looked up again in this project's registry.
+        released["features_from"] = {**released["features_from"], "sources": sources}
+        allowed = (ml.get("platform") or {}).get("feature_datasets")
+        if allowed is not None:                   # the production datasets, for this run only
+            ml["platform"]["feature_datasets"] = sorted(set(allowed) | {t.removeprefix("bq://").rsplit(".", 1)[0]
+                                                                        for t in tables})
+    if data.get("label_source") is not None:
+        mine, theirs = released.get("label_source"), data["label_source"] or {}
+        if not mine:
+            raise BadRequest("loop_data: the release has no data.label_source to read from production")
+        if any(theirs.get(k) != mine.get(k) for k in _LABEL_FIXED):
+            raise BadRequest("loop_data: the label source must keep the release's key, time and cutoff columns")
+        days = theirs.get("window_days")
+        if not isinstance(days, int) or not 1 <= days <= 3650:
+            raise BadRequest("loop_data: label_source.window_days must be 1 to 3650 days")
+        table = _production_table(theirs.get("table"), project, "the label source")
+        tables.append(table)
+        released["label_source"] = {**mine, "table": table, "window_days": days}
+    ml["data"] = released
+    return ml, (("data_from", "production"), ("data_tables", sorted({t.removeprefix("bq://") for t in tables})))

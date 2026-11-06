@@ -494,6 +494,10 @@
             ],
             "description": "this tenant's Ray settings, over the environment's"
           },
+          "loop_production_project": {
+            "type": ["string", "null"],
+            "description": "the closed retrain loop (FR-48, phase 6): the production project whose data this tenant's loop training runs may read (retraining.loop.data: production); the launcher accepts production's feature and label tables only there"
+          },
           "features": {
             "anyOf": [
               {

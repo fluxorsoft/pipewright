@@ -39,7 +39,44 @@ class GcpBackend:
         return launch.run(self.envs[env], launch.body(
             body["usecase"], body["pipeline"], body["source_uri"], None, body["run_key"],
             champion_version=body.get("champion_version"), model_version=body.get("model_version"),
-            loop=body.get("loop")), gcp=self.gcp)
+            loop=body.get("loop"), loop_data=body.get("loop_data")), gcp=self.gcp)
+
+    def production_data(self) -> dict | None:
+        """FR-48 phase 6 (retraining.loop.data: production in production's configuration): production's feature
+        tables, resolved from its Feature Registry as the runtime would, and its label source, for the loop's
+        training run in test. None: test's own data configuration, as before."""
+        from pipewright.build.templates import pipewright_runtime as rt
+
+        uc, e = self.ucs[self.production.name], self.production
+        if ((uc.ml.get("retraining") or {}).get("loop") or {}).get("data") != "production":
+            return None
+        data, out = uc.ml.get("data") or {}, {}
+        if data.get("features_from"):
+            sources = []
+            for src in data["features_from"]["sources"]:
+                if "feature_group" not in src:
+                    sources.append({**src, "table": "bq://" + rt.bq_table(src["table"], e.project)})
+                    continue
+                url = rt._REGISTRY.format(region=e.region, project=e.project, group=src["feature_group"])
+                group = self.gcp.get(url)
+                if not group.ok:
+                    raise ConfigError(f"feature group {src['feature_group']} in {e.name}: HTTP {group.status}")
+                features, token = [], None
+                while True:
+                    page = self.gcp.get(f"{url}/features", pageSize=100, **({"pageToken": token} if token else {}))
+                    if not page.ok:
+                        raise ConfigError(f"features of {src['feature_group']} in {e.name}: HTTP {page.status}")
+                    features += (page.body or {}).get("features", [])
+                    token = (page.body or {}).get("nextPageToken")
+                    if not token:
+                        break
+                resolved = rt.group_source(src, group.body or {}, features)
+                sources.append({**resolved, "table": "bq://" + rt.bq_table(resolved["table"], e.project)})
+            out["features_from"] = {"sources": sources}
+        if data.get("label_source"):
+            out["label_source"] = {**data["label_source"],
+                                   "table": "bq://" + rt.bq_table(data["label_source"]["table"], e.project)}
+        return out or None
 
     def job_state(self, env: str, job_id: str) -> str | None:
         e = self.envs[env]

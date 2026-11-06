@@ -85,12 +85,16 @@ class Loop:
         if not uri:
             raise ConfigError(f"case {self.case_id} has no training data: give --source-uri")
         champion = self._production_champion()
+        # Phase 6 (retraining.loop.data: production): production's feature tables and label window.
+        data = getattr(self.backend, "production_data", lambda: None)()
         run_id, job_id = self.backend.run_ids("training", uri, self.case_id)
         self.backend.submit(self.test, {"usecase": self.usecase, "pipeline": "training", "source_uri": uri,
                                         "run_key": self.case_id, "loop": self.case_id,
-                                        **({"champion_version": champion["test_version"]} if champion else {})})
+                                        **({"champion_version": champion["test_version"]} if champion else {}),
+                                        **({"loop_data": data} if data else {})})
         return self._step("training", source_uri=uri, champion=champion,
                           training={"run_id": run_id, "job_id": job_id},
+                          **({"data_from": "production"} if data else {}),
                           _note=f"training in {self.test}" + (f" against v{champion['test_version']} (production "
                                                                f"v{champion['production_version']})" if champion
                                                                else " (production has no model yet)"))

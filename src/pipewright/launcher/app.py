@@ -77,7 +77,8 @@ def create_app(registry: Registry | None = None) -> Flask:
                     region=contract.region, attributes=attributes)
 
     def start(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str,
-              hint: str = "", extra: dict | None = None, loop: str | None = None) -> dict:
+              hint: str = "", extra: dict | None = None, loop: str | None = None, ml: dict | None = None,
+              recorded: dict | None = None) -> dict:
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
         if pipeline == "inference":
@@ -94,13 +95,16 @@ def create_app(registry: Registry | None = None) -> Flask:
                             "reason": problem}
                 log.warning("integrity (warn) %s %s: %s", contract.usecase, pipeline, problem)
         try:
-            name = adapters.submit(contract, target, parameters_for(contract, target, source_uri, rid, extra), jid,
+            params = parameters_for(contract, target, source_uri, rid, {**(extra or {}), **({"ml_config": ml}
+                                                                                        if ml else {})})
+            name = adapters.submit(contract, target, params, jid,
                                    labels_for(contract, trigger, rid, pipeline, loop), reg().manifest.get("security"),
                                    manifest=reg().manifest, gcp=getattr(reg(), "gcp", None))
             log.info("submitted %s (%s %s, release %s) for %s", name, contract.usecase, pipeline,
                      contract.release_id, source_uri)
             _event("run.submitted", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid,
-                   source_uri=source_uri, job=name, **(extra or {}), **({"loop": loop} if loop else {}))
+                   source_uri=source_uri, job=name, **(extra or {}), **({"loop": loop} if loop else {}),
+                   **(recorded or {}))
             return {"usecase": contract.usecase, "pipeline": pipeline, "status": "submitted", "job_id": jid,
                     "run_id": rid, "release": contract.release_id}
         except AlreadySubmitted:
@@ -337,7 +341,7 @@ def create_app(registry: Registry | None = None) -> Flask:
             reason = reg().errors.get(usecase, "no live release")
             return jsonify(status="error", reason=f"{usecase}: {reason}"), 404
         try:
-            r = resolve_run(contract, body)
+            r = resolve_run(contract, body, manifest=reg().manifest)
         except BadRequest as e:
             return jsonify(status="error", reason=str(e)), 400
         if r.pipeline == "training" and r.trigger == "schedule" and loop_on(contract):
@@ -349,7 +353,7 @@ def create_app(registry: Registry | None = None) -> Flask:
                 return jsonify(status="error", reason=str(e)[:300]), 500
         try:
             result = start(contract, r.pipeline, r.source_uri, r.run_id, r.trigger, body.get("schedule") or "",
-                           dict(r.overrides), r.loop)
+                           dict(r.overrides), r.loop, r.ml_config, dict(r.recorded))
         except Exception as e:  # noqa: BLE001
             log.exception("failed to submit %s", usecase)
             return jsonify(status="error", reason=str(e)), 500
