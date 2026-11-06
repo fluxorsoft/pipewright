@@ -631,6 +631,19 @@ def default_version(project: str, region: str, registry_id: str, session=None, v
     return r.json()
 
 
+def require_champion(jobs: Jobs, ref: str, version, registry_id: str) -> None:
+    """The champion's BigQuery model must still exist. Found live in phase 6 (ent): a registry default whose model
+    went with its dataset failed every later training run with a bare 404; this says which and what to do."""
+    from google.api_core.exceptions import NotFound
+
+    try:
+        jobs.client.get_model(ref)
+    except NotFound:
+        raise ValueError(f"the champion, v{version} of {registry_id}, names BigQuery model {ref}, which no longer "
+                         "exists: make a version whose model exists the default (`pipewright model approve`), or "
+                         "turn off evaluation.champion") from None
+
+
 def registered_version(jobs: Jobs, model: str, wait_s: int = 300) -> str:
     """The registry version ALTER MODEL created: BigQuery records it on the model once the registry has it."""
     deadline = time.time() + wait_s

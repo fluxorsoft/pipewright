@@ -201,3 +201,20 @@ def test_scoring_proposes_and_records(repo, tmp_path):
     uc = resolve(bqml_repo(repo))
     infos = compile_all(uc, "europe-west2-docker.pkg.dev/acme/img/churn@sha256:" + "0" * 64, tmp_path)
     assert {"check-drift-and-performance", "propose-retraining", "record-monitoring"} <= set(infos["inference"].tasks)
+
+
+def test_a_champion_whose_model_is_gone_is_named():
+    """Phase 6, found live on ent: the default version's BigQuery model went with its dataset; training failed
+    with a bare 404 in bqml-evaluate."""
+    from types import SimpleNamespace
+
+    from google.api_core.exceptions import NotFound
+
+    def get_model(ref):
+        raise NotFound("Not found: Model p:d.m")
+
+    jobs = SimpleNamespace(client=SimpleNamespace(get_model=get_model))
+    with pytest.raises(ValueError, match=r"the champion, v2 of churn-bqml-classifier, names BigQuery model p.d.m"):
+        rt.require_champion(jobs, "p.d.m", "2", "churn-bqml-classifier")
+    jobs.client.get_model = lambda ref: object()
+    rt.require_champion(jobs, "p.d.m", "2", "churn-bqml-classifier")       # exists: nothing to say

@@ -191,6 +191,7 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     elif champion_model:
         dataset = ml_config["platform"]["bigquery_dataset"]
         champion_ref = f"{project}.{dataset}.{champion_model}"
+        rt.require_champion(jobs, champion_ref, champion.get("versionId"), section["registry_id"])
         champion_predictions = rt.table_ref(project, ml_config, run_id, "champion")
         jobs.run(rt.predict_sql(ml_config, champion_ref, rows_table, champion_predictions, "_pw_test", jobs.labels,
                                 True, parts=rt.model_parts(jobs, champion_ref)), "champion predictions")
