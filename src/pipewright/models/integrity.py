@@ -465,6 +465,26 @@ def approval_audit(gcp, env: Environment, model: str, at: str, by: str | None) -
             "note": f"the audit log names {found[0]['principal']}, the event says {by}"}
 
 
+def who_made_default(gcp, env: Environment, model: str, version: str, since: str | None) -> dict:
+    """A default with no approval on record: who moved the `default` alias to it, from the Admin Activity audit log
+    (found live on ent: a version made the default with the API was refused, but nothing said by whom). A first
+    version has no such entry: Model Registry made it the default when it was registered."""
+    model_id = model.rsplit("/", 1)[-1].split("@")[0]
+    start = _window(since, 0)[0] if since else None
+    try:
+        found = _audit(gcp, env, f'protoPayload.serviceName="aiplatform.googleapis.com" AND '
+                                 f'protoPayload.methodName:"MergeVersionAliases" AND '
+                                 f'protoPayload.resourceName:"models/{model_id}@{version}" AND '
+                                 f'protoPayload.request.versionAliases="default"'
+                                 + (f' AND timestamp>="{start}"' if start else ""), limit=1)
+    except (ConfigError, ValueError) as e:
+        return {"note": f"not checked: {e}"}
+    if found:
+        return found[0]
+    return {"note": "no alias change in the Admin Activity audit log: Model Registry made it the default when it "
+                    "was registered (its first version), or the entry is older than the log keeps"}
+
+
 # -- scoring with an unapproved default (policies.integrity.inference) ---------------------------------------------
 
 def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:

@@ -120,6 +120,9 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
         out["integrity"] = {**check.summary(), "problems_found": check.problems, "notes": check.notes}
         if check.approval and check.approval.get("lock"):
             out["integrity"]["lock"] = check.approval["lock"]
+        if not check.approval and check.problems and out.get("default"):
+            out["integrity"]["made_default"] = integrity.who_made_default(gcp, env, resource, out["version"],
+                                                                          out.get("created"))
     except Exception as e:  # noqa: BLE001 - lineage still shows everything else
         out["integrity"] = {"result": f"not checked: {str(e).splitlines()[0][:160]}"}
     for d in out.get("decisions") or []:
@@ -320,6 +323,10 @@ def _render_integrity(info: dict, lines: list[str]) -> None:
         lines.append(f"           {p}")
     for n in i.get("notes") or []:
         lines.append(f"           note: {n}")
+    made = i.get("made_default")
+    if made:
+        lines.append(f"           made the default by {made['principal']} at {made['at']} ({made['method']}, "
+                     "Admin Activity audit log)" if made.get("principal") else f"           {made.get('note')}")
     if i.get("lock"):
         lk = i["lock"]
         how = ("on a temporary hold (no end date)" if lk.get("method") == "hold" else

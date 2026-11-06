@@ -464,3 +464,23 @@ def test_the_remedy_is_said_but_never_counted_as_a_problem():
     text = str(e.value)
     assert "2 problems" in text and "\n  fix: re-approve the version after review" in text
     assert len(e.value.problems) == 2
+
+
+def test_who_made_an_unapproved_version_the_default():
+    """Found live on ent: a version made the default with the API was refused, but nothing said by whom."""
+    seen = []
+
+    def post(url, body):
+        seen.append(body["filter"])
+        entries = [{"timestamp": "2026-11-06T01:54:56.1Z", "protoPayload": {
+            "methodName": "google.cloud.aiplatform.v1.ModelService.MergeVersionAliases",
+            "authenticationInfo": {"principalEmail": "someone@example.com"}}}] if len(seen) == 1 else []
+        return SimpleNamespace(ok=True, body={"entries": entries})
+
+    gcp = SimpleNamespace(post=post)
+    env = SimpleNamespace(project="p")
+    got = integrity.who_made_default(gcp, env, "projects/p/locations/r/models/115@2", "2", "2026-11-06 01:50:35")
+    assert got["principal"] == "someone@example.com" and got["at"] == "2026-11-06T01:54:56"
+    assert 'resourceName:"models/115@2"' in seen[0] and 'timestamp>="2026-11-06T01:50:35Z"' in seen[0]
+    first = integrity.who_made_default(gcp, env, "projects/p/locations/r/models/115", "1", None)
+    assert "made it the default when it was registered" in first["note"]
