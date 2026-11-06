@@ -127,7 +127,8 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
         out["integrity"] = {"result": f"not checked: {str(e).splitlines()[0][:160]}"}
     for d in out.get("decisions") or []:
         if d.get("event") == "model.approved":
-            d["audit"] = integrity.approval_audit(gcp, env, resource, d["at"], d.get("by"))
+            d["audit"] = integrity.approval_audit(gcp, env, resource, d["at"], d.get("by"),
+                                                  promoted=bool(d.get("source_environment")))
             if d.get("evaluation_now") in ("changed", "missing") and (d.get("evaluation") or {}).get("record"):
                 d["changed_by"] = integrity.who_wrote(gcp, env, d["evaluation"]["record"], d["at"])
 

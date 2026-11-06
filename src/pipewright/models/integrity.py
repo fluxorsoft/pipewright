@@ -443,16 +443,20 @@ def who_wrote(gcp, env: Environment, record: str, after: str) -> dict:
         "note": "no Data Access audit entry (Cloud Storage data access logs off, or kept elsewhere)"}
 
 
-def approval_audit(gcp, env: Environment, model: str, at: str, by: str | None) -> dict:
+def approval_audit(gcp, env: Environment, model: str, at: str, by: str | None, promoted: bool = False) -> dict:
     """The Admin Activity entry (always on, cannot be turned off) for the change an approval made: the `default`
     alias moved (MergeVersionAliases) or a first version's approval label (UpdateModel). Compares the principal with
-    the event's `by`: an event with no entry, or another principal, is flagged."""
+    the event's `by`: an event with no entry, or another principal, is flagged. A first version approved with its
+    promotion (`promoted`) became the default by its upload (UploadModel, which names the model only in its
+    operation): found live on ent-prod, where it was flagged as having no entry."""
     model_id = model.rsplit("/", 1)[-1].split("@")[0]
     start, end = _window(at, 10)
+    upload = (f' OR (protoPayload.methodName:"UploadModel" AND operation.id:"models/{model_id}/")' if promoted
+              else "")
     try:
         found = _audit(gcp, env, f'protoPayload.serviceName="aiplatform.googleapis.com" AND '
-                                 f'protoPayload.methodName:("MergeVersionAliases" OR "UpdateModel") AND '
-                                 f'protoPayload.resourceName:"models/{model_id}" AND '
+                                 f'((protoPayload.methodName:("MergeVersionAliases" OR "UpdateModel") AND '
+                                 f'protoPayload.resourceName:"models/{model_id}"){upload}) AND '
                                  f'timestamp>="{start}" AND timestamp<="{end}"', limit=10)
     except ConfigError as e:
         return {"state": "not checked", "note": str(e)}

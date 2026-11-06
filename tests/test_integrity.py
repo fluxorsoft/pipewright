@@ -484,3 +484,23 @@ def test_who_made_an_unapproved_version_the_default():
     assert 'resourceName:"models/115@2"' in seen[0] and 'timestamp>="2026-11-06T01:50:35Z"' in seen[0]
     first = integrity.who_made_default(gcp, env, "projects/p/locations/r/models/115", "1", None)
     assert "made it the default when it was registered" in first["note"]
+
+
+def test_a_promotion_approval_is_matched_by_its_upload():
+    """Found live on ent-prod: a first version approved with its promotion became the default by its upload, which
+    the audit check did not look for, so EV-06 said the approval had no entry."""
+    seen = []
+
+    def post(url, body):
+        seen.append(body["filter"])
+        return SimpleNamespace(ok=True, body={"entries": [{"timestamp": "2026-11-06T02:42:46Z", "protoPayload": {
+            "methodName": "google.cloud.aiplatform.v1.ModelService.UploadModel",
+            "authenticationInfo": {"principalEmail": "lead@example.com"}}}]})
+
+    gcp = SimpleNamespace(post=post)
+    got = integrity.approval_audit(gcp, SimpleNamespace(project="p"), "projects/p/locations/r/models/9",
+                                   "2026-11-06 02:43:01", "lead@example.com", promoted=True)
+    assert got["state"] == "matched" and 'operation.id:"models/9/"' in seen[0]
+    integrity.approval_audit(gcp, SimpleNamespace(project="p"), "projects/p/locations/r/models/9",
+                             "2026-11-06 02:43:01", "lead@example.com")
+    assert "UploadModel" not in seen[1]                     # only a promotion's approval counts its upload
