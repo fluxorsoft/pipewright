@@ -421,3 +421,19 @@ def test_a_changed_source_is_reported_before_template_differences(setup, monkeyp
     with pytest.raises(ConfigError, match="not what was approved"):
         setup.run()
     assert compiled == [] and setup.calls == []
+
+
+def test_a_repeated_promotion_reuses_the_version_it_registered():
+    """QA finding: a promotion that failed after registering the model registered it again when re-run, leaving the
+    first copy the default with no approval."""
+    from types import SimpleNamespace as NS
+
+    listed = {"models": [{"versionId": "1", "labels": {"promoted-from": "dev", "source-version": "4",
+                                                       "release": promote.publish._tag("abc123")}},
+                         {"versionId": "2", "labels": {"promoted-from": "dev", "source-version": "3"}}]}
+    gcp = NS(get=lambda url, **k: NS(ok=True, body=listed))
+    env = NS(region="europe-west2")
+    model = {"name": "projects/p/locations/europe-west2/models/9"}
+    assert promote._promoted_already(gcp, env, model, "dev", "4", "abc123") == "1"
+    assert promote._promoted_already(gcp, env, model, "dev", "4", "other") is None
+    assert promote._promoted_already(gcp, env, None, "dev", "4", "abc123") is None

@@ -347,6 +347,20 @@ def source_version(gcp: Gcp, src_env: Environment, name: str, release_id: str, v
     return str(version), chosen
 
 
+def _promoted_already(gcp, dst_env: Environment, dst_model: dict | None, source_env: str, version: str,
+                      release_id: str) -> str | None:
+    """The destination version an earlier run of this promotion registered (its labels say where it came from)."""
+    if not dst_model:
+        return None
+    r = gcp.get(f"{_model_api(dst_env)}/{dst_model['name']}:listVersions", pageSize=100)
+    for v in (r.body or {}).get("models", []) if r.ok else []:
+        labels = v.get("labels") or {}
+        if (labels.get("promoted-from") == source_env[:63] and labels.get("source-version") == version
+                and labels.get("release") == publish._tag(release_id)[:63]):
+            return str(v.get("versionId"))
+    return None
+
+
 def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: ResolvedUseCase,
                   release_id: str, version: str | None, log=print, loop_case: str | None = None) -> dict:
     """The source's approved version, as a new candidate version in the destination's Model Registry.
@@ -362,6 +376,13 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     files = copy_model_files(gcp, chosen["artifactUri"], dest_uri, log)
 
     dst_model = _find_model(gcp, dst_env, name)
+    again = _promoted_already(gcp, dst_env, dst_model, src_env.name, str(version), release_id)
+    if again:
+        # QA finding: a promotion that failed after registering the model (before its pointer moved) registered it
+        # again when re-run, leaving the first copy the default with no approval. The repeat reuses it.
+        log(f"model: {name} v{version} ({src_env.name}) was promoted already as v{again} ({dst_env.name}): reused")
+        return {"name": name, "source_version": str(version), "source_artifact_uri": chosen["artifactUri"],
+                "artifact_uri": dest_uri, "version": again, "files": files}
     from pipewright.models import online
 
     # FR-76: the destination's own online lookup, never the source's (serving.json in the files names the source's).
