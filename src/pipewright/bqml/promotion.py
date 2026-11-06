@@ -228,8 +228,8 @@ def promote_bqml_model(gcp, src_env, dst_env, uc_src, uc_dst, release_id: str, v
                   "status": "candidate", "release": tag(release_id)[:63], "promoted-from": src_env.name[:63],
                   "source-version": str(version), **({"pipewright-loop": tag(loop_case)[:63]} if loop_case else {})}
     rt.label_version(dst_env.project, dst_env.region, registry_id, new, new_labels, session=gcp.session)
-    log(f"model: {registry_id} v{version} ({src_env.name}) -> v{new} ({dst_env.name}), a candidate (imported, "
-        "parity checked)")
+    log(f"model: {registry_id} v{version} ({src_env.name}) -> v{new} ({dst_env.name}), "
+        + ("its first version there, so the default" if not before else "a candidate") + " (imported, parity checked)")
     return {"name": registry_id, "source_version": str(version), "source_artifact_uri": src_records,
             "artifact_uri": dst_records, "version": str(new), "files": files, "parity": result,
             "bigquery_model": dst_ref, "transform": dst_transform}
