@@ -139,7 +139,7 @@ def test_metrics_per_deployed_model_from_cloud_monitoring():
 
 
 def test_the_soak_window_starts_before_the_deploy_so_the_probe_counts():
-    """Found live: the window began after the deploy and its probe, so a quiet endpoint's canary served nothing in it."""
+    """Found live: the window began after the deploy and its probe: a quiet endpoint's canary served nothing in it."""
     b = CanaryBackend()
     lp = to_validated(b)
     deploy = b.deploy_canary
