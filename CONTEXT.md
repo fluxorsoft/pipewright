@@ -1142,7 +1142,7 @@ what the checks compare for Agent Platform, then adds the watch and the alert. A
 changes its bytes, so "load generation G and check its SHA-256" is safe even with the lock off and on a versioned
 bucket where a new version can be put over a locked file.
 
-**Order of work (each item additive; what is on by default is listed under Decisions):**
+**Order of work (each item additive; item 0, the cached approval lookup, comes first; toggles, defaults and costs are in the table below):**
 
 1. **Batch scoring reads the approved bytes (P0).** The launcher's scoring check already reads the approval
    (`inference_check`); with `policies.integrity.inference: warn | refuse` it now also runs the full `integrity.verify`
@@ -1211,15 +1211,67 @@ runners that can write or delete in a production artifacts bucket.
 (item 3), shows the watch's first-seen and restored times, and EV-06 records them. The alert in item 5 is provisioned
 by the blueprint for Enterprise environments.
 
-**Decisions for the user (recommended first):**
-- (a) Items 1 and 2 on whenever the environment's integrity mode is `refuse` (the 1.4.0 default), not behind a new
-  toggle: they only ever load the bytes that deploy already insisted on, and they fail with the reason. *Alternative:*
-  a new `policies.integrity.pin: on | off`, off by default, as the stable-upgrades rule would normally ask.
-- (b) A scoring run whose approved generation is gone (versioning off, or deleted): fail the run (recommended) or warn
-  and fall back to the live folder.
-- (c) KServe: the approval-named copy (works with any serving image) or the `emptyDir` route if the build-time check
-  shows the prebuilt image accepts a local path (no copy, recommended if it works).
-- (d) The watch interval default: 1 hour (recommended), or every scheduler tick.
+**Governance, security and cost, item by item (user, 2026-11-06: "people taking decisions should know cost
+implications too"; the user accepted the recommendations below and asked for toggles and facts first).**
+Prices are Google's list prices from the Cloud Billing Catalog API, USD, europe-west2, read 2026-11-06, before free
+tiers unless stated: BigQuery analysis $7.8125 per TiB (first 1 TiB a month free per billing account; at least 10 MiB
+billed per table a query references); Cloud Storage Standard London $0.023 per GiB-month, regional Class A $0.000005 and
+Class B $0.0000004 per operation; Cloud Run in London is tier 2, request-based $0.0000336 per vCPU-second and
+$0.0000035 per GiB-second; Cloud Logging ingestion $0.50 per GiB after 50 GiB per project a month, retention beyond 30
+days $0.01 per GiB-month; Cloud Monitoring metric volume $0.258 per MiB after 150 MiB, time series billed $0.0000005
+each after 1 million; Cloud Scheduler $0.10 per job a month after 3 free. The catalog listed no per-condition charge
+for alerting policies on that date. Same-region reads from Cloud Storage by GKE or a pipeline are free of network
+charges (Google's network pricing rule). Facts from the code: the launcher already has an hourly Cloud Scheduler tick
+(`17 * * * *`, retraining), runs at 1 vCPU and 1 GiB with no minimum instances, and holds `aiplatform.user`,
+`storage.objectViewer` on the artifacts bucket and, with `inference` on, `bigquery.jobUser`; the events table is
+partitioned by day on `publish_time`; neither the starter nor the blueprint deletes old object versions by a lifecycle
+rule.
+
+**The one finding that decides the cost: the approval lookup.** `integrity.approval_events` runs one BigQuery query per
+version with no date filter, so every check scans the whole event log, and the log only grows. A watch built on it
+costs (assumptions: 30 events a use case a day at 1.5 KB each, a 12-month-old log, 1.5 versions watched per use case;
+replaced by a measurement in the build):
+
+| Fleet | Every 15 min | Every hour | Every 6 hours | Daily |
+|---|---|---|---|---|
+| 5 use cases, today's lookup | $14.56 / month | $3.64 | $0.61 | $0.15 |
+| 25 use cases, today's lookup | $321 | $80 | $13 | $3.35 |
+| 100 use cases, today's lookup | $5,015 | $1,254 | $209 | $52 |
+| 5 use cases, cached lookup | $0.79 | $0.20 | $0.03 | $0.01 |
+| 25 use cases, cached lookup | $2.23 | $0.56 | $0.09 | $0.02 |
+| 100 use cases, cached lookup | $7.65 | $1.91 | $0.32 | $0.08 |
+
+Cached lookup: one query per tick that reads only the partitions since the last tick (approvals never change once
+written), kept in a small state file the launcher already can write beside its run markers. Its cost is almost all
+Cloud Run time. So **the lookup is a P0 fix for the whole phase** (it also serves 1.4.0's deploy and scoring checks:
+100 use cases scoring daily with `inference` on already scan about 4.4 TiB a month, about $34, after a year), and with
+it the interval is a question of how soon people hear, not of money.
+
+| Item | Toggle (default) | Governance | Security | Cost (list prices above) |
+|---|---|---|---|---|
+| 0 Cached approval lookup | none (internal) | same answers, faster | no new access | turns the table above from the first three rows to the last three |
+| 1 Scoring loads approved bytes | `policies.integrity.pin: on` when `mode: refuse` (the 1.4.0 default), `off` to opt out | prevents a swapped file being scored; the run fails with the file and generation | no new access: reading a generation needs the same `storage.objects.get` | same downloads as today, one cached lookup per run: about $0 |
+| 2 KServe serves approved bytes, checked at pod start | the same `pin` key | prevents; a changed file stops the new pod, old pods keep serving (SRE: capacity can fall during a scale-out until restored, by design) | `emptyDir` route: nothing new to protect; copy route: a second folder, writable only by the deployer | `emptyDir`: $0 storage; copy: $0.023 per GiB-month per version kept (0.5 GiB model, 12 versions: $0.14 a month; 20 GiB: $5.52); the check adds seconds of hashing at pod start, and on Autopilot an init container is billed only above the predictor's own requests |
+| 3 Register records the files Agent Platform copies | none (a record) | the approval is provably what serves | none | hashing the model files once at registration: Class B reads (fractions of a cent) and seconds of the training step |
+| 4 The watch | `policies.integrity.watch: off`; when on, `every: 1h` on the existing tick (no new Scheduler job) | detects and tells; prevention is items 1 and 2; worst-case notice = the interval | reads only, as the launcher; Terraform adds `bigquery.jobUser` when on | cached: $0.01 to $7.65 a month by fleet and interval (table) |
+| 5 Alerts and heartbeat | created by `alerts sync` when the watch is on | a broken watch is noticed (absence alert) | none | 3 policies and 3 log-based metrics per environment: within the free metric volume and time series; $0 at the prices read |
+| 6 `pipewright integrity check` | on demand | an exit code for CI | the caller's own read access | one cached lookup and a listing per version: under a cent a run |
+| 7 Rollbacks checked like deploys | follows `mode` | closes the way back | none | one check per rollback: $0 |
+| 8 Lock renewal while in use | `lock.renew: on` when `lock.days > 0` | the preventive control lasts as long as the model serves | the launcher needs to extend retention on model folders: a custom role with only `storage.objects.get` and `storage.objects.setRetention` on model folders (cannot write bytes or shorten a lock); alternative: renew only at deploy and promote, no launcher grant, but a model that serves for a year without a deploy is not renewed | Class A per file per renewal (100 versions x 5 files daily: $0.08 a month) plus retired models kept up to `lock.days` longer (5 GiB for 30 days: $0.12) |
+| 9 `doctor` nudge, restore command, response plan | always | people know when protection is off | none | $0 |
+| FR-102 (1) Audit retention | `observability.audit_retention_days: 0` (off) | the cross-check works for models older than 400 days | a locked log bucket cannot be emptied early, by anyone | Admin Activity for Agent Platform and one bucket is megabytes a month: ingestion within 50 GiB free, retention $0.01 per GiB-month (cents a year); a locked bucket's retention cannot be shortened, so it is a commitment |
+| FR-102 (2) DATA_WRITE audit logs on the artifacts bucket | starter `off`, blueprint `on` | names who wrote a file | entries hold object names and the writer's identity (an email is personal data: retention and access to follow the organisation's policy); no data values | scales with objects written (assumption: 300 per run, 1.5 KB each: 3,000 runs a month = 1.3 GiB, inside the 50 GiB free unless GKE or other logs use it up, then $0.50 per GiB); DATA_READ is not proposed (far larger) |
+| FR-102 (3) Time-boxed override | `mode: warn` needs `until` and `reason` | no permanent exception | recorded with who and why | $0 |
+| FR-102 (4) Who can write approved folders | `doctor` | least privilege made visible | `doctor`'s caller reads IAM policies (already needed) | $0 |
+
+**Decisions (user, 2026-11-06: the recommendations stand, with toggles and their cost shown):** (a) items 1 and 2
+are on under `mode: refuse`, with `policies.integrity.pin: off` to opt out; (b) a scoring run whose approved generation
+is gone fails; (c) KServe uses the `emptyDir` route if the build-time check passes, else the copy; (d) the watch is off
+by default and runs hourly when turned on. **Every toggle's cost goes into docs/INTEGRITY.md as a table like the one
+above**, and `doctor` prints each integrity toggle with its state, so whoever turns one on sees the cost and the
+protection it buys. Still open for the user: the lock renewal identity (custom role on the launcher, recommended, or
+renew only at deploy and promote) and whether DATA_WRITE logs are on by default in the starter (recommended: off, on in
+the blueprint).
 
 **Live tests (pw-ebook pair and a rebuilt ent with GKE):** the spike's swap repeated against each path: scoring refuses
 a swapped file and runs with the approved one; a KServe scale-out after a swap starts no pod with the wrong bytes and
