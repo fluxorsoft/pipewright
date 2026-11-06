@@ -92,10 +92,10 @@ def test_no_canary_without_the_current_version_on_the_endpoint_and_nothing_chang
 def test_the_judgement():
     ok, why = canary.judge({"predictions": 1000, "errors": 2, "latency_ms": 110},
                            {"predictions": 9000, "errors": 9, "latency_ms": 100}, CFG, {"ok": True, "note": "fine"})
-    assert ok and "error rate 0.0020 (current 0.0010)" in why and "latency 110 ms" in why
+    assert ok and "error rate 0.0020 (current 0.0010)" in why and "median latency 110 ms" in why
     bad, why = canary.judge({"predictions": 1000, "errors": 40, "latency_ms": 200},
                             {"predictions": 9000, "errors": 9, "latency_ms": 100}, CFG, None)
-    assert not bad and "error rate 0.0400" in why and "latency 200 ms against 100 ms" in why
+    assert not bad and "error rate 0.0400" in why and "median latency 200 ms against 100 ms" in why
     silent, why = canary.judge({}, {"predictions": 10}, CFG, None)
     assert not silent and "served no requests" in why
     probed, why = canary.judge({"predictions": 5}, {}, CFG, {"ok": False, "note": "1 invalid"})
@@ -129,13 +129,14 @@ def test_metrics_per_deployed_model_from_cloud_monitoring():
         metric = params["filter"].split('metric.type="')[1].split('"')[0].rsplit("/", 1)[-1]
         series = {"prediction_count": [("222", {"int64Value": "500"}), ("111", {"int64Value": "4500"})],
                   "error_count": [("222", {"int64Value": "1"})],
-                  "prediction_latencies": [("222", {"distributionValue": {"mean": 120.0, "count": "500"}})]}[metric]
+                  "prediction_latencies": [("222", {"doubleValue": 120.0})]}[metric]
         return SimpleNamespace(ok=True, status=200, body={"timeSeries": [
             {"metric": {"labels": {"deployed_model_id": d}}, "points": [{"value": v}]} for d, v in series]})
 
     got = canary.endpoint_metrics(SimpleNamespace(get=get), "p", "9", "2026-11-06T10:00:00Z", "2026-11-06T10:31:00Z")
     assert got == {"222": {"predictions": 500, "errors": 1, "latency_ms": 120.0}, "111": {"predictions": 4500}}
     assert seen[0]["aggregation.alignmentPeriod"] == "1860s" and 'endpoint_id="9"' in seen[0]["filter"]
+    assert seen[2]["aggregation.perSeriesAligner"] == "ALIGN_PERCENTILE_50"                 # the median
 
 
 def test_the_soak_window_starts_before_the_deploy_so_the_probe_counts():
@@ -151,3 +152,10 @@ def test_the_soak_window_starts_before_the_deploy_so_the_probe_counts():
     b.deploy_canary = slow_deploy
     rec = lp.advance(approve=True)
     assert rec["canary"]["started_at"] == T0.isoformat()
+
+
+def test_a_cold_canary_is_not_judged_on_latency_until_it_has_served_enough():
+    """Found live on ent-prod: 30 requests after a cold start doubled the latency and rolled a healthy canary back."""
+    ok, why = canary.judge({"predictions": 30, "errors": 0, "latency_ms": 45},
+                           {"predictions": 120, "errors": 0, "latency_ms": 22}, CFG, {"ok": True, "note": "fine"})
+    assert ok and "latency not compared (30 canary requests, fewer than 50)" in why

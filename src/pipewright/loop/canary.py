@@ -19,7 +19,7 @@ import math
 from datetime import datetime
 
 DEFAULTS = {"percent": 10, "soak_minutes": 30, "max_error_rate_increase": 0.01, "max_latency_increase": 0.2,
-            "probe": True}
+            "min_requests": 50, "probe": True}
 METRICS = "aiplatform.googleapis.com/prediction/online/"
 PROBE_ROWS = 12
 
@@ -44,12 +44,17 @@ def judge(canary: dict, current: dict, cfg: dict, probe: dict | None) -> tuple[b
         else:
             notes.append(f"error rate {rate:.4f} (current {base:.4f})")
         lat, cur = canary.get("latency_ms"), current.get("latency_ms")
-        if lat is not None and cur:
+        # Medians, and only on enough requests: a fresh canary's first calls are slow (found live: 30 requests
+        # after a cold start doubled the mean and rolled a healthy canary back).
+        if canary["predictions"] < cfg.get("min_requests", 50):
+            notes.append(f"latency not compared ({canary['predictions']} canary requests, fewer than "
+                         f"{cfg.get('min_requests', 50)})")
+        elif lat is not None and cur:
             if lat > cur * (1 + cfg["max_latency_increase"]):
-                reasons.append(f"latency {lat:.0f} ms against {cur:.0f} ms (at most {cfg['max_latency_increase']:.0%} "
-                               "slower)")
+                reasons.append(f"median latency {lat:.0f} ms against {cur:.0f} ms (at most "
+                               f"{cfg['max_latency_increase']:.0%} slower)")
             else:
-                notes.append(f"latency {lat:.0f} ms (current {cur:.0f} ms)")
+                notes.append(f"median latency {lat:.0f} ms (current {cur:.0f} ms)")
         else:
             notes.append("latency not compared (no requests to the current version in the window)")
     if reasons:
@@ -119,13 +124,13 @@ def endpoint_metrics(gcp, project: str, endpoint_id: str, start: str, end: str) 
                            - datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds()))
     out: dict[str, dict] = {}
 
-    def series(metric: str, aligner: str):
+    def series(metric: str, aligner: str, reducer: str = "REDUCE_SUM"):
         r = gcp.get(api, **{
             "filter": f'metric.type="{METRICS}{metric}" AND resource.type="aiplatform.googleapis.com/Endpoint" '
                       f'AND resource.labels.endpoint_id="{endpoint_id}"',
             "interval.startTime": start, "interval.endTime": end,
             "aggregation.alignmentPeriod": f"{seconds}s", "aggregation.perSeriesAligner": aligner,
-            "aggregation.crossSeriesReducer": "REDUCE_SUM",
+            "aggregation.crossSeriesReducer": reducer,
             "aggregation.groupByFields": "metric.label.deployed_model_id"})
         if not r.ok:
             from pipewright.errors import ConfigError
@@ -138,11 +143,11 @@ def endpoint_metrics(gcp, project: str, endpoint_id: str, start: str, end: str) 
             d = (ts.get("metric") or {}).get("labels", {}).get("deployed_model_id")
             total = sum(int((p.get("value") or {}).get("int64Value") or 0) for p in ts.get("points") or [])
             out.setdefault(str(d), {})[name] = out.get(str(d), {}).get(name, 0) + total
-    for ts in series("prediction_latencies", "ALIGN_DELTA"):
+    # The median over the window, per deployed model (a mean is dragged up by a cold start's first calls).
+    for ts in series("prediction_latencies", "ALIGN_PERCENTILE_50", "REDUCE_MEAN"):
         d = (ts.get("metric") or {}).get("labels", {}).get("deployed_model_id")
-        means = [((p.get("value") or {}).get("distributionValue") or {}) for p in ts.get("points") or []]
-        counted = [(float(m.get("mean") or 0), int(m.get("count") or 0)) for m in means if m.get("count")]
-        if counted:
-            n = sum(c for _, c in counted)
-            out.setdefault(str(d), {})["latency_ms"] = sum(m * c for m, c in counted) / n
+        values = [float((p.get("value") or {}).get("doubleValue")) for p in ts.get("points") or []
+                  if (p.get("value") or {}).get("doubleValue") is not None]
+        if values:
+            out.setdefault(str(d), {})["latency_ms"] = sum(values) / len(values)
     return out

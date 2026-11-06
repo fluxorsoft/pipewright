@@ -726,7 +726,8 @@
                 "percent": { "type": "integer", "minimum": 1, "maximum": 50, "description": "the canary's share (default 10)" },
                 "soak_minutes": { "type": "integer", "minimum": 5, "maximum": 1440, "description": "default 30" },
                 "max_error_rate_increase": { "type": "number", "minimum": 0, "maximum": 1, "description": "error rate above the current version's, as a fraction of requests (default 0.01)" },
-                "max_latency_increase": { "type": "number", "minimum": 0, "description": "latency above the current version's, as a ratio (default 0.2: 20% slower at most)" },
+                "max_latency_increase": { "type": "number", "minimum": 0, "description": "median latency above the current version's, as a ratio (default 0.2: 20% slower at most)" },
+                "min_requests": { "type": "integer", "minimum": 1, "description": "canary requests in the soak window before latency is compared (default 50)" },
                 "probe": { "type": "boolean", "description": "send the validation rows to the canary; their scores must match test's (default true)" }
               }
             },

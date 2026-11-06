@@ -228,7 +228,8 @@ retraining.loop.canary: "The online canary with automatic rollback, for a model 
 retraining.loop.canary.percent: "The canary's share of traffic, in percent (default 10)."
 retraining.loop.canary.soak_minutes: "How long the canary serves before it is checked (default 30)."
 retraining.loop.canary.max_error_rate_increase: "How much higher the canary's error rate may be than the current version's, as a fraction of requests (default 0.01)."
-retraining.loop.canary.max_latency_increase: "How much slower the canary may be than the current version, as a ratio (default 0.2)."
+retraining.loop.canary.max_latency_increase: "How much slower the canary's median latency may be than the current version's, as a ratio (default 0.2)."
+retraining.loop.canary.min_requests: "Canary requests in the soak window before latency is compared; fewer, and only errors and the probe judge it (default 50)."
 retraining.loop.canary.probe: "Whether the validation rows are sent to the canary; their scores must match what test scored (default true). No request or response is stored."
 retraining.loop.data: "Whose data configuration the loop's training run in test reads: test (default, as before) or production (its feature tables and label window, through the read-only loop_readers grant)."
 retraining.decisions: How people hear about a retrain case and how long they have to decide.

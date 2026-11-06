@@ -467,8 +467,9 @@ Four settings under `retraining.loop` (new in phase 6; each off until set, in pr
   days, a pause after 2 failures and drift on 2 runs. `pipewright loop pause | resume --env prod --usecase churn
   --reason "..."` pauses it by hand, recorded with your name.
 - **`canary`**, for a model on an Agent Platform endpoint: the production approval deploys the candidate as a canary
-  (`percent`, default 10); after `soak_minutes` (30) its error rate and latency are compared with the current
-  version's in Cloud Monitoring (`max_error_rate_increase` 0.01, `max_latency_increase` 0.2), with a probe. Healthy,
+  (`percent`, default 10); after `soak_minutes` (30) its error rate and median latency are compared with the
+  current version's in Cloud Monitoring (`max_error_rate_increase` 0.01, `max_latency_increase` 0.2; latency only
+  after `min_requests`, 50, so a cold start is not held against it), with a probe. Healthy,
   it takes all traffic and the case closes; otherwise it is removed and the previous version is the default again,
   without a person. The probe is a BigQuery ML version's parity with `ML.PREDICT`; for a container model, whose files
   are the candidate's by SHA-256, valid answers to instances built from its training statistics (never a row). The
