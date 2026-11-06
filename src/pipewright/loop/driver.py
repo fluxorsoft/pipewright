@@ -39,6 +39,10 @@ class Loop:
     backend: Backend
     by: str | None = None
     log: list = field(default_factory=list)
+    clock: object = None                    # () -> datetime (tests); the wall clock by default
+
+    def _now(self) -> datetime:
+        return self.clock() if self.clock else datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------ reading --
 
@@ -119,6 +123,8 @@ class Loop:
             return self._promote(loop)
         if state == "verifying":
             return self._after_verification(loop)
+        if state == "canary":
+            return self._after_canary(loop)
         return loop                                               # terminal, or waiting
 
     def rollback(self, reason: str) -> dict:
@@ -198,11 +204,24 @@ class Loop:
         return self._step("validated" if outcome == "ok" else "validation-failed", _note=note)
 
     def _promote(self, loop: dict) -> dict:
-        """The production approval: promote the candidate, make it the default, then a scoring run to verify it."""
+        """The production approval: promote the candidate, make it the default, then a scoring run to verify it, or
+        (retraining.loop.canary) a canary on the endpoint, checked after its soak window."""
         previous = next((str(v["version"]) for v in self.backend.versions(self.production) if v["default"]), None)
+        canary = getattr(self.backend, "canary_settings", lambda: None)()
+        if canary:
+            # Before anything changes in production: a canary needs the endpoint to serve the current version.
+            self.backend.canary_ready()
         promoted = self.backend.promote(loop["candidate"]["test_version"])
         version = str(promoted["version"])
         self.backend.approve(self.production, version)
+        if canary:
+            deployed = self.backend.deploy_canary(version, canary)
+            return self._step("canary", promotion={"production_version": version, "previous_version": previous,
+                                                   "release_id": promoted.get("release_id")},
+                              canary={**deployed, "started_at": self._now().replace(microsecond=0).isoformat(),
+                                      "soak_minutes": canary["soak_minutes"]},
+                              _note=f"production default v{previous} -> v{version}; canary at {canary['percent']}% "
+                                    f"for {canary['soak_minutes']} minutes")
         key = f"{self.case_id}-verify"
         run_id, job_id = self.backend.run_ids("inference", loop["source_uri"], key)
         self.backend.submit(self.production, {"usecase": self.usecase, "pipeline": "inference",
@@ -220,6 +239,28 @@ class Loop:
             return self._step("closed", _note=note)
         return self._step("verification-failed", _note=note + ": `pipewright loop rollback` restores "
                                                            f"v{(loop.get('promotion') or {}).get('previous_version')}")
+
+
+    def _after_canary(self, loop: dict) -> dict:
+        """After the soak window: healthy, the canary takes all traffic and the case closes; otherwise it is removed
+        and the previous version is the default again, automatically (D-108)."""
+        from datetime import timedelta
+
+        c = loop["canary"]
+        due = datetime.fromisoformat(c["started_at"]) + timedelta(minutes=int(c["soak_minutes"]))
+        if self._now() < due:
+            self.log.append(f"{self.case_id}: the canary soaks until {due.isoformat()}")
+            return loop
+        healthy, why = self.backend.canary_health(c)
+        if healthy:
+            self.backend.promote_canary()
+            return self._step("closed", canary={**c, "result": "healthy", "checked": why},
+                              _note=f"canary healthy ({why}): it serves all traffic")
+        previous = (loop.get("promotion") or {}).get("previous_version")
+        self.backend.rollback_canary(previous)
+        return self._step("rolled-back", canary={**c, "result": "unhealthy", "checked": why},
+                          rolled_back_to=previous, reason=f"canary: {why}",
+                          _note=f"canary unhealthy ({why}): removed; production default is v{previous} again")
 
 
 def needs_approval(loop: dict) -> bool:

@@ -540,8 +540,8 @@ def _loop(args):
 
 def _render_loop(loop: dict) -> str:
     lines = [f"state: {loop.get('state')}"]
-    for key in ("source_uri", "champion", "training", "candidate", "validation", "promotion", "verification",
-                "rolled_back_to"):
+    for key in ("source_uri", "data_from", "champion", "training", "candidate", "validation", "promotion",
+                "verification", "canary", "rolled_back_to"):
         if loop.get(key) is not None:
             lines.append(f"  {key}: {json.dumps(loop[key], default=str)}")
     lines.append("history:")

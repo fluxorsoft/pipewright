@@ -125,6 +125,86 @@ class GcpBackend:
             raise ConfigError(f"promotion of v{version} to {self.production.name} left no model version")
         return {"version": str(promoted), "release_id": result.contract.release_id}
 
+    # ----------------------------------------------------- the canary (phase 6) --
+
+    def canary_settings(self) -> dict | None:
+        from pipewright.loop import canary
+
+        uc = self.ucs[self.production.name]
+        return canary.settings(((uc.ml.get("retraining") or {}).get("loop") or {}).get("canary"))
+
+    def _prod(self):
+        return self.ucs[self.production.name], self.production, self.gcp.session.credentials
+
+    def canary_ready(self) -> None:
+        from pipewright.models import deploy
+
+        uc, env, creds = self._prod()
+        ai = deploy._aiplatform(env, creds)
+        endpoints = ai.Endpoint.list(filter=f'display_name="{deploy.endpoint_name(uc)}"')
+        if not endpoints or not endpoints[0].list_models():
+            raise ConfigError(f"retraining.loop.canary: {deploy.endpoint_name(uc)} serves no version in "
+                              f"{env.name}, so there is nothing to compare a canary with: deploy the current version "
+                              "first (`pipewright deploy-model`); nothing was promoted")
+
+    def deploy_canary(self, version: str, cfg: dict) -> dict:
+        """The default (the candidate, just approved) as a canary at cfg percent; a container model is probed."""
+        import dataclasses
+        import json
+
+        from pipewright.loop import canary
+        from pipewright.models import deploy
+
+        uc, env, creds = self._prod()
+        model = {**uc.model, "serving": {**uc.model["serving"], "canary_percent": cfg["percent"]}}
+        deploy.deploy(dataclasses.replace(uc, model=model), env, creds, canary=True, log=lambda *_: None)
+        endpoint, deployed, newest, _ = deploy._canary_state(uc, env, creds)
+        out = {"endpoint": endpoint.resource_name, "deployed_model_id": str(newest.id),
+               "current_deployed_model_ids": [str(d.id) for d in deployed if d.id != newest.id]}
+        bqml = bool((uc.ml or {}).get("bqml"))
+        if cfg.get("probe", True) and not bqml:      # a BigQuery ML deploy has run its parity check already
+            from pipewright.gcp.storage import gcs_read
+
+            found = self.gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{newest.model}"
+                                 f"@{newest.model_version_id}")
+            uri = (found.body or {}).get("artifactUri") if found.ok else None
+            bucket, _, prefix = str(uri or "").removeprefix("gs://").partition("/")
+            text, _ = gcs_read(self.gcp, bucket, prefix.rstrip("/") + "/training_stats.json") if bucket else (None, 0)
+            stats = json.loads(text) if text else {}
+            out["probe"] = canary.probe(endpoint, out["deployed_model_id"], canary.probe_instances(stats))
+        elif bqml:
+            out["probe"] = {"ok": True, "note": "BigQuery ML parity with ML.PREDICT checked by the deploy"}
+        return out
+
+    def canary_health(self, c: dict) -> tuple[bool, str]:
+        from datetime import datetime, timezone
+
+        from pipewright.loop import canary
+
+        uc, env, _ = self._prod()
+        cfg = self.canary_settings()
+        start, end = canary.window(c["started_at"].replace("+00:00", "Z"), datetime.now(timezone.utc))
+        metrics = canary.endpoint_metrics(self.gcp, env.project, c["endpoint"].rsplit("/", 1)[-1], start, end)
+        current: dict = {}
+        for d in c.get("current_deployed_model_ids") or []:
+            for k, v in (metrics.get(d) or {}).items():
+                current[k] = current.get(k, 0) + v if k != "latency_ms" else v
+        return canary.judge(metrics.get(c["deployed_model_id"]) or {}, current, cfg, c.get("probe"))
+
+    def promote_canary(self) -> None:
+        from pipewright.models import deploy
+
+        uc, env, creds = self._prod()
+        deploy.promote(uc, env, creds, log=lambda *_: None)
+
+    def rollback_canary(self, previous: str | None) -> None:
+        from pipewright.models import deploy
+
+        uc, env, creds = self._prod()
+        deploy.undeploy_canary(uc, env, creds, log=lambda *_: None)
+        if previous:
+            self.approve(self.production.name, previous)
+
     def approve(self, env: str, version: str) -> None:
         from pipewright.models import registry
 
