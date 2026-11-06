@@ -136,3 +136,18 @@ def test_metrics_per_deployed_model_from_cloud_monitoring():
     got = canary.endpoint_metrics(SimpleNamespace(get=get), "p", "9", "2026-11-06T10:00:00Z", "2026-11-06T10:31:00Z")
     assert got == {"222": {"predictions": 500, "errors": 1, "latency_ms": 120.0}, "111": {"predictions": 4500}}
     assert seen[0]["aggregation.alignmentPeriod"] == "1860s" and 'endpoint_id="9"' in seen[0]["filter"]
+
+
+def test_the_soak_window_starts_before_the_deploy_so_the_probe_counts():
+    """Found live: the window began after the deploy and its probe, so a quiet endpoint's canary served nothing in it."""
+    b = CanaryBackend()
+    lp = to_validated(b)
+    deploy = b.deploy_canary
+
+    def slow_deploy(version, cfg):
+        lp.clock = lambda: T0 + timedelta(minutes=15)                 # a deploy takes a while
+        return deploy(version, cfg)
+
+    b.deploy_canary = slow_deploy
+    rec = lp.advance(approve=True)
+    assert rec["canary"]["started_at"] == T0.isoformat()

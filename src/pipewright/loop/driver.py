@@ -215,10 +215,13 @@ class Loop:
         version = str(promoted["version"])
         self.backend.approve(self.production, version)
         if canary:
+            # The window starts before the deploy, so the probe's requests count (found live: a quiet endpoint's
+            # canary had no requests in a window that began after its probe).
+            started = self._now().replace(microsecond=0).isoformat()
             deployed = self.backend.deploy_canary(version, canary)
             return self._step("canary", promotion={"production_version": version, "previous_version": previous,
                                                    "release_id": promoted.get("release_id")},
-                              canary={**deployed, "started_at": self._now().replace(microsecond=0).isoformat(),
+                              canary={**deployed, "started_at": started,
                                       "soak_minutes": canary["soak_minutes"]},
                               _note=f"production default v{previous} -> v{version}; canary at {canary['percent']}% "
                                     f"for {canary['soak_minutes']} minutes")
