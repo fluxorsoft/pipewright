@@ -213,13 +213,15 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
 
             contract = dataclasses.replace(contract, images=recorded_images)
         try:
-            generation = gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
+            written = gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
         except PreconditionFailed:
             raise ConfigError(f"contract {release_id} of {uc.name} was published by another release while this one "
                               "ran; nothing went live. Re-run the release.") from None
         from pipewright.models import integrity
 
-        integrity.lock_contract(gcp, env, env.artifacts_bucket, name, generation, log)    # QA governance (G10)
+        # QA governance (G10). `written`, not `generation`: that one is the pointer's (found live: reusing the name
+        # made the pointer write fail its precondition).
+        integrity.lock_contract(gcp, env, env.artifacts_bucket, name, written, log)
     contract_uri = f"gs://{env.artifacts_bucket}/{name}"
     log(f"contract: {contract_uri}")
 

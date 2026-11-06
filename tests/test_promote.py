@@ -44,12 +44,15 @@ def setup(repo, monkeypatch, tmp_path):
     def gcs_read(gcp, bucket, name):
         return state.store.get((bucket, name), (None, 0))
 
+    generations = iter(range(1000, 10**6))       # Cloud Storage generations are unique numbers, never per object
+
     def gcs_write(gcp, bucket, name, text, if_generation_match=None, **_):
         current = state.store.get((bucket, name))
         if if_generation_match is not None and (current[1] if current else 0) != if_generation_match:
             raise promote.PreconditionFailed(name)
         state.calls.append(f"write {name}")
-        state.store[(bucket, name)] = (text, (current[1] if current else 0) + 1)
+        state.store[(bucket, name)] = (text, next(generations))
+        return state.store[(bucket, name)][1]      # as the real one does (a QA bug hid behind None here)
 
     def compile_pinned(uc, image, out_dir, synthetic_images=None):
         path = tmp_path / "compiled.yaml"

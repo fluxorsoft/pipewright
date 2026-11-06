@@ -606,10 +606,10 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     contract = ReleaseContract.from_dict({**json.loads(contract.to_json()), "promoted_from": record})
     if not existing_text:
         try:
-            generation = gcs_write(gcp, dst_env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
+            written = gcs_write(gcp, dst_env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
             from pipewright.models import integrity
 
-            integrity.lock_contract(gcp, dst_env, dst_env.artifacts_bucket, name, generation, log)   # QA (G10)
+            integrity.lock_contract(gcp, dst_env, dst_env.artifacts_bucket, name, written, log)   # QA (G10)
         except PreconditionFailed:
             raise ConfigError(f"another promotion wrote release {rid} of {uc_dst.name} meanwhile; nothing went live. "
                               "Re-run to check it.") from None
