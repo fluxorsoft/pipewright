@@ -550,9 +550,36 @@ def _render_loop(loop: dict) -> str:
     return "\n".join(lines)
 
 
+def _pause(args) -> int:
+    """Phase 6 safeguards: `loop pause | resume`, recorded on the production case store and as an event."""
+    import io
+    from datetime import datetime, timezone
+
+    from pipewright.gcp import Gcp
+    from pipewright.observability import events
+    from pipewright.retraining import client
+
+    root = Path(args.root)
+    production = load_environment(root, args.env)
+    uc = resolve_usecase(_selected(root, [args.usecase])[args.usecase], production)
+    gcp = Gcp()
+    who = gcp.identity()
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    paused = {"by": who, "at": now, "reason": args.reason} if args.loop_command == "pause" else None
+    client.store(production, gcp).set_paused(uc.name, paused)
+    events.emit(events.event(f"loop.{'paused' if paused else 'resumed'}", uc.name, production.name, uc.tenant, None,
+                             None, by=who, reason=args.reason),
+                production.observability.get("events_topic"), gcp, stream=io.StringIO(), region=production.region)
+    print(f"automatic retraining of {uc.name} in {production.name}: "
+          + ("paused" if paused else "resumed") + f" by {who} ({args.reason})")
+    return 0
+
+
 def cmd_loop(args) -> int:
     from pipewright.loop import driver
 
+    if args.loop_command in ("pause", "resume"):
+        return _pause(args)
     loop = _loop(args)
     if args.loop_command == "start":
         record = loop.start(args.source_uri)
@@ -1129,6 +1156,14 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--steps", type=int, default=1, help="steps to take at most (default 1)")
         if action == "rollback":
             sp.add_argument("--reason", required=True, help="recorded with your name")
+        sp.set_defaults(func=cmd_loop)
+    for action, text in (("pause", "pause automatic retraining of a use case (safeguards; recorded)"),
+                         ("resume", "resume automatic retraining (after a pause, or the safeguards' circuit breaker)")):
+        sp = lsub.add_parser(action, help=text)
+        sp.add_argument("--root", default=".")
+        sp.add_argument("--env", required=True, help="the production environment")
+        sp.add_argument("--usecase", required=True)
+        sp.add_argument("--reason", required=True, help="recorded with your name")
         sp.set_defaults(func=cmd_loop)
 
     sp = sub.add_parser("retrain", help="retrain decisions: drift opens a case, a person decides")

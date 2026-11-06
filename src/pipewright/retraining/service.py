@@ -113,15 +113,23 @@ class Decisions:
                "release": contract.release_id, "requested_by": contract.runner_service_account,
                "run_id": body.get("run_id"), "champion": champion}
         held: dict = {}
+        cases = self.store.list(contract.usecase) if s.safeguards and s.loop and s.mode == "candidate" else []
 
         def change(current, pointer):
             if current and any(o.get("run_id") == obs["run_id"] for o in current.get("observations") or []):
                 held["out"] = rc.Outcome(None, status=f"case {current['case_id']}: run already recorded")
                 return None, None
-            out = rc.observe(current, pointer.get("last_approved_at"), obs, s, now, ctx)
+            guarded = rc.guard(cases, pointer, s, now) if s.safeguards else None
+            out = rc.observe(current, pointer.get("last_approved_at"), obs, s, now, ctx, guarded)
             held["out"] = out
             if out.case is None:
                 return None, None
+            if (guarded and not guarded.get("paused") and s.safeguards
+                    and guarded["failures"] >= s.safeguards["pause_after_failures"]):
+                # The circuit breaker: paused until a person resumes it (`pipewright loop resume`).
+                pointer = {**pointer, "paused": {"by": "safeguards", "at": rc.iso(now),
+                                                 "reason": f"{guarded['failures']} automatic loops in a row failed"}}
+                held["paused"] = pointer["paused"]
             if out.case["state"] == "approved":            # handed to the closed retrain loop at once (candidate)
                 return out.case, {**pointer, "open": None, "last_case": out.case["case_id"],
                                   "last_approved_at": out.case.get("approved_at")}
@@ -136,6 +144,8 @@ class Decisions:
             return {"status": "no-case", "detail": out.status}
         for event_type, data in out.events:
             self.emit(contract, s, case, event_type, data)
+        if held.get("paused"):
+            self.emit(contract, s, case, "loop.paused", held["paused"])
         if out.submit:
             case = self._submit(contract, case, out.submit)
         return {"status": "recorded", "case_id": case["case_id"], "state": case["state"], "detail": out.status}

@@ -219,6 +219,18 @@ retraining.cooldown_days: Days after an approved retrain during which new alerts
 retraining.source_uri: The training data an approved retrain uses by default; an approver may choose another.
 retraining.loop: "The closed retrain loop: production never trains. An approved case here is trained in the environment this one's releases come from (environments/<env>.yaml promotion.from), on this environment's data through a read-only grant, compared with the model this environment serves, validated by a scoring run there, then promoted, approved and verified here. `pipewright loop` drives it."
 retraining.loop.enabled: Switch the closed retrain loop on, usually only in production (environments/<env> file). Off, an approved case trains in this environment, as in 1.0.
+retraining.loop.safeguards: "Limits on loops started without a person (retraining.mode candidate). Held by one, the case opens for a person to decide. {} gives the defaults: 1 loop per 7 days, pause after 2 failures in a row, drift on 2 runs in a row. Off when not set."
+retraining.loop.safeguards.max_loops: "Automatic loops allowed per period (default 1)."
+retraining.loop.safeguards.per_days: "The period for max_loops, in days (default 7)."
+retraining.loop.safeguards.pause_after_failures: "Automatic loops in a row that end rejected, failed or rolled back before automatic retraining pauses until `pipewright loop resume` (default 2)."
+retraining.loop.safeguards.drift_runs: "A drift trigger starts a loop only when this many scoring runs in a row alerted (default 2)."
+retraining.loop.canary: "The online canary with automatic rollback, for a model served on an Agent Platform endpoint: after the production approval the loop deploys the candidate as a canary, checks it after the soak window, then gives it all traffic or rolls it back. Off when not set."
+retraining.loop.canary.percent: "The canary's share of traffic, in percent (default 10)."
+retraining.loop.canary.soak_minutes: "How long the canary serves before it is checked (default 30)."
+retraining.loop.canary.max_error_rate_increase: "How much higher the canary's error rate may be than the current version's, as a fraction of requests (default 0.01)."
+retraining.loop.canary.max_latency_increase: "How much slower the canary may be than the current version, as a ratio (default 0.2)."
+retraining.loop.canary.probe: "Whether the validation rows are sent to the canary; their scores must match what test scored (default true). No request or response is stored."
+retraining.loop.data: "Whose data configuration the loop's training run in test reads: test (default, as before) or production (its feature tables and label window, through the read-only loop_readers grant)."
 retraining.decisions: How people hear about a retrain case and how long they have to decide.
 retraining.decisions.notify: Who is emailed a case's summary and ID. Email never approves anything.
 retraining.decisions.publish: Whether decision events also go to the tenant's decision feed (a subscription the platform provides).

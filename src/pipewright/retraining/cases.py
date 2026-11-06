@@ -53,6 +53,7 @@ class Settings:
     publish: bool = False
     digest: bool = True
     loop: bool = False                      # retraining.loop.enabled: the closed retrain loop trains elsewhere
+    safeguards: dict | None = None          # retraining.loop.safeguards (phase 6): None is off
 
     @classmethod
     def from_config(cls, retraining: dict, policy: dict | None = None) -> Settings:
@@ -73,7 +74,60 @@ class Settings:
                    escalate_after_days=dec.get("escalate_after_days", 3), cooldown_days=r.get("cooldown_days", 7),
                    source_uri=r.get("source_uri"), notify=tuple(dec.get("notify") or ()),
                    escalate_notify=tuple(dec.get("escalate_notify") or ()), publish=bool(dec.get("publish")),
-                   digest=dec.get("digest", True), loop=bool((r.get("loop") or {}).get("enabled")))
+                   digest=dec.get("digest", True), loop=bool((r.get("loop") or {}).get("enabled")),
+                   safeguards=safeguards((r.get("loop") or {}).get("safeguards")))
+
+
+SAFEGUARD_DEFAULTS = {"max_loops": 1, "per_days": 7, "pause_after_failures": 2, "drift_runs": 2}
+LOOP_FAILURES = ("rejected", "failed", "validation-failed", "verification-failed", "rolled-back")
+AUTOMATIC = "retraining.mode candidate"      # who started a loop without a person
+
+
+def safeguards(cfg: dict | None) -> dict | None:
+    """retraining.loop.safeguards with the conservative defaults (user, 2026-11-06); None when not set."""
+    return None if cfg is None else {**SAFEGUARD_DEFAULTS, **cfg}
+
+
+def automatic_loops(cases: list[dict]) -> list[dict]:
+    """The cases whose loop started without a person, newest first."""
+    auto = [c for c in cases if ((c.get("loop") or {}).get("history") or [{}])[0].get("by") == AUTOMATIC]
+    return sorted(auto, key=lambda c: c.get("approved_at") or "", reverse=True)
+
+
+def guard(cases: list[dict], pointer: dict, s: Settings, now: datetime) -> dict:
+    """What the safeguards need: the pause, automatic loops in the period, and failures in a row."""
+    auto = automatic_loops(cases)
+    since = now - timedelta(days=(s.safeguards or SAFEGUARD_DEFAULTS)["per_days"])
+    recent = [c for c in auto if (parse(c.get("approved_at")) or since) >= since]
+    failures = 0
+    for c in auto:
+        state = (c.get("loop") or {}).get("state")
+        if state in LOOP_FAILURES:
+            failures += 1
+        elif state == "closed":
+            break
+    return {"paused": pointer.get("paused"), "recent": len(recent), "failures": failures}
+
+
+def hold(s: Settings, g: dict | None, obs: dict, fired: list) -> str | None:
+    """Why a loop must not start without a person now, or None. Held, the case opens for a person to decide."""
+    if not s.safeguards or g is None:
+        return None
+    sg = s.safeguards
+    if g.get("paused"):
+        p = g["paused"]
+        return f"automatic retraining is paused (by {p.get('by')}, {p.get('at')}: {p.get('reason')})"
+    if g.get("failures", 0) >= sg["pause_after_failures"]:
+        return (f"the last {g['failures']} automatic loops ended rejected, failed or rolled back: automatic "
+                f"retraining pauses until `pipewright loop resume`")
+    if g.get("recent", 0) >= sg["max_loops"]:
+        return f"{g['recent']} automatic loop(s) in the last {sg['per_days']} days (safeguards.max_loops)"
+    if set(fired) <= {"drift"} and sg["drift_runs"] > 1:
+        earlier = [r for r in obs.get("recent") or [] if isinstance(r, dict)][-(sg["drift_runs"] - 1):]
+        if len(earlier) < sg["drift_runs"] - 1 or not all(r.get("alert") for r in earlier):
+            return (f"drift on this run only: safeguards.drift_runs asks for {sg['drift_runs']} scoring runs in a row "
+                    "that alerted")
+    return None
 
 
 @dataclass
@@ -128,7 +182,7 @@ def _reopen(case: dict, now: datetime, why: str) -> None:
 
 
 def observe(current: dict | None, last_approved_at: str | None, obs: dict, s: Settings, now: datetime,
-            ctx: dict) -> Outcome:
+            ctx: dict, guarded: dict | None = None) -> Outcome:
     """An inference run reported drift or performance (obs). ctx: usecase, environment, tenant, release,
     requested_by, run_id; also champion (version, created) when known."""
     # A schedule or a landing is an explicit request to retrain: it fires whatever retraining.when says (the closed
@@ -157,6 +211,13 @@ def observe(current: dict | None, last_approved_at: str | None, obs: dict, s: Se
         }
         _log(case, now, "proposed", by=ctx.get("requested_by"), run_id=ctx.get("run_id"), triggers=fired)
         submit = None
+        held = hold(s, guarded, obs, fired) if s.mode == "candidate" and s.loop else None
+        if held:
+            # Phase 6 safeguards: the case opens for a person to decide, as under retraining.mode propose.
+            case["mode"], case["held"] = "propose", held
+            _log(case, now, "held", reason=held)
+            return Outcome(case, [("retrain.proposed", {"triggers": fired, "held": held})], None,
+                           f"case {cid} opened for a person: {held}")
         if s.mode == "candidate" and s.loop:
             # Candidate mode with the closed retrain loop: trained and validated in test without a person; only the
             # production approval is a person's (`pipewright loop advance --approve`, or its CI gate).

@@ -707,7 +707,31 @@
           "type": "object",
           "additionalProperties": false,
           "description": "the closed retrain loop (FR-48): an approved case here trains in the environment releases come from (promotion.from), not here",
-          "properties": { "enabled": { "type": "boolean" } }
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "safeguards": {
+              "type": "object", "additionalProperties": false,
+              "description": "limits on loops started without a person (retraining.mode candidate); {} for the defaults (1 loop per 7 days, pause after 2 failures in a row, drift on 2 runs in a row)",
+              "properties": {
+                "max_loops": { "type": "integer", "minimum": 1, "description": "automatic loops per period (default 1)" },
+                "per_days": { "type": "integer", "minimum": 1, "description": "the period (default 7)" },
+                "pause_after_failures": { "type": "integer", "minimum": 1, "description": "automatic loops in a row that end rejected, failed or rolled back before automatic retraining pauses (default 2)" },
+                "drift_runs": { "type": "integer", "minimum": 1, "maximum": 5, "description": "a drift trigger counts only when this many scoring runs in a row alerted (default 2)" }
+              }
+            },
+            "canary": {
+              "type": "object", "additionalProperties": false,
+              "description": "the online canary with automatic rollback (Agent Platform endpoints): the loop deploys the candidate as a canary, checks it after a soak window, then promotes it or rolls it back",
+              "properties": {
+                "percent": { "type": "integer", "minimum": 1, "maximum": 50, "description": "the canary's share (default 10)" },
+                "soak_minutes": { "type": "integer", "minimum": 5, "maximum": 1440, "description": "default 30" },
+                "max_error_rate_increase": { "type": "number", "minimum": 0, "maximum": 1, "description": "error rate above the current version's, as a fraction of requests (default 0.01)" },
+                "max_latency_increase": { "type": "number", "minimum": 0, "description": "latency above the current version's, as a ratio (default 0.2: 20% slower at most)" },
+                "probe": { "type": "boolean", "description": "send the validation rows to the canary; their scores must match test's (default true)" }
+              }
+            },
+            "data": { "enum": ["test", "production"], "description": "whose data configuration (feature tables, label window) the loop's training run in test reads: test's (default) or production's, through its read-only loop_readers grant" }
+          }
         },
         "decisions": {
           "type": "object",
