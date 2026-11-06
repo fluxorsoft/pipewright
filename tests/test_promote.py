@@ -400,3 +400,20 @@ def test_a_source_that_is_not_the_one_approved_is_refused_before_any_copy(setup,
     with pytest.raises(ConfigError, match="not what was approved"):
         setup.run()
     assert setup.calls == []                        # no image copied, no model copied, nothing written
+
+
+# Phase 6 (found live on ent -> ent-prod): with a template difference too, the changed source is what is reported,
+# before anything is compiled.
+def test_a_changed_source_is_reported_before_template_differences(setup, monkeypatch):
+    from pipewright.models import integrity
+
+    compiled = []
+
+    def refuse(*a, **k):
+        raise ConfigError("v3 (dev) is not promoted: what is on file is not what was approved")
+
+    monkeypatch.setattr(integrity, "check_source", refuse)
+    monkeypatch.setattr(promote.publish, "compile_pinned", lambda *a, **k: compiled.append(1) or {})
+    with pytest.raises(ConfigError, match="not what was approved"):
+        setup.run()
+    assert compiled == [] and setup.calls == []
