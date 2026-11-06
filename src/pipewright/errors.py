@@ -8,16 +8,18 @@ import re
 class ConfigError(Exception):
     """One or more problems in Pipewright configuration."""
 
-    def __init__(self, problems: list[str] | str, source: str | None = None):
+    def __init__(self, problems: list[str] | str, source: str | None = None, hint: str | None = None):
         self.problems = [problems] if isinstance(problems, str) else list(problems)
         self.source = source
+        self.hint = hint                     # how to fix it: said after the problems, never counted as one
         super().__init__(self.__str__())
 
     def __str__(self) -> str:
         head = f"{self.source}: " if self.source else ""
+        fix = f"\n  fix: {self.hint}" if self.hint else ""
         if len(self.problems) == 1:
-            return head + self.problems[0]
-        return head + f"{len(self.problems)} problems\n" + "\n".join(f"  - {p}" for p in self.problems)
+            return head + self.problems[0] + fix
+        return head + f"{len(self.problems)} problems\n" + "\n".join(f"  - {p}" for p in self.problems) + fix
 
 
 # Value-free errors (NFR-18, D-65): a data engine's message can quote the rows it failed on ("Bad int64 value: abc",

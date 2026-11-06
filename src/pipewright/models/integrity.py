@@ -370,8 +370,8 @@ def enforce(check: Check, env: Environment, what: str, log=print,
         for p in check.problems:
             log(f"integrity WARNING (policies.integrity.mode warn): {p}")
         return
-    raise ConfigError(check.problems + [f"{remedy}, or, for this environment only, set policies.integrity.mode: "
-                                        "warn"], source=f"{what}: {reason}")
+    raise ConfigError(check.problems, source=f"{what}: {reason}",
+                      hint=f"{remedy}, or, for this environment only, set policies.integrity.mode: warn")
 
 
 # -- what changed, and who (FR-95), and who approved (FR-97) ------------------------------------------------------

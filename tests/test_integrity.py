@@ -450,3 +450,17 @@ def test_agent_platform_prebuilt_images_are_used_by_tag_without_a_warning(tmp_pa
              "m.upload(serving_container_image_uri=IMAGE)"]
     (tmp_path / "register.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert judgement.serving_image_by_tag(tmp_path) == []
+
+
+def test_the_remedy_is_said_but_never_counted_as_a_problem():
+    """Found live on ent: a refusal with two problems said '3 problems', counting the remedy."""
+    from pipewright.errors import ConfigError
+    from pipewright.models import integrity
+
+    check = integrity.Check(problems=["model.pt: approved, now missing", "model_card.md: changed after the approval"])
+    env = SimpleNamespace(name="ent", policies={})
+    with pytest.raises(ConfigError) as e:
+        integrity.enforce(check, env, "v1 of m is not served", lambda *_: None)
+    text = str(e.value)
+    assert "2 problems" in text and "\n  fix: re-approve the version after review" in text
+    assert len(e.value.problems) == 2
