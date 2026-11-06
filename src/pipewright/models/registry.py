@@ -25,6 +25,7 @@ class Version:
     created: str
     labels: dict
     gates: str = ""          # "pass", "FAIL: <first problem>", "no record" or "" (not checked)
+    approved: bool | None = None   # the default only: False when the event log has no model.approved for it
 
 
 def _resource(uc: ResolvedUseCase, env: Environment, creds) -> str:
@@ -98,6 +99,9 @@ def versions(uc: ResolvedUseCase, env: Environment, creds, check_gates: bool = T
                            labelled.get(str(v.version_id)) or dict(getattr(v, "labels", None) or {})))
     out.sort(key=lambda v: _number(v.version_id), reverse=True)
     oldest = min((_number(v.version_id) for v in out), default=0)
+    default = next((v for v in out if v.default), None)
+    if check_gates and default and not pending_approval(default.labels):
+        default.approved = approval_on_record(uc, env, creds, default.version_id)
     for v in out[:limit] if check_gates and gates.needs_record(uc.ml["evaluation"]) else []:
         try:
             problems = gate_problems(uc, creds, resource, v.version_id, _number(v.version_id) > oldest)
@@ -114,7 +118,7 @@ def render(uc: ResolvedUseCase, rows: list[Version]) -> str:
     for v in rows:
         status = "DEFAULT" if v.default else v.labels.get("status", "")
         gate = f"  [gates {v.gates}]" if v.gates else ""
-        unapproved = "  (not approved: `pipewright model approve`)" if v.default and pending_approval(v.labels) else ""
+        unapproved = "  (not approved: `pipewright model approve`)" if v.default and unapproved_default(v) else ""
         lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}{gate}{unapproved}")
     return "\n".join(lines)
 
@@ -128,6 +132,24 @@ APPROVAL_LABEL = "approval"
 
 def pending_approval(labels: dict | None) -> bool:
     return (labels or {}).get(APPROVAL_LABEL) == "pending"
+
+
+def approval_on_record(uc, env: Environment, creds, version: str) -> bool | None:
+    """Phase 6: does the event log hold a model.approved event for this version? None when it cannot tell (no
+    event log, or it cannot be read). Found live on private GKE: a register step that predates the approval=pending
+    label leaves a first version the default with nothing to say nobody approved it."""
+    from pipewright.gcp import Gcp
+    from pipewright.models import integrity
+
+    try:
+        events = integrity.approval_events(Gcp(creds), env, uc.name, str(version))
+    except Exception:  # noqa: BLE001 - the listing and approve must not fail because the log cannot be read
+        return None
+    return None if events is None else bool(events)
+
+
+def unapproved_default(v: Version) -> bool:
+    return pending_approval(v.labels) or v.approved is False
 
 
 def _evaluated(creds, resource: str, version: str, uc: ResolvedUseCase) -> dict:
@@ -261,8 +283,11 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
         raise ConfigError(f"{uc.model['name']} has no version {version} (versions: {', '.join(sorted(known))})")
     first = "default" in (known[version].version_aliases or [])
     if first and not pending_approval(version_labels(env, creds, resource).get(version)):
-        log(f"v{version} of {uc.model['name']} is already the default")
-        return
+        # Phase 6: the event log decides, not the label (a register step may predate it).
+        if approval_on_record(uc, env, creds, version) is not False:
+            log(f"v{version} of {uc.model['name']} is already the default")
+            return
+        log(f"v{version} of {uc.model['name']} is the default, but no approval of it is on record: approving it")
     # Phase 6 (FR-96): judged by the rules of the release that trained it, not the working copy's.
     rules, record, folder = _judged(uc, env, creds, resource, version, log)
     released = _check_rules(uc, env, rules, identity, approved, version, log)

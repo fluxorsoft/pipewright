@@ -1,5 +1,6 @@
 """FR-83: under a manual policy, a first version that became the default by itself is not the champion until a person
 approves it (Pipewright 1.2.0). Scoring is unchanged; model list, doctor and deploy-model say so."""
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -93,3 +94,73 @@ def test_validate_warns_when_the_register_step_predates_it(repo):
     (components / "register.py").write_text('registered = aiplatform.Model.upload(labels={"approval": "pending"})\n',
                                             encoding="utf-8")
     assert not any("FR-83" in w for w in resolve_usecase(path, env).warnings)
+
+
+def test_the_event_log_decides_when_the_label_is_missing(monkeypatch):
+    """Phase 6, found live on private GKE: a register step that predates the label left v1 the default with no
+    approval on record. The list says so, and approve records the approval instead of saying it is the default."""
+    uc = SimpleNamespace(name="churn-gke", model={"name": "churn-gke-classifier"}, environment="ent")
+    rows = [registry.Version("1", True, [], "run r1", "x", {"status": "champion"}, "pass", False)]
+    assert "(not approved: `pipewright model approve`)" in registry.render(uc, rows)
+    rows[0].approved = True
+    assert "not approved" not in registry.render(uc, rows)
+    rows[0].approved = None                                # no event log: nothing to say
+    assert "not approved" not in registry.render(uc, rows)
+
+    monkeypatch.setattr("pipewright.models.integrity.approval_events", lambda *a: [])
+    assert registry.approval_on_record(uc, SimpleNamespace(), None, "1") is False
+    monkeypatch.setattr("pipewright.models.integrity.approval_events", lambda *a: [{"by": "lead@acme"}])
+    assert registry.approval_on_record(uc, SimpleNamespace(), None, "1") is True
+    monkeypatch.setattr("pipewright.models.integrity.approval_events", lambda *a: None)
+    assert registry.approval_on_record(uc, SimpleNamespace(), None, "1") is None
+
+    def broken(*a):
+        raise RuntimeError("403")
+    monkeypatch.setattr("pipewright.models.integrity.approval_events", broken)
+    assert registry.approval_on_record(uc, SimpleNamespace(), None, "1") is None
+
+
+def test_approve_approves_a_default_with_no_approval_on_record(monkeypatch):
+    class V:
+        version_id, version_aliases = "1", ["default", "run-r1"]
+
+    class Registry:
+        def __init__(self, model):
+            pass
+
+        def list_versions(self):
+            return [V()]
+
+    approved = []
+    # faked, never imported: other tests fake google.cloud.aiplatform through sys.modules too
+    monkeypatch.setitem(sys.modules, "google.cloud.aiplatform", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "google.cloud.aiplatform.models", SimpleNamespace(ModelRegistry=Registry))
+    monkeypatch.setattr(registry, "_resource", lambda *a: "projects/p/locations/r/models/m")
+    monkeypatch.setattr(registry, "version_labels", lambda *a: {"1": {"status": "champion"}})
+    monkeypatch.setattr(registry, "approval_on_record", lambda *a: False)
+    monkeypatch.setattr(registry, "_judged", lambda *a: (SimpleNamespace(note=None, differs=[], approvals={},
+                                                                         evaluation={}, release="r"), {}, None))
+    monkeypatch.setattr(registry, "_check_rules", lambda uc, *a: uc)
+    monkeypatch.setattr(registry.gates, "verify", lambda *a: [])
+    monkeypatch.setattr(registry, "_approve_first_version", lambda *a, **k: approved.append(a[4]))
+    uc = SimpleNamespace(name="churn-gke", model={"name": "churn-gke-classifier"}, ml={"evaluation": {}})
+    lines = []
+    registry.approve(uc, SimpleNamespace(name="ent"), None, "1", "lead@acme", True, lines.append)
+    assert approved == ["1"] and "no approval of it is on record" in lines[0]
+
+    monkeypatch.setattr(registry, "approval_on_record", lambda *a: True)
+    lines.clear()
+    registry.approve(uc, SimpleNamespace(name="ent"), None, "1", "lead@acme", True, lines.append)
+    assert approved == ["1"] and lines == ["v1 of churn-gke-classifier is already the default"]
+
+
+def test_decisions_never_deploy_an_unrecorded_default():
+    from pipewright import decisions
+
+    default = registry.Version("1", True, [], "run r1", "x", {"status": "champion"}, "pass", False)
+    assert decisions.pending_for("churn-gke", "ent", [default], [], deploy={"mode": "on_register",
+                                                                            "served": set()}) == []
+    default.approved = True
+    (item,) = decisions.pending_for("churn-gke", "ent", [default], [], deploy={"mode": "on_register",
+                                                                               "served": set()})
+    assert item.kind == "deploy-auto"

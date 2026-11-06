@@ -43,6 +43,8 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
     `launchers`: {"production": url, "test": url} where known; a loop calls both, a retrain decision production's.
     `deploy` (Pipewright 1.2.0, FR-63): {"mode": ci | on_register, "served": {version ids on the endpoint},
     "canary": bool} for a use case that deploys through the workflows."""
+    from pipewright.models import registry
+
     launchers = launchers or {}
     own = [u for u in (launchers.get("production"),) if u]
     both = [u for u in (launchers.get("production"), launchers.get("test")) if u]
@@ -58,7 +60,7 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
                          "--approve"], f"v{v.version_id} passes the gates; the default is "
                                        f"v{default.version_id if default else 'none'}"))
     unserved = deploy and default and str(default.version_id) not in deploy.get("served", set())
-    if unserved and default.gates == "pass" and (default.labels or {}).get("approval") != "pending":
+    if unserved and default.gates == "pass" and not registry.unapproved_default(default):
         ci = deploy.get("mode") == "ci"
         out.append(Item("deploy-approve" if ci else "deploy-auto", usecase, env, env if ci else None,
                         f"v{default.version_id}",
