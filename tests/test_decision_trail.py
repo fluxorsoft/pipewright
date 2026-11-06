@@ -22,7 +22,8 @@ def test_lineage_lists_the_versions_decisions_with_how_each_was_approved(monkeyp
                                                                     "data": {"by": "ci@acme", "approval": GITHUB}})},
         {"published": "2026-10-31 01:30:00.0", "event": json.dumps({"event_type": "model.approved", "release": None,
                                                              "data": {"version": "2", "by": "ci@acme",
-                                                                      "approval": GITHUB}})},
+                                                                      "approval": GITHUB,
+                                                                      "source_environment": "test"}})},
         {"published": "2026-10-31 01:50:00.0", "event": json.dumps({"event_type": "model.deployed", "data": {
             "version": "2", "endpoint": "churn-endpoint", "traffic_percent": 100, "by": "ops@acme",
             "approval": {"via": "outside-ci"}}})},
@@ -39,6 +40,7 @@ def test_lineage_lists_the_versions_decisions_with_how_each_was_approved(monkeyp
     assert " AS at," not in seen["sql"]           # AT is a reserved word in BigQuery (found live)
     assert seen["params"] == {"usecase": "churn", "env": "prod", "version": "2", "release": "abc123"}
     assert [d["event"] for d in out["decisions"]] == ["release.promoted", "model.approved", "model.deployed"]
+    assert out["decisions"][1]["source_environment"] == "test"       # a promotion's approval: its upload counts
     text = lineage.render({"model": "churn-classifier", "version": "2", "environment": "prod", "lineage": None,
                            "note": "no lineage.json", **out})
     assert "release abc123 promoted here, by ci@acme (GitHub a-reviewer, https://github.com/acme/ml/actions/runs/7)" \

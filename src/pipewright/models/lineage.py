@@ -240,6 +240,7 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
                     "approval": data.get("approval"), "version": data.get("version"),
                     "release": event.get("release"), "endpoint": data.get("endpoint"),
                     "traffic_percent": data.get("traffic_percent"),
+                    **({"source_environment": data["source_environment"]} if data.get("source_environment") else {}),
                     # Pipewright 1.3.1: the evaluation record an approval was judged on, by digest
                     **({"evaluation": data["evaluation"]} if isinstance(data.get("evaluation"), dict) else {})})
     return {"decisions": out}
