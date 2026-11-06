@@ -36,6 +36,8 @@ class GcpBackend:
     def submit(self, env: str, body: dict) -> dict:
         from pipewright.runs import launch
 
+        self._accepts(env, body)
+
         return launch.run(self.envs[env], launch.body(
             body["usecase"], body["pipeline"], body["source_uri"], None, body["run_key"],
             champion_version=body.get("champion_version"), model_version=body.get("model_version"),
@@ -77,6 +79,30 @@ class GcpBackend:
             out["label_source"] = {**data["label_source"],
                                    "table": "bq://" + rt.bq_table(data["label_source"]["table"], e.project)}
         return out or None
+
+    def _accepts(self, env: str, body: dict) -> None:
+        """QA finding: the launcher drops a request whose pipeline takes no champion_version or model_version (it
+        logs why, the loop cannot see it). The live release is checked first, so the loop refuses with the reason."""
+        from pipewright.release.contract import RUN_OVERRIDES, ReleaseContract, contract_name
+        from pipewright.release.service import read_pointer
+
+        sent = [k for k in RUN_OVERRIDES if body.get(k)]
+        if not sent:
+            return
+        e = self.envs[env]
+        pointer, _ = read_pointer(self.gcp, e, self.usecase)
+        if pointer is None:
+            raise ConfigError(f"{self.usecase} has no live release in {env}: release it there first")
+        from pipewright.gcp import gcs_read
+
+        text, _ = gcs_read(self.gcp, e.artifacts_bucket, contract_name(self.usecase, pointer.release_id))
+        params = ReleaseContract.from_json(text).pipeline(body["pipeline"]).parameters if text else []
+        missing = [k for k in sent if k not in params]
+        if missing:
+            raise ConfigError(f"the {body['pipeline']} pipeline of {self.usecase}'s live release in {env} "
+                              f"({pointer.release_id}) takes no {', '.join(missing)} parameter, which the closed "
+                              "retrain loop needs (Pipewright's BigQuery ML pipelines and the churn example declare "
+                              "them): add it to the pipeline and release it; nothing was submitted")
 
     def job_state(self, env: str, job_id: str) -> str | None:
         e = self.envs[env]

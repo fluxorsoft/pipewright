@@ -159,3 +159,36 @@ def test_a_cold_canary_is_not_judged_on_latency_until_it_has_served_enough():
     ok, why = canary.judge({"predictions": 30, "errors": 0, "latency_ms": 45},
                            {"predictions": 120, "errors": 0, "latency_ms": 22}, CFG, {"ok": True, "note": "fine"})
     assert ok and "latency not compared (30 canary requests, fewer than 50)" in why
+
+
+def test_a_run_that_never_starts_fails_the_step_instead_of_hanging():
+    """QA finding (QE6): a request the launcher dropped left the loop 'training' for ever."""
+    from tests.test_loop import FakeBackend
+
+    b = FakeBackend()
+    lp = loop(b, clock=lambda: T0)
+    lp.start()
+    b.jobs.clear()                                                  # the run never appeared
+    lp.clock = lambda: T0 + timedelta(minutes=10)
+    assert lp.advance()["state"] == "training"                     # still within the grace period
+    lp.clock = lambda: T0 + timedelta(minutes=31)
+    rec = lp.advance()
+    assert rec["state"] == "failed" and "never started" in rec["history"][-1]["note"]
+
+
+def test_the_loop_refuses_to_send_what_the_release_does_not_take(monkeypatch):
+    """QA finding (QE6): the launcher dropped champion_version for a pipeline without it; the loop could not see."""
+    from pipewright.loop.backend import GcpBackend
+    from pipewright.release import contract as rc
+
+    b = GcpBackend.__new__(GcpBackend)
+    b.usecase, b.gcp = "churn-feats", None
+    b.envs = {"test": SimpleNamespace(artifacts_bucket="b")}
+    monkeypatch.setattr("pipewright.release.service.read_pointer",
+                        lambda gcp, e, u: (SimpleNamespace(release_id="r1"), 1))
+    monkeypatch.setattr("pipewright.gcp.gcs_read", lambda gcp, bucket, name: ("{}", 1))
+    monkeypatch.setattr(rc.ReleaseContract, "from_json", staticmethod(lambda text: SimpleNamespace(
+        pipeline=lambda p: SimpleNamespace(parameters=["project", "region", "source_uri", "run_id"]))))
+    with pytest.raises(ConfigError, match="takes no champion_version parameter.*nothing was submitted"):
+        b._accepts("test", {"pipeline": "training", "champion_version": "3"})
+    b._accepts("test", {"pipeline": "training"})                   # nothing optional sent: nothing to check

@@ -55,7 +55,7 @@ class Loop:
 
     def _step(self, state: str, **data) -> dict:
         """Moves the loop to `state`, recording the step; emits loop.<state>."""
-        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        now = self._now().replace(microsecond=0).isoformat()
 
         def change(case: dict) -> dict:
             loop = dict(case.get("loop") or {})
@@ -151,13 +151,31 @@ class Loop:
                               "loop compares with the model production serves, which must exist in test")
         return {"production_version": str(default["version"]), "test_version": str(source)}
 
+    NEVER_STARTED_MINUTES = 30
+
     def _state(self, env: str, job_id: str) -> str:
         state = self.backend.job_state(env, job_id)
         return "MISSING" if state is None else state
 
+    def _never_started(self, loop: dict, state: str) -> bool:
+        """A run that does not appear within NEVER_STARTED_MINUTES of its step was not accepted (QA finding: a
+        dropped request left the loop `training` for ever)."""
+        if state != "MISSING":
+            return False
+        since = next((h["at"] for h in reversed(loop.get("history") or []) if h.get("state") == loop.get("state")),
+                     None)
+        if not since:
+            return False
+        from datetime import timedelta
+
+        return self._now() - datetime.fromisoformat(since) > timedelta(minutes=self.NEVER_STARTED_MINUTES)
+
     def _after_training(self, loop: dict) -> dict:
         training = loop["training"]
         state = self._state(self.test, training["job_id"])
+        if self._never_started(loop, state):
+            return self._step("failed", _note=f"training run {training['run_id']} never started in {self.test}: the "
+                                              "request was not accepted (see that launcher's log)")
         if state in RUNNING or state == "MISSING":
             return loop
         if state not in SUCCEEDED:
@@ -186,6 +204,9 @@ class Loop:
     def _scored(self, env: str, run: dict) -> tuple[str | None, str]:
         """(outcome, note): outcome None while the run goes on, "ok" or "bad" once it ended."""
         state = self._state(env, run["job_id"])
+        if self._never_started(self.record(), state):
+            return "bad", f"run {run['run_id']} never started in {env}: the request was not accepted (see that " \
+                          "launcher's log)"
         if state in RUNNING or state == "MISSING":
             return None, state
         if state not in SUCCEEDED:
