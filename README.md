@@ -458,6 +458,28 @@ version it replaced. One loop runs at a time per use case, each step is recorded
 `loop advance --approve` promotes, so run it from a clean checkout of the release live in test, as for
 `pipewright promote`.
 
+Four settings under `retraining.loop` (new in phase 6; each off until set, in production's configuration):
+
+- **`safeguards`**, for loops started without a person (`retraining.mode: candidate`): at most `max_loops` per
+  `per_days`; after `pause_after_failures` automatic loops in a row end rejected, failed or rolled back, automatic
+  retraining pauses (`loop.paused`) until `pipewright loop resume`; a drift trigger counts only after `drift_runs`
+  scoring runs in a row alerted. Held by one, the case opens for a person instead. `safeguards: {}` gives 1 loop per 7
+  days, a pause after 2 failures and drift on 2 runs. `pipewright loop pause | resume --env prod --usecase churn
+  --reason "..."` pauses it by hand, recorded with your name.
+- **`canary`**, for a model on an Agent Platform endpoint: the production approval deploys the candidate as a canary
+  (`percent`, default 10); after `soak_minutes` (30) its error rate and latency are compared with the current
+  version's in Cloud Monitoring (`max_error_rate_increase` 0.01, `max_latency_increase` 0.2), with a probe. Healthy,
+  it takes all traffic and the case closes; otherwise it is removed and the previous version is the default again,
+  without a person. The probe is a BigQuery ML version's parity with `ML.PREDICT`; for a container model, whose files
+  are the candidate's by SHA-256, valid answers to instances built from its training statistics (never a row). The
+  endpoint must serve the current version first; the identity that advances the loop reads Cloud Monitoring.
+- **`data: production`**: the loop's training run in test reads production's feature tables and label window, which
+  `loop start` resolves, instead of test's. Test's launcher accepts them only in the production project its manifest
+  names for the tenant (`tenants.<t>.loop_production_project`) and only with the release's own features and label
+  columns.
+- **BigQuery ML use cases** join the loop with `model.promotion: model` (linear and logistic regression): the
+  candidate is promoted by files; production never trains.
+
 ## When retraining fails
 
 An approved retrain whose training fails keeps its approval (new in 1.1): nobody has to decide again. The

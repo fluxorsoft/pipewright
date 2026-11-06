@@ -42,6 +42,12 @@ refused by `deploy-model` and `promote`: approve it with `pipewright model appro
 - **`pipewright report fleet`** (FR-86): every use case in every environment on one read-only HTML page, with each
   champion's integrity.
 - **The churn example points to feature tables** (FR-99) and shows the change that moves it onto them.
+- **The closed retrain loop, the rest of FR-48** (each off until set under `retraining.loop`): `safeguards` for loops
+  started without a person (a rate limit, a circuit breaker that pauses automatic retraining, drift on consecutive
+  runs, `pipewright loop pause | resume`); `canary`, an online canary with automatic rollback on an Agent Platform
+  endpoint, judged by error rate, latency and a probe; `data: production`, production's feature tables and label
+  window for the loop's training in test, accepted only in the production project test's manifest names
+  (`tenants.<t>.loop_production_project`, new); BigQuery ML use cases in the loop, promoted by files.
 
 
 ## [1.3.1] - 2026-11-04
