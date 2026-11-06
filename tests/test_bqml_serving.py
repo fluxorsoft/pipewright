@@ -73,3 +73,24 @@ def test_endpoint_answers_per_task():
     assert serving.compare(["a", "b"], ["a", "c"], "multiclass") == 0.5
     with pytest.raises(ConfigError, match="no probability for churned=1"):
         serving.endpoint_value({"churned_values": ["yes", "no"], "churned_probs": [1, 0]}, uc())
+
+
+def test_a_version_promoted_by_files_is_checked_against_its_parity_rows(monkeypatch):
+    """Found live in phase 6 (ent-prod): a promoted version has no test table where it is deployed; every online
+    deploy of one was refused. Its parity.json, copied with it, holds the source's rows and ML.PREDICT's scores."""
+    read = []
+
+    def read_json(gcp, uri):
+        read.append(uri)
+        return {"rows": [{"instance": {"tenure": 1, "plan": "a"}, "expected": 0.9, "has_null": False},
+                         {"instance": {"tenure": 2, "plan": "b"}, "expected": 0.2, "has_null": False}]}
+
+    from pipewright.bqml import promotion
+
+    monkeypatch.setattr(promotion, "_read_json", read_json)
+    monkeypatch.setattr("pipewright.gcp.bigquery.query", lambda *a, **k: pytest.fail("no test table is read"))
+    imported = {**LABELS, "pipewright-bq-imported": "true"}
+    u = uc()
+    u.ml["bqml"] = {"records": "gs://prod-artifacts/bqml/churn-bqml/"}
+    got = serving.parity(None, u, ENV, imported, Endpoint([("new", [0.9, 0.2])]), "new")
+    assert got["ok"] and got["rows"] == 2 and read == ["gs://prod-artifacts/bqml/churn-bqml/r1/parity.json"]

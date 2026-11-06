@@ -56,6 +56,14 @@ def expected_rows(gcp, uc, env, labels: dict, columns: list[str]) -> list[tuple[
     return [(json.loads(r["instance"]), r["expected"]) for r in found]
 
 
+def imported_rows(gcp, uc, labels: dict) -> list[tuple[dict, object]]:
+    """(instance, the source's ML.PREDICT score) from the parity.json a promotion by files copied with the version."""
+    from pipewright.bqml.promotion import _read_json
+
+    doc = _read_json(gcp, f"{uc.ml['bqml']['records']}{labels['pipewright-run']}/parity.json") or {}
+    return [(r["instance"], r["expected"]) for r in (doc.get("rows") or [])][:ROWS]
+
+
 def endpoint_value(prediction: dict, uc):
     """The comparable value of one endpoint answer: the positive class probability, the prediction, or the label."""
     label = uc.ml["data"]["label"]
@@ -82,9 +90,13 @@ def compare(expected: list, got: list, task: str) -> float:
 
 
 def parity(gcp, uc, env, labels: dict, endpoint, deployed_id: str, attempts: int = 40) -> dict:
-    """Endpoint scores of the new deployed model against ML.PREDICT on the run's test rows."""
-    columns = feature_columns(gcp, uc, labels)
-    cases = expected_rows(gcp, uc, env, labels, columns)
+    """Endpoint scores of the new deployed model against ML.PREDICT on the run's test rows. A version promoted by
+    files has no test table here (it was trained in the source environment): its parity.json, copied with it, holds
+    the source's test rows and ML.PREDICT's scores (found live in phase 6: every promoted version was refused)."""
+    if labels.get("pipewright-bq-imported") == "true":
+        cases = imported_rows(gcp, uc, labels)
+    else:
+        cases = expected_rows(gcp, uc, env, labels, feature_columns(gcp, uc, labels))
     if not cases:
         raise ConfigError(f"no kept test predictions for run {labels.get('pipewright-run')} "
                           f"({_test_table(uc, labels)}): train again, then deploy")
