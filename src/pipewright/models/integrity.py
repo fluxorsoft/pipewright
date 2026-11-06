@@ -296,8 +296,11 @@ class Check:
                    if self.approval else {})}
 
 
+AUDIT_KEPT_DAYS = 400      # Cloud Audit Logs keep Admin Activity entries this long (the _Required bucket)
+
+
 def verify(gcp, env: Environment, usecase: str, version: str, folder: str | None, image: str | None,
-           first_version_pending: bool = False) -> Check:
+           first_version_pending: bool = False, model: str | None = None) -> Check:
     """Is the version on file now the one approved? Reads the newest approval of `version` and compares the
     evaluation record, the model files and the serving image with what it recorded."""
     from pipewright.models import gates
@@ -320,6 +323,8 @@ def verify(gcp, env: Environment, usecase: str, version: str, folder: str | None
                               "(the console, gcloud or the API), so nobody approved it here")
         return check
     approval = check.approval = events[0]
+    if model:
+        _audit_problem(gcp, env, model, version, approval, check)
     recorded = approval.get("evaluation") or {}
     if recorded.get("sha256"):
         now = record_sha256(gcp, recorded.get("record")) if recorded.get("record") else (
@@ -353,7 +358,7 @@ def check_source(gcp, src_env: Environment, dst_env: Environment, usecase: str, 
             "approval, not in the source")
         return None
     check = verify(gcp, src_env, usecase, version, chosen.get("artifactUri"),
-                   (chosen.get("containerSpec") or {}).get("imageUri"))
+                   (chosen.get("containerSpec") or {}).get("imageUri"), model=chosen.get("name"))
     enforce(check, dst_env, f"v{version} ({src_env.name}) is not promoted", log)
     return check
 
@@ -523,6 +528,38 @@ def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
     if events == []:
         return mode, f"v{version} of {name} has no model.approved event: it became the default outside Pipewright"
     return mode, None
+
+
+def _audit_problem(gcp, env: Environment, model: str, version: str, approval: dict, check: Check) -> None:
+    """QA governance (G3): the approval against the Admin Activity entry its change made. An event anyone with
+    publish rights could write is not evidence on its own; the audit log, which nobody can write, is."""
+    import datetime
+
+    try:
+        audit = approval_audit(gcp, env, model, approval.get("at") or "", approval.get("by"),
+                               promoted=bool(approval.get("source_environment")))
+    except Exception as e:  # noqa: BLE001 - an unreadable audit log is a note, never a broken deploy
+        check.notes.append(f"the approval of v{version} could not be checked against Cloud Audit Logs: "
+                           f"{str(e).splitlines()[0][:120]}")
+        return
+    state = audit.get("state")
+    if state == "no entry":
+        try:
+            at = datetime.datetime.fromisoformat((approval.get("at") or "").replace(" ", "T")[:19]).replace(
+                tzinfo=datetime.timezone.utc)
+            within = datetime.datetime.now(datetime.timezone.utc) - at < datetime.timedelta(days=AUDIT_KEPT_DAYS)
+        except ValueError:
+            within = False
+        if within:
+            check.problems.append(f"the approval of v{version} ({approval.get('at')}, by {approval.get('by')}) has "
+                                  "no Admin Activity entry in Cloud Audit Logs: the event may not be genuine")
+        else:
+            check.notes.append(f"the approval of v{version} is older than Cloud Audit Logs keep: not cross-checked")
+    elif state == "other principal":
+        check.problems.append(f"the approval of v{version}: {audit.get('note')}")
+    elif state == "not checked":
+        check.notes.append(f"the approval of v{version} could not be checked against Cloud Audit Logs: "
+                           f"{audit.get('note')}")
 
 
 # -- the retention lock (FR-97) -----------------------------------------------------------------------------------

@@ -540,3 +540,33 @@ def test_a_release_contract_is_locked_and_checked_against_what_went_live(monkeyp
     assert lineage.contract_now(None, e, "churn", "r1", live) == "CHANGED"
     monkeypatch.setattr("pipewright.gcp.gcs_read", lambda gcp, b, n: (None, 0))
     assert lineage.contract_now(None, e, "churn", "r1", live) == "MISSING"
+
+
+def test_deploy_and_promote_cross_check_the_approval_with_cloud_audit_logs(monkeypatch):
+    """QA governance finding G3: a forged model.approved event (no fingerprints, so it looked like an approval from
+    before 1.3.1) passed the checks that gate deploy and promote; only lineage flagged it."""
+    import datetime
+
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    approval = {"at": now, "by": "lead@example.com", "version": "2"}
+    env = SimpleNamespace(name="prod", project="p", policies={})
+    monkeypatch.setattr(integrity, "approval_events", lambda *a: [approval])
+    monkeypatch.setattr(integrity, "compare_image", lambda *a: [])
+    monkeypatch.setattr(integrity, "compare_bq_model", lambda *a: [])
+
+    def audited(state, **extra):
+        monkeypatch.setattr(integrity, "approval_audit", lambda *a, **k: {"state": state, **extra})
+        return integrity.verify(None, env, "churn", "2", None, None, model="projects/p/locations/r/models/9")
+
+    check = audited("no entry", note="x")
+    assert check.problems == [f"the approval of v2 ({now}, by lead@example.com) has no Admin Activity entry in "
+                              "Cloud Audit Logs: the event may not be genuine"]
+    assert audited("other principal", note="the audit log names a@x, the event says lead@example.com").problems
+    assert not audited("matched", principal="lead@example.com").problems
+    unreadable = audited("not checked", note="Cloud Audit Logs: HTTP 403")
+    assert not unreadable.problems and "could not be checked" in unreadable.notes[0]          # never a broken deploy
+    approval["at"] = "2024-01-01 00:00:00"
+    old = audited("no entry", note="x")
+    assert not old.problems and "older than Cloud Audit Logs keep" in old.notes[0]
+    approval["at"] = now
+    assert not integrity.verify(None, env, "churn", "2", None, None).problems     # no model given: as before

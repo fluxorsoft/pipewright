@@ -116,7 +116,7 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
     spec = getattr(getattr(model, "gca_resource", None), "container_spec", None)
     try:
         check = integrity.verify(gcp, env, uc.name, out["version"], getattr(model, "uri", None) or None,
-                                 getattr(spec, "image_uri", None) or None)
+                                 getattr(spec, "image_uri", None) or None, model=resource)
         out["integrity"] = {**check.summary(), "problems_found": check.problems, "notes": check.notes}
         if check.approval and check.approval.get("lock"):
             out["integrity"]["lock"] = check.approval["lock"]

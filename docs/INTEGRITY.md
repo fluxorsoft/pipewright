@@ -67,6 +67,11 @@ policies:
   with `gcloud storage objects update --no-temporary-hold` when the version is retired), and a `locked` lock is not
   possible and is recorded as not done. Terraform ignores the retention setting after the bucket exists, so turning the
   lock on never replaces the bucket.
+- **An approval must be in Cloud Audit Logs:** `deploy-model`, KServe deploys and `promote` cross-check the newest
+  approval with the Admin Activity entry its change made (the alias moved, the label set, or a promotion's upload),
+  which nobody can write. An approval event with no entry, or naming someone else, is refused like any other check
+  (`policies.integrity.mode`), so an event written by hand does not pass. A log that cannot be read is a note, never
+  a refusal; an approval older than the log keeps (400 days) is not cross-checked.
 - **The release contract too:** with a lock configured, each release's contract (what a run pins: images and
   templates by digest) is locked the same way at release and at promotion, so nobody who may write the bucket can
   change what a live release runs. `release.live` and `release.promoted` record the contract's SHA-256, and

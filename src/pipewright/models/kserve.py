@@ -285,7 +285,8 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     problems = gates.verify(gcp, version["artifactUri"], rules.evaluation, earlier)
     pending = pending_approval(labels)
     check = integrity.verify(gcp, env, uc.name, vid, version.get("artifactUri"),
-                             (version.get("containerSpec") or {}).get("imageUri"), first_version_pending=pending)
+                             (version.get("containerSpec") or {}).get("imageUri"), first_version_pending=pending,
+                             model=version.get("name"))
     if rules.note:
         check.notes.append(rules.note)
     body = inference_service(uc, env, version, k.s)

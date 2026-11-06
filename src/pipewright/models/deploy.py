@@ -137,7 +137,8 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     gcp = Gcp(creds)
     spec = getattr(getattr(default, "gca_resource", None), "container_spec", None)
     check = integrity.verify(gcp, env, uc.name, str(default.version_id), default.uri,
-                             getattr(spec, "image_uri", None) or None, first_version_pending=pending_approval(labels))
+                             getattr(spec, "image_uri", None) or None, first_version_pending=pending_approval(labels),
+                             model=getattr(default, "resource_name", None))
     record = record_location(uc, default.uri, labels)
     approved = ((check.approval or {}).get("evaluation") or {}).get("record")
     if record is None and approved:          # a version that lost its labels: found by the record its approval names
