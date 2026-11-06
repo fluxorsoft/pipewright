@@ -606,7 +606,10 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
     contract = ReleaseContract.from_dict({**json.loads(contract.to_json()), "promoted_from": record})
     if not existing_text:
         try:
-            gcs_write(gcp, dst_env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
+            generation = gcs_write(gcp, dst_env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
+            from pipewright.models import integrity
+
+            integrity.lock_contract(gcp, dst_env, dst_env.artifacts_bucket, name, generation, log)   # QA (G10)
         except PreconditionFailed:
             raise ConfigError(f"another promotion wrote release {rid} of {uc_dst.name} meanwhile; nothing went live. "
                               "Re-run to check it.") from None
@@ -629,7 +632,10 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
                                  **_evaluated(gcp, model.get("artifact_uri")),
                                  **_judged_copy(gcp, dst_env, model, released_rules, log)),
                     dst_env.observability.get("events_topic"), gcp, stream=_quiet(), region=dst_env.region)
+    from pipewright.models.integrity import contract_sha256
+
     events.emit(events.event("release.promoted", uc_dst.name, dst_env.name, uc_dst.tenant, rid, None, by=who,
+                             contract_sha256=contract_sha256(contract.to_json()),
                              previous=pointer.release_id if pointer else None, source_environment=src_env.name,
                              source_contract_sha256=source_sha, component_image=dst_image,
                              model=({k: model[k] for k in ("name", "source_version", "version")} if model else None)),

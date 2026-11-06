@@ -504,3 +504,39 @@ def test_a_promotion_approval_is_matched_by_its_upload():
     integrity.approval_audit(gcp, SimpleNamespace(project="p"), "projects/p/locations/r/models/9",
                              "2026-11-06 02:43:01", "lead@example.com")
     assert "UploadModel" not in seen[1]                     # only a promotion's approval counts its upload
+
+
+def test_a_release_contract_is_locked_and_checked_against_what_went_live(monkeypatch):
+    """QA governance finding G10: a live contract could be changed by anyone who may write the artifacts bucket,
+    unseen. With policies.integrity.lock it is locked at release; lineage compares it with release.live's SHA-256."""
+    from pipewright.models import lineage
+
+    patched = []
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            if params and params.get("alt") == "media":
+                return SimpleNamespace(status_code=200, content=b'{"release_id": "r1"}')
+            return SimpleNamespace(status_code=200, json=lambda: {"objectRetention": {"mode": "Enabled"}})
+
+        def patch(self, url, params=None, json=None, timeout=None):
+            patched.append((url, params, json))
+            return SimpleNamespace(status_code=200, text="")
+
+    gcp = SimpleNamespace(session=Session())
+    env = SimpleNamespace(name="prod", policies={"integrity": {"lock": {"days": 30, "mode": "locked"}}})
+    got = integrity.lock_contract(gcp, env, "b", "contracts/churn/r1.json", 7, lambda *_: None)
+    assert got["locked"] == 1 and got["method"] == "retention" and got["mode"] == "locked"
+    (url, params, body) = patched[0]
+    assert url.endswith("/o/contracts%2Fchurn%2Fr1.json") and params == {"generation": "7"}
+    assert body["retention"]["mode"] == "Locked"
+    assert integrity.lock_contract(gcp, SimpleNamespace(policies={}), "b", "c/x.json", 1) is None   # off: as before
+
+    live = integrity.contract_sha256('{"release_id": "r1"}')
+    monkeypatch.setattr("pipewright.gcp.gcs_read", lambda gcp, b, n: ('{"release_id": "r1"}', 3))
+    e = SimpleNamespace(artifacts_bucket="b")
+    assert lineage.contract_now(None, e, "churn", "r1", live) == "unchanged"
+    monkeypatch.setattr("pipewright.gcp.gcs_read", lambda gcp, b, n: ('{"release_id": "r1", "x": 1}', 4))
+    assert lineage.contract_now(None, e, "churn", "r1", live) == "CHANGED"
+    monkeypatch.setattr("pipewright.gcp.gcs_read", lambda gcp, b, n: (None, 0))
+    assert lineage.contract_now(None, e, "churn", "r1", live) == "MISSING"

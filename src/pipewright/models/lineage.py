@@ -126,11 +126,29 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
     except Exception as e:  # noqa: BLE001 - lineage still shows everything else
         out["integrity"] = {"result": f"not checked: {str(e).splitlines()[0][:160]}"}
     for d in out.get("decisions") or []:
+        if d.get("contract_sha256") and d.get("release"):      # QA governance (G10): the contract that went live
+            d["contract_now"] = contract_now(gcp, env, uc.name, d["release"], d["contract_sha256"])
         if d.get("event") == "model.approved":
             d["audit"] = integrity.approval_audit(gcp, env, resource, d["at"], d.get("by"),
                                                   promoted=bool(d.get("source_environment")))
             if d.get("evaluation_now") in ("changed", "missing") and (d.get("evaluation") or {}).get("record"):
                 d["changed_by"] = integrity.who_wrote(gcp, env, d["evaluation"]["record"], d["at"])
+
+
+def contract_now(gcp, env: Environment, usecase: str, release: str, recorded: str) -> str:
+    """unchanged, CHANGED or MISSING: the release contract on file against the SHA-256 its release.live (or
+    release.promoted) event recorded."""
+    from pipewright.gcp import gcs_read
+    from pipewright.models.integrity import contract_sha256
+    from pipewright.release.contract import contract_name
+
+    try:
+        text, _ = gcs_read(gcp, env.artifacts_bucket, contract_name(usecase, release))
+    except Exception as e:  # noqa: BLE001 - lineage still shows everything else
+        return f"not checked: {str(e).splitlines()[0][:120]}"
+    if text is None:
+        return "MISSING"
+    return "unchanged" if contract_sha256(text) == recorded else "CHANGED"
 
 
 def check_evaluations(gcp, out: dict, folder: str | None) -> None:
@@ -239,6 +257,7 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
         out.append({"at": (row["published"] or "")[:19], "event": event.get("event_type"), "by": data.get("by"),
                     "approval": data.get("approval"), "version": data.get("version"),
                     "release": event.get("release"), "endpoint": data.get("endpoint"),
+                    **({"contract_sha256": data["contract_sha256"]} if data.get("contract_sha256") else {}),
                     "traffic_percent": data.get("traffic_percent"),
                     **({"source_environment": data["source_environment"]} if data.get("source_environment") else {}),
                     # Pipewright 1.3.1: the evaluation record an approval was judged on, by digest
@@ -351,6 +370,9 @@ def _render_decisions(info: dict, lines: list[str]) -> None:
         how = _how(d.get("approval"))
         lines.append(f"  {'decided' if i == 0 else '       '}  {d['at']}  {what}, by {d.get('by') or '?'}"
                      + (f" ({how})" if how else ""))
+        if d.get("contract_now"):
+            lines.append(f"           contract sha256 {d['contract_sha256'][:16]}: {d['contract_now']}"
+                         + (" (not the contract that went live)" if d["contract_now"] == "CHANGED" else ""))
         ev = d.get("evaluation") or {}
         if ev.get("sha256"):
             state = {"unchanged": "unchanged since", "missing": "MISSING now",

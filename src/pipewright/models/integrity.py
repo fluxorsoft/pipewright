@@ -532,6 +532,33 @@ def _bucket_has_retention(gcp, bucket: str) -> bool:
     return r.status_code == 200 and ((r.json() or {}).get("objectRetention") or {}).get("mode") == "Enabled"
 
 
+def lock_contract(gcp, env: Environment, bucket: str, name: str, generation, log=print) -> dict | None:
+    """QA governance (G10): a release contract is locked as approved files are (policies.integrity.lock), so
+    nobody who may write the bucket can change what a live release runs. None when no lock is configured."""
+    import hashlib
+
+    if not isinstance(getattr(env, "policies", None), dict) or policy(env)["lock"]["days"] <= 0:
+        return None                                    # no lock configured: nothing to do (as before)
+    folder, _, file = name.rpartition("/")
+    text, _ = gcs_read_versioned(gcp, bucket, name, generation)
+    files = {"folder": f"gs://{bucket}/{folder}", "files": [{"file": file, "generation": int(generation),
+                                                             "sha256": hashlib.sha256(text or b"").hexdigest()}]}
+    return lock(gcp, env, files, lambda m: log(m.replace("approved files", "contract").replace(
+        "approved file", "contract")))
+
+
+def gcs_read_versioned(gcp, bucket: str, name: str, generation) -> tuple[bytes | None, int]:
+    r = gcp.session.get(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}",
+                        params={"alt": "media", "generation": str(generation)}, timeout=60)
+    return (r.content, int(generation)) if r.status_code == 200 else (None, 0)
+
+
+def contract_sha256(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
     """Locks the approved files for policies.integrity.lock.days. With object retention on the bucket (a bucket
     created with it: Cloud Storage cannot add it later), each file gets retention until then, `unlocked` or

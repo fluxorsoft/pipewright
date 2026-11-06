@@ -213,10 +213,13 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
 
             contract = dataclasses.replace(contract, images=recorded_images)
         try:
-            gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
+            generation = gcs_write(gcp, env.artifacts_bucket, name, contract.to_json(), if_generation_match=0)
         except PreconditionFailed:
             raise ConfigError(f"contract {release_id} of {uc.name} was published by another release while this one "
                               "ran; nothing went live. Re-run the release.") from None
+        from pipewright.models import integrity
+
+        integrity.lock_contract(gcp, env, env.artifacts_bucket, name, generation, log)    # QA governance (G10)
     contract_uri = f"gs://{env.artifacts_bucket}/{name}"
     log(f"contract: {contract_uri}")
 
@@ -236,7 +239,10 @@ def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, compo
                           "Re-run the release.") from None
     pointer_uri = f"gs://{env.artifacts_bucket}/{pointer_name(uc.name)}"
     log(f"live: {pointer_uri} -> {release_id}" + (f" (was {pointer.release_id})" if pointer else " (first release)"))
+    from pipewright.models.integrity import contract_sha256
+
     events.emit(events.event("release.live", uc.name, env.name, uc.tenant, release_id, None, by=who,
+                             contract_sha256=contract_sha256(contract.to_json()),
                              previous=pointer.release_id if pointer else None, pipelines=contract.pipeline_names,
                              component_image=component_image), env.observability.get("events_topic"), gcp,
                 stream=_quiet(), region=env.region)

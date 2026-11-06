@@ -67,6 +67,10 @@ policies:
   with `gcloud storage objects update --no-temporary-hold` when the version is retired), and a `locked` lock is not
   possible and is recorded as not done. Terraform ignores the retention setting after the bucket exists, so turning the
   lock on never replaces the bucket.
+- **The release contract too:** with a lock configured, each release's contract (what a run pins: images and
+  templates by digest) is locked the same way at release and at promotion, so nobody who may write the bucket can
+  change what a live release runs. `release.live` and `release.promoted` record the contract's SHA-256, and
+  `pipewright lineage` says whether the contract on file is still that one.
 - **inference:** with `warn` or `refuse`, the launcher checks before each scoring run that the default version was
   approved, and records `run.integrity` when it was not. The launcher then reads the event log.
 
