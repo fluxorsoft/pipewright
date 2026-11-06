@@ -145,6 +145,14 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
             model["promotion"] = "retrain"
     model["serving"] = deep_merge(_SERVING_DEFAULTS, eff["model"].get("serving", {}))
     serving = model["serving"]
+    if (bqml_spec and bqml_spec.get("transform") and model["promotion"] == "model" and env.promotion_from
+            and serving["enabled"]):
+        # Found live in phase 6 (ent-prod): a version promoted by files is the exported model, its TRANSFORM a
+        # separate model beside it; an endpoint serves only the first, so callers' raw inputs are never transformed.
+        problems.append(f"model.serving: in {env.name} a BigQuery ML version arrives by its exported files, and an "
+                        "endpoint does not apply its TRANSFORM (exported as a separate model), so online scores "
+                        "would not match ML.PREDICT; serve it where it was trained, drop bqml.transform (put the "
+                        "expressions in prepare.sql, which callers apply), or turn model.serving off here")
     if serving["replicas"]["min"] > serving["replicas"]["max"]:
         problems.append("model.serving.replicas: min is greater than max")
     if serving["enabled"]:

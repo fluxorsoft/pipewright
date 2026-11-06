@@ -113,3 +113,15 @@ def test_the_loops_settings_need_the_loop_and_an_endpoint_for_the_canary(repo):
     assert "apply only with retraining.loop.enabled" in problems(repo)
     repo.usecase["spec"]["retraining"] = {"mode": "propose", "loop": {"enabled": True, "canary": {"percent": 10}}}
     assert "not served online" in problems(repo)
+
+
+def test_a_promoted_bigquery_ml_model_with_transform_is_not_served_online(repo):
+    """Found live in phase 6 (ent-prod): the endpoint served the exported model without its TRANSFORM; the parity
+    check refused it after the deploy. Refused up front now."""
+    from tests.test_bqml_config import bqml_repo, problems
+
+    bqml_repo(repo, model_type="logistic_reg", transform="sql/transform.sql")
+    repo.usecase["spec"]["model"].update(promotion="model", serving={"enabled": True})
+    repo.add_env("prod")
+    repo.environments["prod"]["promotion"] = {"from": "dev"}
+    assert "does not apply its TRANSFORM" in problems(repo, env="prod")
