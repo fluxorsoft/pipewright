@@ -63,7 +63,7 @@ fails when the pack is stale, and the pull request workflow from `ci init` runs 
 ## 3. Connect the agent
 
 ```bash
-pip install "pipewright-mlops[gcp,mcp]==1.3.0"
+pip install "pipewright-mlops[gcp,mcp]==1.4.0"
 pipewright mcp --env test --tenant retail --print-config
 ```
 

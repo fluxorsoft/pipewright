@@ -33,3 +33,14 @@ retraining:                             # drift or a performance drop opens a ca
     required: []                        # approver groups the platform registered, e.g. [ml-leads, model-risk]
     separate_from_requester: true
   snooze: { max_days: 30, reopen_when_worse_by: 0.1 }
+  # The closed retrain loop: production never trains; an approved case trains in the environment releases come from
+  # (promotion.from). Usually set in the production environment's file (environments/<prod>.yaml), off by default:
+  # loop:
+  #   enabled: true
+  #   safeguards: {}           # 1.4.0, for loops started without a person (mode candidate): 1 loop per 7 days,
+  #                            # pause after 2 failures in a row, drift on 2 runs in a row; or set each:
+  #                            # { max_loops: 1, per_days: 7, pause_after_failures: 2, drift_runs: 2 }
+  #   canary:                  # 1.4.0, served on an Agent Platform endpoint: canary, check, promote or roll back
+  #     { percent: 10, soak_minutes: 30, max_error_rate_increase: 0.01, max_latency_increase: 0.2,
+  #       min_requests: 50, probe: true }
+  #   data: test               # 1.4.0: or production (its feature tables and label window, read in place)

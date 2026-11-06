@@ -109,6 +109,21 @@ Compute the feature, append a row per change, keep the timestamp honest, keep th
 columns; do not rename or retype them), register the group if your organisation uses the Feature Store, and handle
 erasure requests in their tables (`pipewright data erase` covers only a use case's own tables).
 
+To register a feature table as a feature group (1.4.0), describe it in a file and run
+`pipewright features register --env <env> --file feature_groups.yaml` (`--dry-run` first). Run it as the data team,
+the identity that owns the tables. It is safe to repeat: a group or feature that exists is left as it is, never
+changed or deleted, and messages name groups, tables and features, never values.
+
+```yaml
+customer_activity:
+  table: pw_retail.customer_activity        # dataset.table in the environment's project, or project.dataset.table
+  entity: [customer_id]
+  description: Monthly purchase behaviour per customer
+  features:
+    recency_days: Days since the last purchase
+    orders_12m: Orders in the last twelve months
+```
+
 ## Building feature tables: dbt or Dataform
 
 Pipewright reads feature tables; it does not build them. Any tool works if the table follows the rules above. Two

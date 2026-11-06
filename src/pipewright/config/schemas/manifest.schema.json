@@ -362,7 +362,7 @@
         "integrity": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Phase 6: what runs is what was approved. Deploy and promote compare the version with its approval (the evaluation record, the model files and the serving image, or a BigQuery ML model), and approvals are judged by the released rules.",
+          "description": "Pipewright 1.4.0: what runs is what was approved. Deploy and promote compare the version with its approval (the evaluation record, the model files and the serving image, or a BigQuery ML model), and approvals are judged by the released rules.",
           "properties": {
             "mode": {
               "enum": [
@@ -496,7 +496,7 @@
           },
           "loop_production_project": {
             "type": ["string", "null"],
-            "description": "the closed retrain loop (FR-48, phase 6): the production project whose data this tenant's loop training runs may read (retraining.loop.data: production); the launcher accepts production's feature and label tables only there"
+            "description": "the closed retrain loop (Pipewright 1.4.0): the production project whose data this tenant's loop training runs may read (retraining.loop.data: production); the launcher accepts production's feature and label tables only there"
           },
           "features": {
             "anyOf": [

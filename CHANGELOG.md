@@ -3,7 +3,7 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [Unreleased]
+## [1.4.0] - 2026-11-06
 
 Phase 6: what runs is what was approved. An approval records what it approved, and nothing is deployed or promoted
 unless it is still that. One behaviour changes on upgrade, deliberately: these checks **refuse by default**
@@ -17,6 +17,15 @@ with a note. A default version that has no `model.approved` event (made the defa
 refused by `deploy-model` and `promote`: approve it with `pipewright model approve`, or set
 `policies.integrity.mode: warn` while you do. `model approve` refuses when your working copy's `ml.evaluation` or
 `approvals` differ from the release that trained the version: approve from the release's commit.
+
+- `deploy-model` and `promote` cross-check each approval with Cloud Audit Logs. The identity that deploys or promotes
+  needs to read the Admin Activity log (`roles/logging.viewer`); without it the check is a note, never a refusal.
+- For a production environment, set `policies.integrity.lock` with `mode: locked`, on an artifacts bucket created with
+  object retention (the starter and the Enterprise blueprint create it so when the lock is set from the start).
+- The closed retrain loop now checks that the release in test accepts what it sends (`champion_version`,
+  `model_version`) and refuses with the reason; a pipeline written before 1.1 needs those parameters for the loop.
+- BigQuery ML: a version promoted by files with `bqml.transform` is not served online in the destination (`validate`
+  refuses it); serve it where it was trained, or move the expressions to `prepare.sql`.
 
 ### Added
 
@@ -48,6 +57,24 @@ refused by `deploy-model` and `promote`: approve it with `pipewright model appro
   endpoint, judged by error rate, latency and a probe; `data: production`, production's feature tables and label
   window for the loop's training in test, accepted only in the production project test's manifest names
   (`tenants.<t>.loop_production_project`, new); BigQuery ML use cases in the loop, promoted by files.
+- **Approvals cross-checked with Cloud Audit Logs at deploy and promote** (found testing as a bank's governance team
+  would): an approval event with no Admin Activity entry, or naming someone else, is refused like any other check, so
+  an event written by hand does not pass.
+- **Release contracts locked and fingerprinted:** with a lock configured, each release's contract is locked at
+  release and at promotion; `release.live` and `release.promoted` record its SHA-256, and `pipewright lineage` says
+  whether the contract on file is still that one.
+- **A deploy under `warn` says so:** `model.deployed` records `warned` with the problems found (names and digests,
+  never data).
+
+### Fixed
+
+- **BigQuery ML online serving of a version promoted by files** compared the endpoint with a test table that exists
+  only where the version was trained, so every such deploy was refused; it now uses the parity rows copied with it.
+- **A champion whose BigQuery ML model is gone, or whose registry labels were removed,** failed training with a bare
+  404 or an unexplained gate; training now stops naming the version and what to do.
+- **A repeated promotion** after a failure registered the model again; it reuses the version it registered.
+- **A first version** approved with its promotion is reported as the default, not a candidate.
+- **Wording:** a refusal counts only its problems; lineage calls a candidate nobody approved "not approved yet".
 
 
 ## [1.3.1] - 2026-11-04

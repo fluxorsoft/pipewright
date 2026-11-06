@@ -6,7 +6,9 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.3.0.** Working end to end on Google Cloud, including private environments with
+> **Status: 1.4.0.** What runs is what was approved: approvals fingerprint the model files, serving image and rules,
+> and deploy and promote refuse anything that changed since (see [What runs is what was approved](#what-runs-is-what-was-approved)).
+> Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
 > file, the launcher image in GitHub Container Registry) and on PyPI as `pipewright-mlops`.
@@ -458,7 +460,7 @@ version it replaced. One loop runs at a time per use case, each step is recorded
 `loop advance --approve` promotes, so run it from a clean checkout of the release live in test, as for
 `pipewright promote`.
 
-Four settings under `retraining.loop` (new in phase 6; each off until set, in production's configuration):
+Four settings under `retraining.loop` (new in 1.4.0; each off until set, in production's configuration):
 
 - **`safeguards`**, for loops started without a person (`retraining.mode: candidate`): at most `max_loops` per
   `per_days`; after `pause_after_failures` automatic loops in a row end rejected, failed or rolled back, automatic
@@ -519,9 +521,18 @@ An approval records what it approved: the evaluation record, every model file an
 (a BigQuery ML model by its etag), and the release whose rules it was judged by. `deploy-model` (Agent Platform and
 KServe) and `promote` refuse a version that is not that: a changed file, a moved image tag, a first version nobody
 approved, a default made outside Pipewright. Approvals are judged by the released gates and approvers, not your
-working copy; approved files can be locked with object retention; `lineage` checks each approval against Cloud Audit
-Logs. The checks refuse by default (`policies.integrity.mode: warn` relaxes an environment). The guide:
+working copy; approved files and release contracts can be locked with object retention; each approval is checked
+against Cloud Audit Logs at deploy and promote, so an approval written by hand does not pass. New in 1.4.0; the checks
+refuse by default (`policies.integrity.mode: warn` relaxes an environment). The guide:
 [docs/INTEGRITY.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/INTEGRITY.md).
+
+## Every use case on one page
+
+`pipewright report fleet --out fleet.html` (new in 1.4.0) reads every environment of your MLOps repository and writes
+one read-only HTML page: each use case's live release, champion, runs, pipeline hours, decisions and what waits for a person, and whether each champion is
+still the version approved. `--mask` replaces email addresses before you share it. It reads only what Pipewright
+records (contracts, the registry, the event log), never a row of data. Pipewright Enterprise's Fleet View is the
+hosted, access-controlled version for a whole organisation.
 
 ## Lineage
 
@@ -677,11 +688,11 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.3.0"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp]==1.4.0"     # the command is `pipewright`
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.3.0 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.4.0 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -784,15 +795,17 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
-| A/B testing of models: sticky assignment by customer, a business metric and guardrails, a person decides the winner | Planned (phase 5) |
+| A/B testing of models: sticky assignment by customer, a business metric and guardrails, a person decides the winner | Planned |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
 | Online serving from Bigtable (endpoints read features by entity ID) | Built (1.1); used end to end on Agent Platform endpoints and KServe |
 | BigQuery ML use cases: classification, regression, k-means, PCA, ARIMA_PLUS and AI.FORECAST forecasts, imported models | Built (1.1); used end to end on both orchestrators |
 | The closed retrain loop, failed retrains and their retry | Built (1.1); used end to end, test to production |
+| What runs is what was approved: approvals fingerprint files, image, rules and BigQuery ML models; deploy and promote refuse a change, cross-checked with Cloud Audit Logs; approved files and release contracts locked | Released in 1.4.0; used end to end on Agent Platform and private GKE, tested as a bank's governance team would |
+| The closed retrain loop's safeguards, online canary with automatic rollback, production data for training, BigQuery ML in the loop | Released in 1.4.0; used end to end, test to production |
 | Fairness gates, approved images, approvals in GitHub, lineage per run | Built (1.1) |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 | Synthetic data (learned inside the environment and gated, or from the data contract alone) | Released in 1.0.0; used end to end on Agent Platform Pipelines and on Kubeflow in private GKE, inside an enforced perimeter |

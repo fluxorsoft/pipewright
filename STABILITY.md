@@ -30,7 +30,7 @@ These may change in any release:
 
 - **Minor versions (1.x)** add keys, commands, events and fields. Existing configuration keeps working unchanged.
 - **Patch versions (1.x.y)** fix bugs and security issues only.
-- **The one deliberate exception (phase 6):** the integrity checks refuse to deploy or promote a version that
+- **The one deliberate exception (1.4.0):** the integrity checks refuse to deploy or promote a version that
   is not the one approved, from the release that ships them. A failed check means what would run is not what
   was approved; `policies.integrity.mode: warn` relaxes an environment ([docs/INTEGRITY.md](docs/INTEGRITY.md)).
 - **Deprecations:** anything on the stable surface that is going away first warns (in `validate`, `doctor` and the

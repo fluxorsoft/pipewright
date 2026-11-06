@@ -15,6 +15,7 @@ ML persona assumes the infrastructure already exists; this guide covers the hand
 | Feature datasets (optional) | `project.dataset` feature datasets the team may read, and whether the environment requires feature tables; see [FEATURES.md](FEATURES.md) |
 | Online store (optional, 1.1) | a Feature Store online store for the tenant (`tenants.<tenant>.features.online_store`), so endpoints read features by entity ID; it has a standing cost |
 | Platform policies (optional, 1.1) | `policies.images` (approved base images and package indexes), `policies.bqml` (byte limits; `ai_forecast` to allow AI.FORECAST) |
+| Integrity (1.4.0) | `policies.integrity`: deploy and promote refuse a version that is not the one approved (`mode: refuse`, the default; `warn` for an environment that must keep going), approved files and contracts locked (`lock`), and the scoring check (`inference`). Who deploys or promotes needs `roles/logging.viewer` for the audit cross-check; see [INTEGRITY.md](INTEGRITY.md) |
 | Environment manifest | published at `gs://<artifacts-bucket>/pipewright/environment.json` |
 
 The shared launcher picks up new tenants from the manifest within a minute; no launcher redeploy is needed.
@@ -94,7 +95,7 @@ TLS-intercepting proxy also set `REQUESTS_CA_BUNDLE`.
 | 7 | `pipewright release --env <env>` | Builds your component image, compiles and uploads one template per pipeline, writes the contract, verifies, makes it live |
 | 8 | `pipewright schedules sync --env <env>` | Creates your schedules: Cloud Scheduler jobs, or CronJobs where the manifest sets `schedules.backend: kubernetes` (private GKE) |
 | 9 | drop a file in your landing prefix, or wait for the schedule | The shared launcher starts the pipeline the trigger names (landing: training by default) |
-| 10 | `pipewright model list` / `model approve --version N --approve` | With `promote_model: manual`, an approved model is a candidate until you make it the default (the champion) |
+| 10 | `pipewright model list` / `model approve --version N --approve` | With `promote_model: manual`, an approved model is a candidate until you make it the default (the champion). The approval is judged by the rules of the release that trained the version, records its files and image by fingerprint, and (1.4.0) is what deploy and promote check |
 
 CI (GitHub Actions): `pipewright ci init --environments dev,prod` writes `pipewright-pr` (validate, test,
 doctor, dry runs on every pull request), `pipewright-release` (on merge: tables, release, schedules, alerts for
@@ -120,7 +121,9 @@ pipewright retrain show   --env <env> --usecase <usecase>                  # the
 pipewright retrain approve --env <env> --usecase <usecase> --reason "..."  # or decline / snooze --because ... --days N
 pipewright retrain retry --env <env> --usecase <usecase> --case <id> --reason "..."  # after a failed training
 pipewright decisions pending --env <env>                                   # what waits for a person
-pipewright lineage --env <env> --usecase <usecase> --version N             # a version back to its data and release
+pipewright lineage --env <env> --usecase <usecase> --version N             # a version back to its data and release, and its integrity
+pipewright loop pause --env <prod> --usecase <usecase> --reason "..."      # stop automatic retraining (then loop resume)
+pipewright report fleet --out fleet.html                                    # every use case and environment on one page
 pipewright data erase   --env <env> --usecase <usecase> --keys-file ids.txt   # counts; add --confirm to delete
 ```
 

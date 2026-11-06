@@ -1,6 +1,6 @@
 # What runs is what was approved
 
-From the release that ships Pipewright's phase 6, an approval records what it approved, and nothing is deployed,
+From Pipewright 1.4.0, an approval records what it approved, and nothing is deployed,
 promoted or (optionally) scored unless it is still that.
 
 ## What an approval records
@@ -20,7 +20,7 @@ destination) writes a `model.approved` event with:
 The rules are the released ones. The gates `model approve` re-checks, and the approvers it allows, come from the release
 that trained the version, not from your working copy. If your working copy differs in `ml.evaluation` or `approvals`,
 the approval is refused: approve from the release's commit, or release the change and retrain. A release from before
-phase 6 records its gates but not its approvers; its approvers then come from the working copy, and the approval says so.
+1.4.0 records its gates but not its approvers; its approvers then come from the working copy, and the approval says so.
 
 ## What is checked, and when
 
