@@ -246,7 +246,8 @@ def released_rules(uc: ResolvedUseCase, env: Environment, gcp, release_id: str |
                      "rules apply")
     released_eval = dict(ml_config(contract).get("evaluation") or {})
     released_appr = dict((contract.metadata or {}).get("approvals") or {})
-    note = None if released_appr else (f"release {release_id} predates Pipewright 1.4.0 and does not record its approvers: "
+    note = None if released_appr else (f"release {release_id} predates Pipewright 1.4.0 and does not record its "
+                                       "approvers: "
                                        "the working copy's approvers apply")
     rules = Rules(released_eval or local_eval, released_appr or local_appr, release_id,
                   "release" if released_eval else "working copy", note)

@@ -148,7 +148,7 @@ def test_approval_is_judged_by_the_released_rules(monkeypatch):
     old = SimpleNamespace(metadata={})                                    # a release from before phase 6
     monkeypatch.setattr("pipewright.release.service.read_contract", lambda gcp, env, name: old)
     rules = integrity.released_rules(same, env(), None, "rel1")
-    assert rules.approvals == same.approvals and "predates phase 6" in rules.note
+    assert rules.approvals == same.approvals and "predates Pipewright 1.4.0" in rules.note
     assert integrity.released_rules(same, env(), None, None).source == "working copy"
 
 
@@ -191,7 +191,7 @@ def test_an_approval_before_phase_6_still_deploys_with_a_note(monkeypatch):
     monkeypatch.setattr(integrity, "approval_events", lambda *a: [{"at": "2026-10-30T10:00:00", "by": "a@x"}])
     check = integrity.verify(store(), env(), "churn", "4", FOLDER, None)
     assert check.problems == [] and any("predates Pipewright 1.3.1" in n for n in check.notes)
-    assert any("approved before phase 6" in n for n in check.notes)
+    assert any("approved before Pipewright 1.4.0" in n for n in check.notes)
 
 
 def test_enforce_refuses_by_default_and_warns_when_the_policy_says_so():
