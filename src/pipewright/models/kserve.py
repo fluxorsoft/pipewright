@@ -336,7 +336,7 @@ def _deployed(uc: ResolvedUseCase, env: Environment, gcp, version: str, k: KServ
     events.emit(events.event("model.deployed", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
                              version=version, endpoint=f"kserve:{k.s['namespace']}/{k.name}", traffic_percent=100,
                              target="kserve", by=gcp.identity(),
-                             **({"integrity": check.summary()} if check is not None else {})),
+                             **({"integrity": check.deployed()} if check is not None else {})),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
 
 

@@ -289,6 +289,15 @@ class Check:
     notes: list[str] = field(default_factory=list)
     approval: dict | None = None
 
+    def deployed(self) -> dict:
+        """For model.deployed: a deploy that went on with problems did so under policies.integrity.mode warn, and
+        says so with what was wrong (found in QA: it recorded 'refused' and a count for a deploy that happened).
+        The problems name files, digests and versions, never data."""
+        out = self.summary()
+        if self.problems:
+            out.update(result="warned: deployed under policies.integrity.mode warn", problems_found=self.problems[:10])
+        return out
+
     def summary(self) -> dict:
         state = "refused" if self.problems else "verified"
         return {"result": state, "problems": len(self.problems),

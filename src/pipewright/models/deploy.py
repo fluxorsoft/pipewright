@@ -268,7 +268,7 @@ def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: in
     gcp = Gcp(creds)
     events.emit(events.event("model.deployed", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
                              version=version, endpoint=endpoint_name(uc), traffic_percent=traffic,
-                             by=gcp.identity(), **({"integrity": check.summary()} if check is not None else {})),
+                             by=gcp.identity(), **({"integrity": check.deployed()} if check is not None else {})),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
 
 

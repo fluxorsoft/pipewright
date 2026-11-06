@@ -586,3 +586,13 @@ def test_lineage_calls_a_candidate_nobody_approved_not_approved_yet(monkeypatch)
     out = {"version": "4", "default": True, "decisions": []}
     lineage.check_integrity(None, SimpleNamespace(), SimpleNamespace(name="churn"), out, "m", None)
     assert out["integrity"]["result"] == "refused"                    # the default: it is a problem
+
+
+def test_a_deploy_under_warn_is_recorded_as_such_with_its_problems():
+    """QA finding (G8, break-glass): model.deployed said 'refused' and a count for a deploy that went on under warn."""
+    ok = integrity.Check(approval={"at": "t", "by": "lead@example.com"})
+    assert ok.deployed()["result"] == "verified"
+    warned = integrity.Check(problems=["model_card.md: changed after the approval (sha256 0585c5d1c067dc2b approved)"])
+    got = warned.deployed()
+    assert got["result"].startswith("warned: deployed under policies.integrity.mode warn")
+    assert got["problems_found"] == warned.problems and got["problems"] == 1
