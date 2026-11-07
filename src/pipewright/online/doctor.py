@@ -99,8 +99,8 @@ def check(uc, env, gcp, report) -> None:
             elif res.ok and size:
                 report.add(s, Result(OK, "BI Engine", f"covers {online['table']} ({nbytes / 2**20:.0f} MiB)"))
             report.add(s, Result(INFO, "refresh window", f"for minutes after each sync, lookups BI Engine has not "
-                                 f"reloaded are billed as a full read (at least 10 MiB): about ${per:.5f} each (spike: up "
-                                 "to 10 minutes for 1M rows)"))
+                                 f"reloaded are billed as a full read (at least 10 MiB): about ${per:.5f} each "
+                                 "(spike: up to 10 minutes for 1M rows)"))
         else:
             report.add(s, Result(WARN, "served table", f"{online['table']}: not synced yet",
                                  "run `pipewright features sync` or wait for the online_sync schedule"))
