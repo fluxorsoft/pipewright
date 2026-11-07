@@ -170,8 +170,8 @@ def test_a_serving_namespace_that_cannot_be_read_is_counted_and_degrades_the_ren
     clean while the copies served there went unchecked."""
     from types import SimpleNamespace
 
-    from pipewright.models import protection, watch
     from pipewright.kube import KubeClient, Response
+    from pipewright.models import protection, watch
 
     class Kube:
         def get(self, path, **params):
