@@ -406,6 +406,58 @@ def cmd_features_register(args) -> int:
     return 0
 
 
+def _online_source(args):
+    """(ml_config, environment, tenant, usecase, release) for the online sync: the live release's configuration
+    (--manifest, as the scheduled job runs), or the checkout's (--root and --env)."""
+    from pipewright.gcp import Gcp
+
+    gcp = Gcp()
+    if args.manifest:
+        from pipewright.config.environment import environment_from_manifest
+        from pipewright.release import service as release
+
+        env = environment_from_manifest(args.manifest)
+        pointer, _ = release.read_pointer(gcp, env, args.usecase)
+        if not pointer:
+            raise ConfigError(f"{args.usecase} has no release in {env.name}")
+        contract = release.read_contract(gcp, env, pointer.contract)
+        ml = contract.pipeline("training").static_parameters.get("ml_config") or {}
+        return gcp, ml, env, contract.tenant, args.usecase, contract.release_id
+    if not args.env:
+        raise ConfigError("give --env (with the MLOps checkout) or --manifest (the environment manifest)")
+    env = load_environment(Path(args.root), args.env)
+    path = _selected(Path(args.root), [args.usecase])[args.usecase]
+    uc = resolve_usecase(path, env)
+    return gcp, uc.ml_config(), env, uc.tenant, uc.name, None
+
+
+def cmd_features_sync(args, load: bool = True) -> int:
+    """Pipewright 1.4.2 (FR-104): the latest feature values per entity into the use case's online store (bigquery,
+    cloudsql), or with `features export` only the Parquet generation and its manifest."""
+    from pipewright.online import sync
+
+    gcp, ml, env, tenant, usecase, release_id = _online_source(args)
+    online = ml.get("online_features") or {}
+    if not load and not online.get("export"):
+        from pipewright.online import config as online_config
+
+        online = {**online, "export": {"uri": online_config.export_prefix(env, tenant, usecase), "keep": 3,
+                                       "readers": []}}
+        ml = {**ml, "online_features": online}
+    out = sync.run(ml, env, tenant, usecase, gcp, release=release_id, load=load)
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
+    else:
+        print(f"{usecase}: generation {out['generation']}, {out['rows']} entities as of {out['as_of']}"
+              + (f", manifest {out['manifest']}" if out.get("manifest") else "")
+              + f" ({out['timings']['total_s']} s)")
+    return 0
+
+
+def cmd_features_export(args) -> int:
+    return cmd_features_sync(args, load=False)
+
+
 def cmd_features_contract(args) -> int:
     """Pipewright 1.4.1 (FR-103): write or check the use case's feature contract from its live feature sources.
     Exit codes with --check: 0 the sources match the contract, 1 they differ, 2 they cannot be checked."""
@@ -1281,6 +1333,19 @@ def build_parser() -> argparse.ArgumentParser:
                                                                 "wrote each table built by a query")
     sp.add_argument("--dry-run", action="store_true", help="say what would change; write nothing")
     sp.set_defaults(func=cmd_features_contract)
+    for name, func, text in (
+            ("sync", cmd_features_sync, "the latest feature values per entity into the use case's online store "
+                                        "(model.serving.online_store bigquery or cloudsql; FR-104)"),
+            ("export", cmd_features_export, "the latest feature values per entity as Parquet with a manifest, for a "
+                                            "store the team builds (FR-104)")):
+        sp = fsub.add_parser(name, help=text)
+        sp.add_argument("--root", default=".")
+        sp.add_argument("--env", help="with the MLOps checkout")
+        sp.add_argument("--manifest", help="the environment manifest (gs:// or a file): read the live release, as "
+                                           "the scheduled sync does")
+        sp.add_argument("--usecase", required=True)
+        sp.add_argument("--json", action="store_true")
+        sp.set_defaults(func=func)
 
     sp = sub.add_parser("report", help="read-only reports from the records Pipewright keeps")
     rsub = sp.add_subparsers(dest="report_command", required=True)
