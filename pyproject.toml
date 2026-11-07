@@ -72,6 +72,8 @@ packages = ["src/pipewright"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+# Spike scripts kept as evidence, verbatim: a record of what ran, not product code.
+extend-exclude = ["docs/evidence"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "I"]
