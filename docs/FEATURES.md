@@ -254,3 +254,10 @@ old value unless the row's `feature_timestamp` is newer, entities that left the 
 values, and a breaking change fails the sync while serving goes on with the last good values. With the check and
 the watch on, a feature view whose newest sync failed is reported (an incident). After a definition change, resync
 with rows stamped newer than the last sync (for example `CURRENT_TIMESTAMP()` as `feature_timestamp` in the view).
+
+## Serving features online
+
+The same feature tables serve online lookups. Bigtable (Feature Store) is the default; Cloud SQL and BigQuery with BI
+Engine cost far less at modest traffic, and the Parquet export lets a team load a store of its own. Each sync records
+the feature contract's version in its manifest, so serving can say which definition it served. Choosing and setting
+up a store, costs, performance and the pattern for your own sync: [ONLINE_STORES.md](ONLINE_STORES.md).

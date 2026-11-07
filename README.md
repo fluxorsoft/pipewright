@@ -339,6 +339,38 @@ creates one. Both Agent Platform endpoints and KServe on private GKE serve this 
 (`[{"customer_id": "c-42"}]`), since its serving envelope refuses bare strings. A new feature view serves nothing
 until its first sync, which `doctor` reports.
 
+### Choosing the online store
+
+Bigtable costs about $781 a month per node, called or not. A use case may choose another store the environment offers
+(`model.serving.online_store.type`, FR-104):
+
+| Store | A lookup | Standing cost a month (London list price) |
+|---|---|---|
+| `bigtable` (default) | about 12 ms | about $781 per node |
+| `cloudsql` | about 3 ms direct, 12 ms through Pipewright's lookup service | about $61 (1 vCPU), plus about $14 per warm lookup instance |
+| `bigquery` (with BI Engine) | about 200 ms | about $38 per GiB reserved, no copy of the data |
+| `http` | your own store | yours |
+
+```yaml
+model:
+  serving:
+    enabled: true
+    features: online
+    online_store:
+      type: cloudsql
+      cloudsql: { schema: team_churn }
+      lookup: { min_instances: 1 }       # Pipewright's Cloud Run lookup service, sized here (or provider: own)
+triggers:
+  schedules:
+    - { name: online, cron: "0 * * * *", timezone: Europe/London, pipeline: online_sync }
+```
+
+Pipewright syncs the newest values per entity from BigQuery (a staging load, checked against a manifest, swapped in
+one transaction: no lookup sees half a load), creates the lookup service at `deploy-model`, checks every size against
+what Google Cloud supports, and alerts when a sync is stale or BI Engine lets lookups be billed as full reads. The
+Parquet export (`export.enabled`) is for teams that build their own store. The guide, with costs, performance and the
+pattern for your own sync: [docs/ONLINE_STORES.md](docs/ONLINE_STORES.md).
+
 ## Reproducible runs and label windows
 
 Two optional keys in `config/data.yaml`, both off unless set (new in 1.1):

@@ -3,6 +3,29 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [Unreleased]
+
+Phase 9: choosing the online feature store (FR-104). Everything is off until a use case sets
+`model.serving.online_store`; Bigtable stays the default. The guide is [docs/ONLINE_STORES.md](docs/ONLINE_STORES.md).
+
+### Added
+
+- **Cloud SQL for PostgreSQL** as an online store: one instance per environment, a schema per team, private IP, SSL
+  verified, IAM database login with no password user. Pipewright's sync (`pipeline: online_sync` schedules, run by the
+  launcher as the tenant's runner) writes the newest values per entity through a staging table checked against a
+  manifest and swapped in one transaction; `sync.mode: changed` writes only changed rows.
+- **Pipewright's lookup service** (`python -m pipewright.online.server`, in the launcher image) between Agent
+  Platform endpoints and Cloud SQL, created by the launcher at `deploy-model`; or `lookup.provider: own`.
+- **BigQuery with BI Engine** as an online store, refused without a reservation; `online.billed` when lookups are
+  billed as full table reads.
+- **`http`**: a team's own store answering `POST /lookup`, its answers checked against the model.
+- **The Parquet export** (`export.enabled`, off by default) with a manifest, for a store a team builds;
+  `pipewright features export`.
+- Sizes in YAML checked against what Cloud Run and Cloud SQL support (`validate`, Terraform); `doctor` shows each
+  store's standing cost; `online.stale` and `online.fresh` from the launcher's tick; `pipewright features sync` and
+  `pipewright features online-setup`.
+- The churn example's serving handler reads any store through `online_lookup.py`, one lookup per request.
+
 ## [1.4.1] - 2026-11-07
 
 Phase 7: serving what was approved, and knowing when it changes (FR-101, FR-102). A live test showed that KServe and
