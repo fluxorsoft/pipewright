@@ -48,7 +48,7 @@ def test_cloudsql_shows_costs_and_warns_about_public_and_shared_core(monkeypatch
                                                           "uri": "https://u"})}),
               env(tier="db-g1-small"), fresh, monkeypatch)
     text = " | ".join(f"{s} {c}: {d}" for s, c, d in got)
-    assert "about $33 a month, shared by 2 tenants" in text
+    assert "about $33 a month (London list price), shared by 2 tenants" in text
     assert "WARN instance tier" in text and "no SLA" in text                 # shared core in production
     assert "WARN schema: public, in an instance other tenants share" in text
     assert "warm instances about $14 a month (best effort" in text
