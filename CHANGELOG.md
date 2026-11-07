@@ -21,6 +21,13 @@ manifest and Terraform when you want them; `doctor` lists what is off.
 
 ### Added
 
+- **Feature contracts** (FR-103): `pipewright features contract` writes `feature_contract` (per `data.features_from`
+  source: kind, SQL and schema fingerprints, features, a semantic version set by what changed); `--check` for CI.
+  It travels in the release contract. With `policies.integrity.features.check: on` a changed definition refuses
+  training, approval, promotion, deploy, scoring and rollback (or warns under mode warn), and the watch reports it
+  and a feature view whose newest sync failed. `built_tables` checks tables built by a query by their last job's SQL;
+  `record_reads`, `fingerprint_rows` and `snapshot_days` record what a scoring run read. All off by default.
+
 - **Scoring loads the approved bytes** (`policies.integrity.pin`, on by default): with `inference: warn` or `refuse`
   the launcher runs the full check of the version a scoring run uses and passes its approved files
   (`approved_files`); the reference example's `load_model` downloads exactly those generations and checks each

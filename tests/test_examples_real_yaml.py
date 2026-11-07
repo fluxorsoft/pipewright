@@ -53,6 +53,7 @@ def _resolver_default(key: str):
     absent = {"model.serving.features": "request", "model.serving.fill_missing": True,
               "model.serving.scale_to_zero": False, "model.serving.accelerator": None,
               "data.label_source": None, "monitoring.performance.labels.time_column": None,
+              "feature_contract": None,
               "components.base_image": ResolvedUseCase.__dataclass_fields__["base_image"].default,
               "tests.on_release": ResolvedUseCase.__dataclass_fields__["tests_on_release"].default,
               "tests.environment": ResolvedUseCase.__dataclass_fields__["tests_environment"].default}

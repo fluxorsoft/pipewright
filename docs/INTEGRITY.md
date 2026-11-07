@@ -189,6 +189,9 @@ alerts in place, and ships paused (`renewer_schedule`) until you have tested the
 | DATA_WRITE logs (with the exclusion) | starter off, blueprint on | who wrote a file | usually inside Cloud Logging's free 50 GiB a month; $0.50 per GiB beyond |
 | `audit_retention_days` | 0 | approvals older than 400 days are cross-checked | cents a year ($0.01 per GiB-month); a locked bucket's retention cannot be shortened |
 | alerts | with `platform_alert_emails` | the platform team is told | $0 at these volumes |
+| `features.check: on` (1.4.1, FR-103) | off | a changed feature definition is refused like a changed model file | $0: object metadata and dry runs are free |
+| `features.built_tables` | off | tables built by a query, by their last job's SQL | about $0.00015 a check (20 MiB minimum); needs `bigquery.jobs.listAll` |
+| `features.record_reads`, `fingerprint_rows`, `snapshot_days` | off | what each scoring run read | $0; a scan per source per run ($0.0076 per GiB); snapshot storage of rows that later change |
 
 ## When something changes: the response plan (1.4.1)
 

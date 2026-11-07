@@ -29,6 +29,9 @@ data:
 features:
   exclude: []                            # default: every contract column except label, time and personal data
 
+# default feature_contract: null          # with data.features_from: the approved definitions of those sources,
+#                                         # written by `pipewright features contract` (docs/FEATURES.md, 1.4.1)
+
 data_protection:
   personal_data_columns: [customer_id]   # never a feature; erased by `pipewright data erase`
   erasure: { key_column: customer_id }

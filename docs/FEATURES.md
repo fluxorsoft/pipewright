@@ -212,3 +212,45 @@ learns the entity table together with the feature tables named in `data.features
 
 Each synthetic table goes to its own output table (`synthetic.output_tables`, by source name), so a team can train
 on synthetic data with the same `features_from` block pointed at those tables.
+
+## The feature contract: definitions that cannot change under an approved model (1.4.1)
+
+An approval pins the model, its evaluation and the release; the feature contract pins the definitions of the
+features it reads. Definitions are immutable, values are not: new rows under the same definition are fine; changing
+how a feature is calculated needs a new contract version, a release and a retrain.
+
+**Write it.** `pipewright features contract --env test --usecase churn` reads each `data.features_from` source as
+it is now (a feature group is followed to its BigQuery table) and writes `config/feature_contract.yaml`: per source
+its kind, the SHA-256 of its SQL and of its schema, the schema itself and each feature's type. Add descriptions;
+commit the file. Run it again after a change: it says what changed and sets the version (a removed or retyped column
+is major, changed SQL or an added column minor, descriptions a patch). `--check` compares without writing: exit 0
+same, 1 different, 2 cannot check, for CI.
+
+**Where the SQL comes from.** A view or materialized view carries its SQL. A table built by a query (a pipeline,
+dbt, Dataform, `CREATE TABLE ... AS`) does not: give its `sql_file` (the query, kept with the use case) or its
+`scheduled_query` (the transfer config name). With `policies.integrity.features.built_tables: true` the SQL of the
+job that last wrote the table must match; without it such a table is checked by schema only. The fingerprint ignores
+whitespace, leading comments, the `CREATE TABLE ... AS` prefix and the source's own project (so test and prod
+compare equal), and never includes descriptions, labels or etags, which move on harmless edits.
+
+**Turn the check on** (platform team, `policies.integrity.features` in the manifest):
+
+| Key | Default | Then |
+|---|---|---|
+| `check: on` | off | training is refused on a definition that differs from the release's contract; approval and promotion record the definitions and refuse a difference; deploy, scoring (with `inference` on), the watch, `integrity check` and rollbacks compare with the approval. A difference is judged by `policies.integrity.mode` (refuse, or warn with `until`) |
+| `built_tables: true` | false | tables built by a query are checked by their last job's SQL (needs `bigquery.jobs.listAll`; at least 20 MiB a check, about $0.00015) |
+| `record_reads: true` | false | `run.submitted` of a scoring run records each source's base tables, their last-modified time and row count, and the read time |
+| `fingerprint_rows: true` | false | and a row fingerprint per source (one full scan each: about $0.0076 per GiB, 10 MiB minimum) |
+| `snapshot_days: N` | 0 | and an immutable snapshot of each base table in the use case's dataset, expiring after N days |
+
+**Reproducing what a model read.** Time travel works on tables for 2 to 7 days (the dataset's window), even across
+`CREATE OR REPLACE TABLE`, but **not through a view**: `FOR SYSTEM_TIME AS OF` on a view returns today's values
+without an error, and a view cannot be snapshotted. That is why `record_reads` records a view's base tables, and
+snapshots are taken of those. Beyond the window, only snapshots (or your own history tables) can rebuild the inputs.
+
+**Feature Store.** A feature group and a feature view hold only a pointer to the BigQuery table; the definition is
+whatever the table is at sync time. Found live: a sync of a changed definition reports success but keeps serving the
+old value unless the row's `feature_timestamp` is newer, entities that left the definition keep serving their old
+values, and a breaking change fails the sync while serving goes on with the last good values. With the check and
+the watch on, a feature view whose newest sync failed is reported (an incident). After a definition change, resync
+with rows stamped newer than the last sync (for example `CURRENT_TIMESTAMP()` as `feature_timestamp` in the view).
