@@ -62,7 +62,14 @@ def _post(url, body, token, timeout, what):
         with urllib.request.urlopen(request, timeout=timeout) as r:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
-        raise ValueError("the online store ({}) answered HTTP {}".format(what, e.code)) from None
+        reason = ""
+        try:                      # the API's reason code only (never its message, which may quote a value)
+            errors = (json.loads(e.read() or b"{}").get("error") or {}).get("errors") or [{}]
+            reason = errors[0].get("reason") or ""
+        except (ValueError, AttributeError):
+            pass
+        raise ValueError("the online store ({}) answered HTTP {}{}".format(
+            what, e.code, " ({})".format(reason) if reason else "")) from None
     except (urllib.error.URLError, OSError) as e:
         raise ValueError("the online store ({}) did not answer: {}".format(what, type(e).__name__)) from None
 
@@ -110,6 +117,8 @@ def _bigquery(online, ids):
             "queryParameters": [{"name": "ids", "parameterType": {"type": "ARRAY", "arrayType": {"type": "STRING"}},
                                  "parameterValue": {"arrayValues": [{"value": str(i)} for i in ids]}}],
             "jobCreationMode": "JOB_CREATION_OPTIONAL"}
+    if online.get("kms_key"):     # where the CMEK organization policy covers BigQuery (found live: HTTP 412 without)
+        body["destinationEncryptionConfiguration"] = {"kmsKeyName": online["kms_key"]}
     url = "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries".format(online["project"])
     got = _post(url, body, access_token(), max(2, online.get("timeout_ms", 1000) / 1000 + 1), "BigQuery")
     if not got.get("jobComplete", True):

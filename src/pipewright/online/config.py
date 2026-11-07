@@ -96,6 +96,8 @@ def resolve(spec: dict, ml: dict, env, tenant: str, usecase: str, problems: list
         table = (spec.get("bigquery") or {}).get("table") or table_name(usecase)
         out.update(project=env.project, location=env.region, table=f"{env.project}.{dataset}.{table}",
                    timeout_ms=(spec.get("bigquery") or {}).get("timeout_ms", 1000))
+        if (env.security or {}).get("bigquery_kms_key"):     # CMEK on the lookups' results (found live in ent)
+            out["kms_key"] = env.security["bigquery_kms_key"]
     elif kind == "cloudsql":
         sql = store.get("cloudsql") or {}
         if not sql.get("instance"):

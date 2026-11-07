@@ -118,3 +118,13 @@ def test_the_lookup_service_url_is_read_once(monkeypatch):
     lc._cache.pop("url:pwl-churn-x", None)
     assert lc.service_url(online) == lc.service_url(online) == "https://pwl-churn-x-123.europe-west2.run.app"
     assert reads == ["https://run.googleapis.com/v2/projects/acme-ml-dev/locations/europe-west2/services/pwl-churn-x"]
+
+
+def test_bigquery_lookups_carry_the_cmek_key(monkeypatch):
+    seen = []
+    monkeypatch.setattr(lc, "access_token", lambda: "a")
+    monkeypatch.setattr(lc, "_post", lambda url, body, token, timeout, what: seen.append(body) or {"rows": []})
+    online = {"type": "bigquery", "key": "k", "features": ["a"], "project": "p", "location": "us-central1",
+              "table": "p.d.t", "kms_key": "projects/p/locations/us-central1/keyRings/r/cryptoKeys/bigquery"}
+    lc.fetch_many(online, ["e"])
+    assert seen[0]["destinationEncryptionConfiguration"]["kmsKeyName"].endswith("/cryptoKeys/bigquery")
