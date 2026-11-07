@@ -1063,10 +1063,13 @@ def record_reads(gcp, features_from: dict | None, contract, feat: dict, dataset:
             if feat["snapshot_days"] and dataset and body.get("type") == "TABLE":
                 snap = f"{r['tableId']}_snap_{(run_id or at.strftime('%Y%m%d%H%M%S'))}"[:1024]
                 expires = (at + datetime.timedelta(days=feat["snapshot_days"])).strftime("%Y-%m-%d %H:%M:%S")
-                query(gcp, contract.project,
-                      f"CREATE SNAPSHOT TABLE `{contract.project}.{dataset}.{snap}` CLONE `{bref}` "
-                      f"OPTIONS (expiration_timestamp = TIMESTAMP '{expires}')", kms_key=kms)
-                item["snapshot"] = f"{contract.project}.{dataset}.{snap}"
+                try:
+                    query(gcp, contract.project,
+                          f"CREATE SNAPSHOT TABLE `{contract.project}.{dataset}.{snap}` CLONE `{bref}` "
+                          f"OPTIONS (expiration_timestamp = TIMESTAMP '{expires}')", kms_key=kms)
+                    item["snapshot"] = f"{contract.project}.{dataset}.{snap}"
+                except Exception as e:  # noqa: BLE001 - one snapshot failing keeps the rest of the record (found live)
+                    item["snapshot_error"] = str(e).splitlines()[0][:200]
             base.append(item)
         entry = {"name": definitions.source_name(src), "object": ref, "base_tables": base}
         if feat["fingerprint_rows"]:

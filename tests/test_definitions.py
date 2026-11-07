@@ -194,7 +194,7 @@ def test_a_built_table_is_checked_by_its_last_job_only_with_built_tables(monkeyp
     assert d.check(gcp, expected, None, "p-test", "EU", built_tables=True)[0] == []
     monkeypatch.setattr(d, "built_sql", lambda gcp, ref, loc, kms=None: {"sql_sha256": "f" * 64, "job": "j2"})
     problems, _, _ = d.check(gcp, expected, None, "p-test", "EU", built_tables=True)
-    assert problems == [f"feature source spend: last built by SQL sha256 ffffffffffff (j2), approved {declared[:12]}"]
+    assert problems == [f"feature source spend: last built by SQL sha256 ffffffffffff (j2), recorded {declared[:12]}"]
     monkeypatch.setattr(d, "built_sql", lambda gcp, ref, loc, kms=None: {})
     assert "no job that wrote it" in d.check(gcp, expected, None, "p-test", "EU", built_tables=True)[1][0]
 
@@ -364,3 +364,22 @@ def test_a_table_built_from_a_commented_sql_file_matches_the_file():
     assert d.normalise_sql(job, "p-test") == d.normalise_sql(body, "p-test")
     assert d.normalise_sql(job, "p-test") == "SELECT customer_id, n FROM `{project}.ds.events`"
     assert d.normalise_sql(body.replace("p-test", "{project}"), "p-test") == d.normalise_sql(job, "p-test")
+
+
+def test_a_snapshot_that_fails_keeps_the_rest_of_the_record(monkeypatch):
+    """Found live: a snapshot with an expiration needs bigquery.tables.deleteSnapshot; one failure lost the record."""
+    from pipewright.models import integrity
+
+    base = {"type": "TABLE", "lastModifiedTime": "1", "numRows": "5", "schema": {"fields": []}}
+    gcp = FakeGcp({"p-test.feat.spend": view(base=["p-test.feat.tx"]), "p-test.feat.tx": base})
+    sec = d.build(gcp, FROM, "p-test", "r", None, None)["section"]
+
+    def denied(*a, **k):
+        raise ConfigError("Access Denied: Permission bigquery.tables.deleteSnapshot denied")
+
+    monkeypatch.setattr("pipewright.gcp.bigquery.query", denied)
+    manifest = {"policies": {"integrity": {"features": {"snapshot_days": 1}}}}
+    rec = integrity.feature_gate(gcp, manifest, _contract(sec, metadata={"dataset": "uc"}), "inference",
+                                 run_id="r1")["record"]["feature_reads"]
+    item = rec["sources"][0]["base_tables"][0]
+    assert item["table"] == "p-test.feat.tx" and "deleteSnapshot" in item["snapshot_error"]

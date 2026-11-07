@@ -301,11 +301,11 @@ def compare(expected: list[dict], now: list[dict], built: dict | None = None) ->
         if e.get("schema_sha256") and cur.get("schema_sha256") != e["schema_sha256"]:
             level, what = classify({"sources": [{**e, "features": None}]}, {"sources": [{**cur, "features": None}]})
             detail = "; ".join(w.split(": ", 1)[1] for w in what if "column" in w) or "its schema changed"
-            problems.append(f"feature source {name}: {detail} (schema sha256 {e['schema_sha256'][:12]} approved, "
+            problems.append(f"feature source {name}: {detail} (schema sha256 {e['schema_sha256'][:12]} recorded, "
                             f"{str(cur.get('schema_sha256'))[:12]} now)")
         if cur.get("kind") in ("view", "materialized_view"):
             if e.get("sql_sha256") and cur.get("sql_sha256") != e["sql_sha256"]:
-                problems.append(f"feature source {name}: its SQL changed (sha256 {e['sql_sha256'][:12]} approved, "
+                problems.append(f"feature source {name}: its SQL changed (sha256 {e['sql_sha256'][:12]} recorded, "
                                 f"{str(cur.get('sql_sha256'))[:12]} now)")
         elif e.get("sql_sha256"):
             b = (built or {}).get(name)
@@ -319,7 +319,7 @@ def compare(expected: list[dict], now: list[dict], built: dict | None = None) ->
                 problems.append(f"feature source {name}: {b['error']}")
             elif b.get("sql_sha256") != e["sql_sha256"]:
                 problems.append(f"feature source {name}: last built by SQL sha256 {b['sql_sha256'][:12]}"
-                                f"{' (' + b['job'] + ')' if b.get('job') else ''}, approved "
+                                f"{' (' + b['job'] + ')' if b.get('job') else ''}, recorded "
                                 f"{e['sql_sha256'][:12]}")
     return problems, notes
 
