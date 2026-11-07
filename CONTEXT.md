@@ -1479,7 +1479,7 @@ lock renewal extends retention on a serving version (with the acceptance tests a
 **Rules:** additive, nothing changes for a use case with integrity off; names, digests, generations and versions in
 every message, never a data value; the user reviews this design before it is built.
 
-### 8.19 Choosing the online feature store (FR-104, settled with the user 2026-11-07; phase 9 with FR-92)
+### 8.19 Choosing the online feature store (FR-104, settled with the user 2026-11-07, review decided the same day; phase 9 with FR-92)
 
 **Why:** online lookup (FR-51, 1.1.0) uses Google Cloud's managed online store, Feature Store online serving on
 Bigtable: $1.07 per node-hour in London, about $781 a month per node whether or not it is called, and the starter
@@ -1533,11 +1533,92 @@ in BigQuery.
 7. *Lessons the reference code carries:* keep HTTPS connections alive; pool database connections with a bound and cap
    instances; check every write when loading a store; load only changed rows where writes are charged one by one.
 
-**Open for the design review (recommendations first):** (a) Pipewright ships the Cloud Run lookup service for
-`cloudsql` on Agent Platform endpoints (about 60 lines, pooled, IAM login), rather than each team writing one;
-(b) the sync runs on the launcher's existing scheduler, rather than being triggered by the team; (c) Cloud SQL tenancy:
-one instance per environment with a schema per tenant (cheapest) or an instance per tenant (strongest isolation);
-(d) the request rate one Cloud SQL vCPU sustains (50 a second was untested headroom) and lookups during the rename.
+**Decided in the design review (user, 2026-11-07):**
+
+- (a) Pipewright ships the Cloud Run lookup service for `cloudsql` on Agent Platform endpoints (pooled, IAM login,
+  image published by Pipewright and pinned by digest). Its CPU, memory and instances are set in YAML by the ML team.
+- (b) The sync runs on the launcher's existing scheduler.
+- (c) One Cloud SQL instance per environment, a schema per tenant. Its tier, memory and disk are set in YAML, checked
+  against the tiers Google Cloud supports.
+- (d) A spike measures the request rate one vCPU sustains and whether lookups see errors during the sync's swap
+  (plan below), before the build.
+
+**Sizing in YAML, checked against what Google Cloud supports** (docs read 2026-11-07: Cloud Run "CPU limits" and
+"Memory limits", Cloud SQL "Instance settings" and "Machine series"). Anything outside the tables is refused by
+`validate` (the use case) or by Terraform's validation and `doctor` (the instance), naming the key and the allowed
+values. Nothing changes for anyone who does not choose `cloudsql`.
+
+*The lookup service: the ML team's use case YAML,* `model.serving.features.lookup`, overridable per environment in
+`environments/<env>.yaml`, within limits the platform sets in the manifest (`features.online_store.lookup.limits`:
+`max_cpu`, `max_memory`, `max_instances`, `max_min_instances`), as Ray limits work today. `deploy-model` deploys or
+updates it.
+
+| Key | Default | Allowed (Cloud Run services) |
+|---|---|---|
+| `cpu` | `1` | `1`, `2`, `4`, `6`, `8`. Fractional CPU (0.08 to under 1) is refused here: Cloud Run then forces concurrency 1, which defeats the connection pool |
+| `memory` | `512Mi` | `512Mi` to `32Gi` (second-generation runtime), and per CPU: 1 vCPU up to 4 GiB, 2 up to 8 GiB, 4 from 2 to 16 GiB, 6 from 4 to 24 GiB, 8 from 4 to 32 GiB |
+| `min_instances` | `0` | `0` and up; `1` keeps one instance warm (no cold start) |
+| `max_instances` | `5` | `1` and up, and `pool_size x max_instances` must fit the database's connection limit (below) |
+| `concurrency` | `80` | `1` to `1000` |
+| `pool_size` | `8` | `1` to `50` connections per instance (the spike's fix for exhausted connection slots) |
+| `timeout_ms` | `1000` | `50` to `30000`; the handler's own timeout and FR-73 filling apply as for every store |
+
+*The Cloud SQL instance: YAML too,* `online_store.cloudsql`, but in the platform's file (the starter's
+`online_store.yaml`, read by its Terraform; Enterprise's platform file under `spec.features.online_store`), because one
+instance serves every tenant in the environment: an ML team changes it by pull request to that one file, so two teams
+cannot size the same database differently. `doctor` shows each tenant what its environment's instance is and costs.
+
+| Key | Default | Allowed (Cloud SQL for PostgreSQL) |
+|---|---|---|
+| `edition` | `enterprise` | `enterprise`, `enterprise_plus`. Always written out: PostgreSQL 16 and later default to Enterprise Plus, which costs more |
+| `tier` | `db-custom-1-3840` | Enterprise: `db-f1-micro`, `db-g1-small` (shared core, no SLA, test only: `doctor` warns in an environment marked production); `db-custom-<vCPU>-<MB>` with vCPU 1 or an even number 2 to 96, memory 0.9 to 6.5 GB per vCPU, a multiple of 256 MB and at least 3840 MB; `db-custom-N4-<vCPU>-<MB>` with vCPU 2 to 80 in steps of 2 and 2 to 8 GB per vCPU. Enterprise Plus: `db-perf-optimized-N-<2,4,8,16,32,48,64,80,96,128>`, `db-c4a-highmem-<2,4,8,16,32,48,64,72>`, `db-perf-optimized-C4-<2,4,8>` (C4 and C4A depend on the region) |
+| `postgres_version` | `POSTGRES_16` | a version Cloud SQL offers |
+| `availability` | `zonal` | `zonal`, `regional` (high availability, about twice the compute) |
+| `disk.type` | `ssd` | `ssd`; `hdd` (Enterprise only); `hyperdisk` (N4, C4, C4A only) |
+| `disk.size_gb` | `10` | `10` to `65536`, can only grow; `disk.autoresize` on by default with an optional `autoresize_limit_gb` |
+| `data_cache` | off | Enterprise Plus only |
+| `deletion_protection` | `true` | |
+
+**Cost per choice** (Cloud Billing Catalog list prices, europe-west2, read 2026-11-07, before discounts; 730 hours a
+month):
+
+| Choice | A month |
+|---|---|
+| `db-f1-micro`, zonal, 10 GB SSD | about $11 (test only) |
+| `db-g1-small`, zonal | about $33 |
+| `db-custom-1-3840`, zonal (default; the spike's size) | about $61 ($0.0496 per vCPU-hour, $0.0084 per GiB-hour, $0.204 per GB-month SSD) |
+| `db-custom-1-3840`, regional | about $122 |
+| `db-custom-2-7680`, zonal / regional | about $120 / $241 |
+| `db-perf-optimized-N-2` (Enterprise Plus), zonal | about $221 ($0.0644 per vCPU-hour, $0.0109 per GiB-hour) |
+| An instance per tenant instead (not chosen) | the above times the number of tenants |
+| Lookup service, `min_instances: 0` | per use: $0.0000336 per vCPU-second and $0.0000035 per GiB-second while serving, plus requests |
+| Lookup service, one warm instance (1 vCPU, 512 MiB) | about $14 idle ($0.0000035 per vCPU-second and per GiB-second) |
+
+**Governance and security per item:**
+
+- *Tenancy:* each tenant has its own schema and its own IAM database users (its lookup service's identity, its sync's
+  identity). Grants are `USAGE` and `SELECT` on its own schema for lookups, write on its own schema for the sync,
+  nothing on `public` or another tenant's schema. No passwords exist. The instance has a private IP only, CMEK from the
+  manifest, and SSL required. A tenant needing a database of its own is the stronger option, at the cost above.
+- *Lookup service:* one per use case and environment, running as the tenant's lookup identity, IAM-only invocation (the
+  endpoint's identity and the tenant's runner), ingress internal, image by digest. Messages carry names, counts and
+  digests, never a feature value or an entity ID.
+- *Sync:* fired by the launcher's scheduler; it runs as the tenant's identity, never as the launcher, so the launcher
+  never reads feature data. It writes only its own schema, and every load carries the manifest (FR-103 contract version
+  and fingerprints), checked before the swap.
+
+**Spike (d), before the build** (pw-ebook, europe-west2, torn down after; about $2): `db-custom-1-3840` and the lookup
+service at its defaults, 1M entities x 30 features.
+
+1. *The rate one vCPU sustains:* open-loop lookups at 50, 100, 200, 400 and 800 a second, direct and through the
+   lookup service; p50, p95, p99, errors and database CPU at each. The knee is where p99 passes 50 ms or errors appear.
+2. *Lookups during the swap:* 200 a second without a pause while a sync loads 1M rows into staging and swaps; count
+   errors and the p99 around the swap. Compare a rename in one transaction with a view repointed in one statement,
+   each with a `lock_timeout`.
+3. *Facts to confirm:* the instance's default `max_connections` for the tier (bounds `pool_size x max_instances`); IAM
+   database login and CMEK on the default tier; whether a runner can be limited to its own Cloud Run services by name
+   (otherwise the launcher deploys the lookup service for it); BigQuery billing while BI Engine reloads a refreshed
+   table.
 
 **Rules:** additive and off by default; the stores' costs shown before anyone switches one on; names, digests and
 counts in every message and manifest, never a feature value.
