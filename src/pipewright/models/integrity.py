@@ -1066,7 +1066,9 @@ def record_reads(gcp, features_from: dict | None, contract, feat: dict, dataset:
                 try:
                     query(gcp, contract.project,
                           f"CREATE SNAPSHOT TABLE `{contract.project}.{dataset}.{snap}` CLONE `{bref}` "
-                          f"OPTIONS (expiration_timestamp = TIMESTAMP '{expires}')", kms_key=kms)
+                          f"OPTIONS (expiration_timestamp = TIMESTAMP '{expires}')")
+                    # no job key: BigQuery refuses one on DDL, and a snapshot keeps its base table's encryption
+                    # (found live on a CMEK project)
                     item["snapshot"] = f"{contract.project}.{dataset}.{snap}"
                 except Exception as e:  # noqa: BLE001 - one snapshot failing keeps the rest of the record (found live)
                     item["snapshot_error"] = str(e).splitlines()[0][:200]

@@ -268,21 +268,23 @@ def test_a_scoring_run_records_the_base_tables_it_reads(monkeypatch):
                    "p-test.feat.transactions": base})
     sec = d.build(gcp, FROM, "p-test", "r", None, None)["section"]
     queries = []
-    monkeypatch.setattr("pipewright.gcp.bigquery.query", lambda gcp, p, sql, *a, **k: queries.append(sql) or {
+    monkeypatch.setattr("pipewright.gcp.bigquery.query", lambda gcp, p, sql, *a, **k: queries.append(
+        sql + (" [kms]" if k.get("kms_key") else "")) or {
         "schema": {"fields": [{"name": "n", "type": "INTEGER"}, {"name": "fp", "type": "INTEGER"}]},
         "rows": [{"f": [{"v": "200"}, {"v": "42"}]}]})
     at = datetime.datetime(2026, 11, 7, 9, 0, tzinfo=datetime.timezone.utc)
     manifest = {"policies": {"integrity": {"features": {"record_reads": True, "fingerprint_rows": True,
                                                         "snapshot_days": 3}}}}
-    rec = integrity.feature_gate(gcp, manifest, _contract(sec, metadata={"dataset": "uc"}), "inference",
-                                 run_id="r9", now=at)["record"]["feature_reads"]
+    rec = integrity.feature_gate(gcp, {**manifest, "security": {"bigquery_kms_key": "k"}},
+                                 _contract(sec, metadata={"dataset": "uc"}), "inference", run_id="r9",
+                                 now=at)["record"]["feature_reads"]
     assert rec["read_at"] == "2026-11-07T09:00:00Z"
     src = rec["sources"][0]
     assert src["object"] == "p-test.feat.spend" and src["rows"] == 200 and src["row_fingerprint"] == "42"
     assert src["base_tables"] == [{"table": "p-test.feat.transactions", "last_modified": "1794038186457",
                                    "rows": "20000", "snapshot": "p-test.uc.transactions_snap_r9"}]
     assert any("CREATE SNAPSHOT TABLE `p-test.uc.transactions_snap_r9` CLONE `p-test.feat.transactions`" in q
-               and "2026-11-10 09:00:00" in q for q in queries)
+               and "2026-11-10 09:00:00" in q and "[kms]" not in q for q in queries)   # found live on CMEK
     assert gcp.posted[0][1]["configuration"]["dryRun"] is True
 
 
