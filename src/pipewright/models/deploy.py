@@ -198,12 +198,14 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                           f"--version {p.version} --approve",
                           source=f"v{p.version} of {p.model} is not served: it is the default and labelled "
                                  "approval=pending: nobody has approved it (approvals.promote_model manual)")
+    from pipewright.online import launcher as online_launcher
+
+    # FR-104: the use case's Cloud SQL lookup service, created or brought up to date before the model (also when the
+    # model is already served, so a changed size or setting is applied by running deploy-model again).
+    online_launcher.request_from_cli(uc, env, log)
     if p.already_deployed:
         log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return
-    from pipewright.online import launcher as online_launcher
-
-    online_launcher.request_from_cli(uc, env, log)       # FR-104: its Cloud SQL lookup service, before the model
     registered = ai.Model.list(filter=f'display_name="{p.model}"')[0]
     model = ai.Model(model_name=f"{registered.resource_name}@default")
     endpoints = ai.Endpoint.list(filter=f'display_name="{p.endpoint}"')
