@@ -1729,6 +1729,25 @@ anything custom. Pipewright neither builds nor tests those; it syncs the schema 
 | The same inside the private blueprint: CMEK required, the instance and the lookup service inside the VPC Service Controls perimeter, Private Service Connect from Agent Platform endpoints (FR-92), KServe on private GKE straight to the private IP, high availability on for production, the tenant grants as code | Enterprise |
 | Evidence that what was served was what was synced (the manifest digest against the sync record), Fleet View showing each store's freshness, sync health and standing cost | Enterprise |
 
+**Build and live test (2026-11-07).** Built on branch `phase-9` (core, starter, Enterprise): `pipewright.online`
+(config, sizing, lookup client, lookup service, sync, launcher, doctor, watch, setup), the starter's `online_stores.tf`
+and `online_store.yaml`, Enterprise's `online_stores.tf`, Fleet View and EV-17, the docs and the site page. Live in the
+starter (pw-ebook, europe-west2) and in `ent` (us-central1: CMEK required by organization policy, private network,
+Private Service Connect for Google APIs, VPC Service Controls), with the churn example on Cloud SQL and on BigQuery:
+
+- the admin IAM user created the database and grants with no password user; scheduled syncs ran scheduler, launcher,
+  the tenant's job; Cloud SQL swaps 11 to 18 ms; 750 of 750 predictions succeeded while a sync swapped the table;
+  `changed` mode wrote exactly the 10 changed rows; export generations kept and pruned; both stores gave identical
+  scores for the same entities; `online.billed` fired when BI Engine was turned off; Fleet View and EV-17 read the
+  records.
+- Found and fixed live: the schedule pipeline enum; an isolated runner cannot read the manifest or contracts (the
+  launcher now hands the job a request under `online-sync/<tenant>/`, and may write there); the launcher needs
+  `cloudsql.viewer` to pin the database's CA (it now refuses without it); Cloud Run's v2 API omits `reconciling:
+  false`; internal ingress answers Agent Platform's public endpoints 404 (ingress all, IAM-only, until FR-92);
+  `deploy-model` refreshes the lookup service every time; BigQuery bills at least 10 MiB per unaccelerated lookup;
+  Cloud SQL refuses to drop IAM users that own objects (abandoned on destroy); bucket grants must wait for the bucket;
+  the starter's lock file lacked the `time` provider; Terraform conditionals over YAML need one type.
+
 **User docs, part of the release (user, 2026-11-07):** the website's `docs/index.html` and `docs/quickstart.html`
 gain the online feature store, and a full guide covers, with real YAML:
 
@@ -1941,7 +1960,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | An audit trail that lasts: long audit retention, Data Access logs, time-boxed break glass, who can write approved folders (FR-102) | Phase 7, the next release (user, 2026-11-06) |
 | Immutable feature definitions and the complete ML release (FR-103, section 8.17) | Phase 8, released together with phase 7 (user, 2026-11-06) |
 | Online endpoints in Terraform: endpoint, IAM and network, deploy-model unchanged (FR-92) | Phase 9 (user, 2026-11-05); the user reviews the wording before it is built |
-| Choose the online feature store, with its cost shown: Bigtable, BigQuery + BI Engine, Cloud SQL, http; export and plugins (FR-104, section 8.19) | Phase 9, with FR-92 (user, 2026-11-07) |
+| Choose the online feature store, with its cost shown: Bigtable, BigQuery + BI Engine, Cloud SQL, http; export and plugins (FR-104, section 8.19) | Built on branch `phase-9` 2026-11-07 and live-tested in the starter (pw-ebook) and Enterprise's secured `ent` (section 8.19, "Build and live test"); not released (the user may bundle it with other phases as 1.4.2). Not built: KServe straight to Cloud SQL, the GKE CronJob sync, the Firestore plugin; Private Service Connect for endpoints is FR-92 |
 | `deploy-model` checks the evaluation is the one approved (FR-93) | Phase 6, next (user, 2026-11-05) |
 | What is served is what was approved: model files and serving image by digest (FR-94) | Phase 6, next (user, 2026-11-05) |
 | Show what changed in an approved evaluation, and who changed it (FR-95) | Phase 6, next (user, 2026-11-05) |
