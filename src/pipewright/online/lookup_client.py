@@ -117,7 +117,8 @@ def _bigquery(online, ids):
     out = {}
     for row in got.get("rows") or []:
         cells = [c.get("v") for c in row["f"]]
-        out[str(cells[0])] = {n: (float(v) if v is not None else None) for n, v in zip(names, cells[1:])}
+        values = zip(names, cells[1:])   # noqa: B905 - Python 3.9 in the serving image; BigQuery returns every column
+        out[str(cells[0])] = {n: (float(v) if v is not None else None) for n, v in values}
     return out
 
 
