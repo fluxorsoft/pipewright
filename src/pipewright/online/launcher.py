@@ -150,7 +150,7 @@ def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, slee
     while time.time() < deadline:
         got = gcp.get(f"{base}/{name}")
         svc = got.body if got.ok else {}
-        if svc.get("reconciling") is False and svc.get("terminalCondition", {}).get("state") == "CONDITION_SUCCEEDED":
+        if not svc.get("reconciling") and svc.get("terminalCondition", {}).get("state") == "CONDITION_SUCCEEDED":
             break
         if svc.get("terminalCondition", {}).get("state") == "CONDITION_FAILED":
             raise ConfigError(f"the lookup service {name} failed to start: "
@@ -205,7 +205,7 @@ def request_from_cli(uc, env, log=print, gcp=None, wait: float = 900, sleep=time
             log("cannot read the lookup service to wait for it (run.services.get); deploying anyway")
             return {"service": online["service"], "status": "requested"}
         body = r.body if r.ok else {}
-        if body.get("reconciling") is False and (body.get("terminalCondition") or {}).get("state") == \
+        if not body.get("reconciling") and (body.get("terminalCondition") or {}).get("state") == \
                 "CONDITION_SUCCEEDED" and release and (body.get("labels") or {}).get("pipewright-release") in (
                 None, release.lower()[:63]) and body.get("uri"):
             log(f"lookup service {online['service']} ready: {body['uri']}")

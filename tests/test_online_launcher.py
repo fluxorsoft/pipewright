@@ -97,7 +97,7 @@ def test_a_service_outside_the_tenants_prefix_is_refused():
 
 def test_ensure_creates_waits_and_lets_the_endpoint_call_it():
     states = iter([(404, {}), (200, {"reconciling": True}),
-                   (200, {"reconciling": False, "terminalCondition": {"state": "CONDITION_SUCCEEDED"},
+                   (200, {"terminalCondition": {"state": "CONDITION_SUCCEEDED"},      # v2 omits reconciling: false
                           "uri": "https://pwl-churn-churn-x.run.app"})])
     gcp = Gcp({("GET", "sqladmin"): (200, {"serverCaCert": {"cert": "CA"}}),
                ("GET", "/services/pwl-churn-churn-x"): lambda: next(states),
@@ -134,7 +134,7 @@ def test_deploy_model_asks_the_launcher_directly_or_over_the_topic(monkeypatch):
     monkeypatch.setattr(launch, "request", lambda env, topic, payload, gcp=None: published.append(payload))
     env.launcher = {"url": "https://l", "run_requests_topic": "projects/p/topics/runs"}
     ready = Gcp({("GET", "/services/pwl-churn-churn-x"): (200, {
-        "reconciling": False, "terminalCondition": {"state": "CONDITION_SUCCEEDED"}, "uri": "https://u",
+        "terminalCondition": {"state": "CONDITION_SUCCEEDED"}, "uri": "https://u",
         "labels": {"pipewright-release": "r1"}})})
     out = ol.request_from_cli(uc, env, log=lambda m: None, gcp=ready, sleep=lambda s: None)
     assert published[0]["kind"] == "online.lookup_service" and out == {
