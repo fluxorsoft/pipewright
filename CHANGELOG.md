@@ -3,7 +3,7 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [1.4.1] - unreleased
+## [1.4.1] - 2026-11-07
 
 Phase 7: serving what was approved, and knowing when it changes (FR-101, FR-102). A live test showed that KServe and
 scoring runs load the model folder at every start, so a file swapped after approval reached them without a deploy;
