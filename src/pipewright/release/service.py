@@ -276,9 +276,14 @@ def rollback(usecase: str, env: Environment, gcp: Gcp | None = None, to: str | N
     # 1.4.1 (FR-101 item 7): the old release's contract is still the one fingerprinted when it went live, and it is
     # locked again before the pointer moves back to it (lock on activation).
     check = integrity.contract_check(gcp, env, usecase, target["release_id"], text)
+    features_only = check.problems and all("feature source" in p for p in check.problems)
     integrity.enforce(check, env, f"{usecase} is not rolled back to {target['release_id']}", log,
-                      reason="its release contract is not the one that went live",
-                      remedy="release again from the commit you want, rather than rolling back")
+                      reason=("its feature definitions are not the ones in its feature contract (a model and its "
+                              "features go back together)") if features_only else
+                      "its release contract is not the one that went live",
+                      remedy=("restore those feature definitions with the data team, or release a contract for the "
+                              "current ones and retrain") if features_only else
+                      "release again from the commit you want, rather than rolling back")
     integrity.lock_contract(gcp, env, env.artifacts_bucket, target["contract"], written, log)
 
     from pipewright.observability.events import approval
