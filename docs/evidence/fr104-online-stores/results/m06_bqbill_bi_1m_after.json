@@ -1,0 +1,114 @@
+{
+ "plan": {
+  "kind": "bq_billing",
+  "table": "features_1m",
+  "entities": 1000000,
+  "n": 10
+ },
+ "result": {
+  "samples": [
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 234
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 209
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 215
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 141
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 185
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 195
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 180
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 188
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 229
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 178
+   }
+  ]
+ },
+ "started": 1794008027.124023,
+ "seconds": 3.4
+}

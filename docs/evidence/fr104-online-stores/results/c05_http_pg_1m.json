@@ -1,0 +1,69 @@
+{
+ "plan": {
+  "kind": "http_lookup",
+  "url": "https://fs104-adapter-522129413870.europe-west2.run.app",
+  "store": "pg",
+  "entities": 1000000,
+  "rates": [
+   1,
+   10,
+   50
+  ],
+  "secs": 30
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 1,
+    "secs": 30,
+    "sent": 30,
+    "ok": 30,
+    "errors": {},
+    "achieved_rps": 1.0,
+    "p50_ms": 103.6,
+    "p95_ms": 110.3,
+    "p99_ms": 113.4,
+    "max_ms": 113.4,
+    "mean_ms": 103.3,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 10,
+    "secs": 30,
+    "sent": 300,
+    "ok": 300,
+    "errors": {},
+    "achieved_rps": 10.0,
+    "p50_ms": 101.7,
+    "p95_ms": 113.4,
+    "p99_ms": 131.1,
+    "max_ms": 133.3,
+    "mean_ms": 103.1,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1374,
+    "errors": {
+     "500: {\"error\": \"{'S': 'FATAL', 'V': 'FATAL', 'C': '53300', 'M': 'remaining connection slots are reserved for non-replication ": 106,
+     "500: {\"error\": \"network error\"}": 19,
+     "500: {\"error\": \"communication error\"}": 1
+    },
+    "achieved_rps": 23.3,
+    "p50_ms": 4639.5,
+    "p95_ms": 5818.8,
+    "p99_ms": 6404.1,
+    "max_ms": 6952.3,
+    "mean_ms": 4523.0,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   }
+  ]
+ },
+ "started": 1794006948.441792,
+ "seconds": 120.5
+}

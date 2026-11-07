@@ -1,0 +1,70 @@
+{
+ "plan": {
+  "kind": "bq_lookup",
+  "table": "features_1m",
+  "entities": 1000000,
+  "rates": [
+   1,
+   10,
+   50
+  ],
+  "secs": 30
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 1,
+    "secs": 30,
+    "sent": 30,
+    "ok": 30,
+    "errors": {},
+    "achieved_rps": 1.0,
+    "p50_ms": 280.0,
+    "p95_ms": 464.1,
+    "p99_ms": 505.3,
+    "max_ms": 505.3,
+    "mean_ms": 303.3,
+    "bytes_processed_seen": [
+     "256888896"
+    ],
+    "jobs_created": 0
+   },
+   {
+    "rate": 10,
+    "secs": 30,
+    "sent": 300,
+    "ok": 300,
+    "errors": {},
+    "achieved_rps": 9.9,
+    "p50_ms": 289.1,
+    "p95_ms": 462.7,
+    "p99_ms": 619.7,
+    "max_ms": 641.0,
+    "mean_ms": 307.3,
+    "bytes_processed_seen": [
+     "256888896"
+    ],
+    "jobs_created": 0
+   },
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1500,
+    "errors": {},
+    "achieved_rps": 49.4,
+    "p50_ms": 281.3,
+    "p95_ms": 493.3,
+    "p99_ms": 696.0,
+    "max_ms": 1019.9,
+    "mean_ms": 301.5,
+    "bytes_processed_seen": [
+     "256888896"
+    ],
+    "jobs_created": 0
+   }
+  ]
+ },
+ "started": 1794007261.5200305,
+ "seconds": 95.8
+}

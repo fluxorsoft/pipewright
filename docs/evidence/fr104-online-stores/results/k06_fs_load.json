@@ -1,0 +1,18 @@
+{
+ "plan": {
+  "kind": "fs_load",
+  "prefix": "export/features_100k/x/",
+  "limit": 100000
+ },
+ "result": {
+  "rows": 100000,
+  "seconds": 6.8,
+  "errors": {
+   "400": 250,
+   "first_error": "{'error': '{\\n  \"error\": {\\n    \"code\": 400,\\n    \"message\": \"Invalid value at \\'writes[0].update.fields[30].value.timestamp_value\\' (type.googleapis.com/google.protobuf.Timestamp), Field \\'timestampValue\\', Illegal timestamp format; timestamps must end with \\'Z\\' or have a valid timezone offset.\\\\nInvalid value at \\'wri'}",
+   "sample_write": "{\"update\": {\"name\": \"projects/pw-ebook/databases/fs104-spike/documents/features/e79723\", \"fields\": {\"f00\": {\"doubleValue\": 20.5152}, \"f01\": {\"doubleValue\": 80.5253}, \"f02\": {\"doubleValue\": 23.0977}, \"f03\": {\"doubleValue\": 16.0551}, \"f04\": {\"doubleValue\": 54.5307}, \"f05\": {\"doubleValue\": 58.5433}, \"f06\": {\"doubleValue\": 46.3898}, \"f07\": {\"doubleValue\": 18.2289}, \"f08\": {\"doubleValue\": 59.1568}, \"f09\": {\"doubleValue\": 4.1909}, \"f10\": {\"doubleValue\": 89.6333}, \"f11\": {\"doubleValue\": 49.1153}, \"f12\": {\"doubleValue\": 81.0129}, \"f13\": {\"doubleValue\": 2.7022}, \"f14\": {\"doubleValue\": 59.0589}, \"f15\": "
+  }
+ },
+ "started": 1794007626.6464508,
+ "seconds": 10.4
+}

@@ -1,0 +1,84 @@
+{
+ "plan": {
+  "kind": "bq_billing",
+  "table": "features_100k",
+  "entities": 100000,
+  "n": 10
+ },
+ "result": {
+  "samples": [
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 170
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 166
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 152
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 142
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 136
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 173
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 157
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 146
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 152
+   },
+   {
+    "bytes_processed": "25588895",
+    "bytes_billed": "26214400",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 132
+   }
+  ]
+ },
+ "started": 1794006531.5232356,
+ "seconds": 4.4
+}

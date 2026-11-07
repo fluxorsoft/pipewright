@@ -1,0 +1,16 @@
+{
+ "plan": {
+  "kind": "fs_load",
+  "prefix": "export/features_100k/x/",
+  "limit": 100000
+ },
+ "result": {
+  "rows": 100000,
+  "seconds": 11.4,
+  "errors": {
+   "400": 250
+  }
+ },
+ "started": 1794006597.8549035,
+ "seconds": 12.6
+}

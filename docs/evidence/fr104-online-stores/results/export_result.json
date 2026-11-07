@@ -1,0 +1,115 @@
+{
+  "snapshot_query": {
+    "bytes_billed": "256901120",
+    "ms": 10125
+  },
+  "extract": {
+    "ms": 10178,
+    "stats": {
+      "destinationUriFileCounts": [
+        "1"
+      ],
+      "inputBytes": "256888896",
+      "timeline": [
+        {
+          "elapsedMs": "764",
+          "totalSlotMs": "3864",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "1764",
+          "totalSlotMs": "4672",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "2764",
+          "totalSlotMs": "5177",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "3764",
+          "totalSlotMs": "5519",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "4764",
+          "totalSlotMs": "5815",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "5764",
+          "totalSlotMs": "6138",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "6764",
+          "totalSlotMs": "6492",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "7764",
+          "totalSlotMs": "6898",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "8764",
+          "totalSlotMs": "6898",
+          "pendingUnits": "1",
+          "completedUnits": "0",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 3.0517578125e-05,
+          "estimatedRunnableUnits": "0"
+        },
+        {
+          "elapsedMs": "10117",
+          "totalSlotMs": "6898",
+          "pendingUnits": "0",
+          "completedUnits": "1",
+          "activeUnits": "1",
+          "shuffleRamUsageRatio": 1.52587890625e-05,
+          "estimatedRunnableUnits": "0"
+        }
+      ]
+    },
+    "reservation": "default-pipeline",
+    "totalSlotMs": "6898"
+  },
+  "manifest": {
+    "files": 1,
+    "total_mib": 194.1,
+    "rows": 1000000
+  },
+  "prefix": "export/features_1m/20261106T230238/"
+}

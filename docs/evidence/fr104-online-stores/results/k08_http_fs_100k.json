@@ -1,0 +1,71 @@
+{
+ "plan": {
+  "kind": "http_lookup",
+  "url": "https://fs104-adapter-522129413870.europe-west2.run.app",
+  "store": "fs",
+  "entities": 100000,
+  "rates": [
+   1,
+   10,
+   50
+  ],
+  "secs": 30
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 1,
+    "secs": 30,
+    "sent": 30,
+    "ok": 0,
+    "errors": {
+     "500: {\"error\": \"HTTP Error 404: Not Found\"}": 30
+    },
+    "achieved_rps": 0.0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "max_ms": null,
+    "mean_ms": null,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 10,
+    "secs": 30,
+    "sent": 300,
+    "ok": 0,
+    "errors": {
+     "500: {\"error\": \"HTTP Error 404: Not Found\"}": 300
+    },
+    "achieved_rps": 0.0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "max_ms": null,
+    "mean_ms": null,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 0,
+    "errors": {
+     "500: {\"error\": \"HTTP Error 404: Not Found\"}": 1500
+    },
+    "achieved_rps": 0.0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "max_ms": null,
+    "mean_ms": null,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   }
+  ]
+ },
+ "started": 1794007726.7045476,
+ "seconds": 91.0
+}

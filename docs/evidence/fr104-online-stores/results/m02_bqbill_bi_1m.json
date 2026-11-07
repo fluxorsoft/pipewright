@@ -1,0 +1,108 @@
+{
+ "plan": {
+  "kind": "bq_billing",
+  "table": "features_1m",
+  "entities": 1000000,
+  "n": 10
+ },
+ "result": {
+  "samples": [
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 263
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "256901120",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 311
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 265
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "256901120",
+    "bi_engine": null,
+    "cache_hit": false,
+    "ms": 336
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 264
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 218
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 239
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 251
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 279
+   },
+   {
+    "bytes_processed": "256888896",
+    "bytes_billed": "0",
+    "bi_engine": {
+     "biEngineMode": "FULL",
+     "accelerationMode": "FULL_QUERY"
+    },
+    "cache_hit": false,
+    "ms": 263
+   }
+  ]
+ },
+ "started": 1794007832.0283835,
+ "seconds": 4.5
+}

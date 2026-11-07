@@ -1,0 +1,64 @@
+{
+ "plan": {
+  "kind": "bt_lookup",
+  "view": "f1m",
+  "entities": 1000000,
+  "rates": [
+   1,
+   10,
+   50
+  ],
+  "secs": 30
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 1,
+    "secs": 30,
+    "sent": 30,
+    "ok": 30,
+    "errors": {},
+    "achieved_rps": 1.0,
+    "p50_ms": 69.5,
+    "p95_ms": 75.8,
+    "p99_ms": 90.7,
+    "max_ms": 90.7,
+    "mean_ms": 70.4,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 10,
+    "secs": 30,
+    "sent": 300,
+    "ok": 300,
+    "errors": {},
+    "achieved_rps": 10.0,
+    "p50_ms": 67.7,
+    "p95_ms": 72.5,
+    "p99_ms": 82.7,
+    "max_ms": 84.2,
+    "mean_ms": 68.3,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1500,
+    "errors": {},
+    "achieved_rps": 26.3,
+    "p50_ms": 4704.8,
+    "p95_ms": 5619.5,
+    "p99_ms": 6000.5,
+    "max_ms": 6535.1,
+    "mean_ms": 4505.9,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   }
+  ]
+ },
+ "started": 1794006741.36814,
+ "seconds": 117.4
+}

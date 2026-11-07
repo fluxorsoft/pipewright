@@ -1,0 +1,13 @@
+{
+ "plan": {
+  "kind": "pg_load",
+  "prefix": "export/features_1m/20261106T230238/"
+ },
+ "result": {
+  "rows": 1000000,
+  "seconds": 54.8,
+  "count_in_db": 1000000
+ },
+ "started": 1794006542.3512924,
+ "seconds": 55.3
+}

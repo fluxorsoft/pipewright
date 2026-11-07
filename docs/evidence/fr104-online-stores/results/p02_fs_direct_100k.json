@@ -1,0 +1,82 @@
+{
+ "plan": {
+  "kind": "fs_lookup",
+  "entities": 100000,
+  "rates": [
+   1,
+   10,
+   50
+  ],
+  "secs": 30
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 1,
+    "secs": 30,
+    "sent": 30,
+    "ok": 29,
+    "errors": {
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e6": 1
+    },
+    "achieved_rps": 1.0,
+    "p50_ms": 13.0,
+    "p95_ms": 16.4,
+    "p99_ms": 66.1,
+    "max_ms": 66.1,
+    "mean_ms": 14.0,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 10,
+    "secs": 30,
+    "sent": 300,
+    "ok": 291,
+    "errors": {
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e7": 1,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e6": 2,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e1": 2,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e8": 1,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e3": 1,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e4": 2
+    },
+    "achieved_rps": 9.7,
+    "p50_ms": 9.8,
+    "p95_ms": 16.1,
+    "p99_ms": 28.6,
+    "max_ms": 60.2,
+    "mean_ms": 10.8,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1435,
+    "errors": {
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e9": 12,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e1": 7,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e5": 11,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e7": 9,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e6": 10,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e4": 5,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e8": 6,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e3": 3,
+     "404: {\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"Document \\\"projects/pw-ebook/databases/fs104-spike/documents/features/e2": 2
+    },
+    "achieved_rps": 47.8,
+    "p50_ms": 8.7,
+    "p95_ms": 11.2,
+    "p99_ms": 14.8,
+    "max_ms": 134.3,
+    "mean_ms": 9.2,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   }
+  ]
+ },
+ "started": 1794008272.2486527,
+ "seconds": 89.3
+}

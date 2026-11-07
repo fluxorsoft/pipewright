@@ -1,0 +1,64 @@
+{
+ "plan": {
+  "kind": "bt_lookup",
+  "view": "f100k",
+  "entities": 100000,
+  "rates": [
+   1,
+   10,
+   50
+  ],
+  "secs": 30
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 1,
+    "secs": 30,
+    "sent": 30,
+    "ok": 30,
+    "errors": {},
+    "achieved_rps": 1.0,
+    "p50_ms": 13.3,
+    "p95_ms": 34.5,
+    "p99_ms": 84.2,
+    "max_ms": 84.2,
+    "mean_ms": 17.7,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 10,
+    "secs": 30,
+    "sent": 300,
+    "ok": 300,
+    "errors": {},
+    "achieved_rps": 10.0,
+    "p50_ms": 12.4,
+    "p95_ms": 18.0,
+    "p99_ms": 64.1,
+    "max_ms": 67.9,
+    "mean_ms": 13.8,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   },
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1500,
+    "errors": {},
+    "achieved_rps": 50.0,
+    "p50_ms": 12.3,
+    "p95_ms": 16.6,
+    "p99_ms": 25.2,
+    "max_ms": 148.8,
+    "mean_ms": 13.3,
+    "bytes_processed_seen": [],
+    "jobs_created": 0
+   }
+  ]
+ },
+ "started": 1794007357.400243,
+ "seconds": 89.7
+}
