@@ -356,7 +356,8 @@ def _check_renewer(env: Environment, gcp: Gcp, report: Report, s: str, pol: dict
     job, sa = launcher.get("renewer_job"), launcher.get("renewer_service_account")
     if not job or not sa:
         report.add(s, Result(WARN, "lock renewal", "lock.renew is on but no renewer is deployed: protection ends "
-                                                   "lock.days after each approval", "deploy the renewer job (Terraform)"))
+                                                   "lock.days after each approval",
+                             "deploy the renewer job (Terraform)"))
         return
     r = gcp.get(f"https://run.googleapis.com/v2/{job}")
     report.add(s, Result(OK if r.ok else FAIL, "renewer job", job.rsplit("/", 1)[-1] if r.ok else
