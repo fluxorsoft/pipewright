@@ -75,7 +75,11 @@ def test_the_service_spec_follows_the_use_cases_sizes_and_the_platform():
     assert c["resources"]["startupCpuBoost"] is True and c["resources"]["cpuIdle"] is True
     cfg = json.loads(c["env"][0]["value"])
     assert cfg["host"] == "10.41.0.3" and cfg["server_ca"] == "CA-PEM" and cfg["pool_size"] == 8
-    assert t["vpcAccess"]["egress"] == "PRIVATE_RANGES_ONLY"
+    assert t["vpcAccess"]["egress"] == "PRIVATE_RANGES_ONLY" and "encryptionKey" not in t
+    store = MANIFEST["features"]["online_store"]
+    cmek = {**MANIFEST, "features": {"online_store": {**store, "lookup": {
+        **store["lookup"], "kms_key": "projects/p/locations/r/keyRings/k/cryptoKeys/run"}}}}
+    assert ol.service_spec(contract(), cmek, ONLINE, None)["template"]["encryptionKey"].endswith("/cryptoKeys/run")
 
 
 def test_a_service_outside_the_tenants_prefix_is_refused():

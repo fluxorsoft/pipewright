@@ -1039,6 +1039,13 @@
                 "image": {
                   "type": "string"
                 },
+                "kms_key": {
+                  "type": "string",
+                  "description": "CMEK for the lookup services the launcher creates (where an organization policy requires it)"
+                },
+                "ingress": {
+                  "enum": ["INGRESS_TRAFFIC_INTERNAL_ONLY", "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER", "INGRESS_TRAFFIC_ALL"]
+                },
                 "network": {
                   "type": "string"
                 },

@@ -94,6 +94,8 @@ def service_spec(contract, manifest: dict, online: dict, ca: str | None) -> dict
                           "cpuIdle": size.get("billing", "request") == "request"},
             "startupProbe": {"httpGet": {"path": "/healthz"}, "periodSeconds": 3, "failureThreshold": 20},
             "ports": [{"containerPort": 8080}]}]}
+    if lk.get("kms_key"):
+        template["encryptionKey"] = lk["kms_key"]
     if lk.get("network"):
         template["vpcAccess"] = {"networkInterfaces": [{"network": lk["network"],
                                                         **({"subnetwork": lk["subnetwork"]}
