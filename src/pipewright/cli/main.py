@@ -418,6 +418,140 @@ def cmd_report_fleet(args) -> int:
     return 0
 
 
+def _integrity_env(args):
+    """--env (with the MLOps repo) or --manifest (the renewer job and CI without a repo); the model to use case map
+    from the repo when there is one, else from the registry's labels."""
+    from pipewright.config.environment import environment_from_manifest
+
+    if getattr(args, "manifest", None):
+        return environment_from_manifest(args.manifest), None
+    if not args.env:
+        raise ConfigError("give --env (with the MLOps repo) or --manifest gs://<artifacts>/pipewright/environment.json")
+    env = load_environment(Path(args.root), args.env)
+    models = {}
+    try:
+        for name, path in _selected(Path(args.root), None, args.env).items():
+            try:
+                models[resolve_usecase(path, env).model["name"]] = name
+            except ConfigError:
+                continue
+    except ConfigError:
+        models = {}
+    return env, models or None
+
+
+def cmd_integrity_check(args) -> int:
+    """1.4.1 (FR-101 item 6): every default and serving version against its approval; exit 0 unchanged, 1 changed or
+    unapproved, 2 something could not be checked (a CI gate before deploy, or a schedule without the launcher)."""
+    import contextlib
+
+    from pipewright.gcp import Gcp
+    from pipewright.models import watch
+
+    env, models = _integrity_env(args)
+    _quiet_agent_platform_sdk()
+    with contextlib.redirect_stdout(sys.stderr):
+        uses, notes = watch.check(Gcp(), env, models, {args.usecase} if args.usecase else None)
+    code = watch.exit_code(uses)
+    if args.json:
+        print(json.dumps({"environment": env.name, "exit": code, "uses": [u.record() for u in uses], "notes": notes},
+                         indent=2))
+        return code
+    marks = {"unchanged": "ok  ", "changed": "FAIL", "unapproved": "FAIL", "cannot_check": "?   "}
+    for u in uses:
+        print(f"{marks[u.status]} {u.usecase} v{u.version} ({u.where}): {u.status}"
+              + (f" [{u.severity}]" if u.severity else ""))
+        for problem in u.problems[:5]:
+            print(f"       {problem}")
+    for n in notes:
+        print(f"note: {n}")
+    verdict = {0: "every approval unchanged", 1: "NOT what was approved", 2: "some could not be checked"}[code]
+    print(f"{len(uses)} checked in {env.name}: {verdict}")
+    return code
+
+
+def cmd_integrity_renew(args) -> int:
+    """1.4.1 (FR-101 item 8): the renewer's run (a dedicated identity, a Cloud Run job, daily): keep every artifact an
+    active version needs protected lock.days ahead; never shorten. Exit 1 when protection failed."""
+    from pipewright.gcp import Gcp
+    from pipewright.models import protection
+
+    env, models = _integrity_env(args)
+    _quiet_agent_platform_sdk()
+    out = protection.renew(Gcp(), env, models, dry_run=args.dry_run, log=lambda m: print(m, file=sys.stderr))
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
+    elif args.dry_run:
+        for a in out.get("artifacts") or []:
+            print(f"would protect  {a['type']}  gs://{a['bucket']}/{a['object']}#{a['generation']}  "
+                  f"({', '.join(a['reasons'])})")
+    elif out.get("status") == "off":
+        print(out["reason"])
+    return 1 if out.get("status") == "failed" else 0
+
+
+def cmd_model_restore_files(args) -> int:
+    """1.4.1 (FR-101 item 9): the response to a changed file: the approved generations written back as the live
+    version (each copied from its approved generation inside Cloud Storage, then checked by SHA-256), recorded as
+    model.restored with who did it. Without --confirm: says what would be restored."""
+    import io
+
+    from pipewright.gcp import Gcp
+    from pipewright.models import integrity
+    from pipewright.observability import events
+
+    uc, env = _one(args)
+    gcp = Gcp()
+    approval = (integrity.approval_events(gcp, env, uc.name, args.version) or [None])[0]
+    spec = integrity.approved_files(approval)
+    if not spec:
+        raise ConfigError(f"v{args.version} has no approval that records its files: nothing to restore from")
+    restored = integrity.restore_files(gcp, spec, dry_run=not args.confirm)
+    for r in restored:
+        print(("RESTORED  " if args.confirm else "would restore  ") + f"{r['file']}: generation {r['from']} -> live"
+              + (f" (now {r['to']})" if r.get("to") else ""))
+    if not restored:
+        print(f"every approved file of v{args.version} is already the live version: nothing to restore")
+    elif args.confirm:
+        events.emit(events.event("model.restored", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
+                                 version=args.version, by=gcp.identity(), files=restored),
+                    env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
+    else:
+        print("run again with --confirm to restore")
+    return 0
+
+
+def cmd_model_retire(args) -> int:
+    """1.4.1 (FR-101): retiring a version stops its renewal (it is no longer in use) and, with --release-holds,
+    releases the temporary holds on its approved files (buckets without object retention), as the caller, recorded
+    as model.retired. Refused while the version is in use."""
+    import io
+
+    from pipewright.gcp import Gcp
+    from pipewright.models import integrity, watch
+    from pipewright.observability import events
+
+    uc, env = _one(args)
+    gcp = Gcp()
+    uses, _ = watch.in_use(gcp, env, {uc.model["name"]: uc.name}, {uc.name})
+    busy = [u.where for u in uses if str(u.version) == str(args.version)]
+    if busy:
+        raise ConfigError(f"v{args.version} is in use ({', '.join(busy)}): not retired")
+    approval = (integrity.approval_events(gcp, env, uc.name, args.version) or [None])[0]
+    spec = integrity.approved_files(approval)
+    released = integrity.release_holds(gcp, spec, dry_run=not args.confirm) if (spec and args.release_holds) else []
+    for name in released:
+        print(("released hold  " if args.confirm else "would release hold  ") + name)
+    if args.confirm:
+        events.emit(events.event("model.retired", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
+                                 version=args.version, by=gcp.identity(), holds_released=len(released)),
+                    env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
+        print(f"v{args.version} retired: its renewal has stopped; its files keep their last retention date")
+    else:
+        print("run again with --confirm to retire")
+    return 0
+
+
 def cmd_lineage(args) -> int:
     import contextlib
 
@@ -1072,6 +1206,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--mask", action="store_true", help="replace email addresses with ...")
     sp.set_defaults(func=cmd_report_fleet)
 
+    sp = sub.add_parser("integrity", help="what runs is what was approved (1.4.1): check, renew")
+    isub = sp.add_subparsers(dest="integrity_command", required=True)
+    for cmd, help_, fn in (("check", "every default and serving version against its approval; exit 0 unchanged, 1 "
+                                     "changed or unapproved, 2 could not check", cmd_integrity_check),
+                           ("renew", "keep the approved files of every version in use protected (the renewer's "
+                                     "daily run)", cmd_integrity_renew)):
+        sp = isub.add_parser(cmd, help=help_)
+        sp.add_argument("--root", default=".")
+        sp.add_argument("--env")
+        sp.add_argument("--manifest", help="gs://<artifacts>/pipewright/environment.json (no MLOps repo needed)")
+        if cmd == "check":
+            sp.add_argument("--usecase")
+        else:
+            sp.add_argument("--dry-run", action="store_true", help="list what would be protected; change nothing")
+        sp.add_argument("--json", action="store_true")
+        sp.set_defaults(func=fn)
+
     sp = sub.add_parser("lineage", help="a model version back to its run, release, rows and sources (FR-55)")
     one(sp)
     sp.add_argument("--version", help="version id (default: the default version)")
@@ -1103,6 +1254,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--version", required=True, help="version id, e.g. 4")
     sp.add_argument("--approve", action="store_true", help="confirm a manual promotion")
     sp.set_defaults(func=cmd_model_approve)
+
+    sp = msub.add_parser("restore-files", help="write a version's approved file generations back as the live "
+                                               "files (1.4.1; dry run without --confirm)")
+    one(sp)
+    sp.add_argument("--version", required=True)
+    sp.add_argument("--confirm", action="store_true")
+    sp.set_defaults(func=cmd_model_restore_files)
+    sp = msub.add_parser("retire", help="retire a version no longer in use: its renewal stops; --release-holds "
+                                        "releases its temporary holds (1.4.1; dry run without --confirm)")
+    one(sp)
+    sp.add_argument("--version", required=True)
+    sp.add_argument("--release-holds", action="store_true")
+    sp.add_argument("--confirm", action="store_true")
+    sp.set_defaults(func=cmd_model_retire)
 
     sp = sub.add_parser("data", help="data protection")
     dsub = sp.add_subparsers(dest="data_command", required=True)

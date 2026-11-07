@@ -756,6 +756,56 @@ def gcs_read_versioned(gcp, bucket: str, name: str, generation) -> tuple[bytes |
     return (r.content, int(generation)) if r.status_code == 200 else (None, 0)
 
 
+def restore_files(gcp, approved: dict, dry_run: bool = True) -> list[dict]:
+    """The approved generations written back as the live objects where the live one differs (a rewrite inside Cloud
+    Storage from the approved generation), each read back by SHA-256. Returns [{file, from, to}]."""
+    bucket, _, prefix = approved["folder"].removeprefix("gs://").partition("/")
+    prefix = prefix.rstrip("/") + "/"
+    out = []
+    for f in approved["files"]:
+        name = prefix + f["file"]
+        live = gcp.get(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}")
+        if live.ok and str(live.body.get("generation")) == str(f["generation"]):
+            continue
+        row = {"file": f["file"], "from": str(f["generation"])}
+        if not dry_run:
+            token = None
+            while True:
+                params = {"sourceGeneration": str(f["generation"]), **({"rewriteToken": token} if token else {})}
+                r = gcp.post(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}/rewriteTo/b/{bucket}/o/"
+                             f"{quote(name, safe='')}", {}, **params)
+                if not r.ok:
+                    raise ConfigError(f"{f['file']}: generation {f['generation']} cannot be restored (HTTP {r.status})")
+                if r.body.get("done"):
+                    break
+                token = r.body.get("rewriteToken")
+            gen = r.body["resource"]["generation"]
+            if _sha256(gcp, bucket, name, gen) != f["sha256"]:
+                raise ConfigError(f"{f['file']}: the restored file does not have the approved SHA-256")
+            row["to"] = str(gen)
+        out.append(row)
+    return out
+
+
+def release_holds(gcp, approved: dict, dry_run: bool = True) -> list[str]:
+    """Releases the temporary holds on a retired version's approved files (as the caller: an authorised person)."""
+    bucket, _, prefix = approved["folder"].removeprefix("gs://").partition("/")
+    prefix = prefix.rstrip("/") + "/"
+    out = []
+    for f in approved["files"]:
+        name = prefix + f["file"]
+        meta = gcp.get(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}", generation=str(f["generation"]))
+        if not meta.ok or not (meta.body or {}).get("temporaryHold"):
+            continue
+        if not dry_run:
+            r = gcp.patch(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}", {"temporaryHold": False},
+                          generation=str(f["generation"]))
+            if not r.ok:
+                raise ConfigError(f"{f['file']}: the hold cannot be released (HTTP {r.status})")
+        out.append(f["file"])
+    return out
+
+
 def contract_check(gcp, env: Environment, usecase: str, release: str, text: str) -> Check:
     """Pipewright 1.4.1 (FR-101 item 7): a release contract against the SHA-256 its release.live event recorded
     (1.4.0 records it). A release with no such event (before 1.4.0) passes with a note."""
