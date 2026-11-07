@@ -308,6 +308,21 @@ def create_app(registry: Registry | None = None) -> Flask:
                   if (c.metadata or {}).get("model")}
         result = iwatch.run(gcp, env, state, models)
         topic = (m.get("observability") or {}).get("events_topic")
+        if pol["lock"]["days"] > 0:
+            # The cross-identity check: this read-only identity watches what the renewer (or anyone) did to the
+            # protected files' holds and metadata (1.4.1, section 8.18).
+            from pipewright.models import protection
+
+            try:
+                result["changes"] += protection.observe(gcp, env, state, models)
+            except Exception as e:  # noqa: BLE001 - said in the heartbeat, never silent
+                result["heartbeat"]["notes"].append(f"protection not observed: {str(e)[:160]}")
+        if pol["mode"] == "warn" or pol["expired_warn"]:
+            # 1.4.1 (FR-102): a time-boxed warn is recorded while it lasts (alerted), and when it has expired.
+            events.emit(events.event("policy.override", None, env.name, None, None, None,
+                                     status="expired" if pol["expired_warn"] else "active", until=pol["until"],
+                                     reason=pol["reason"], open_ended=not pol["until"]), topic, gcp,
+                        region=env.region)
         for change in result["changes"]:
             events.emit(events.event("model.integrity", change["usecase"], env.name, None, None, None, **change),
                         topic, gcp, region=env.region)

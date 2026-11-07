@@ -588,6 +588,20 @@
           ],
           "pattern": "^gs://[^/]+/.*/$",
           "description": "write-once location for evidence packs (ends with /)"
+        },
+        "audit_log_bucket": {
+          "type": ["string", "null"],
+          "pattern": "^projects/[^/]+/locations/[^/]+/buckets/[^/]+$",
+          "description": "Pipewright 1.4.1 (FR-102): a Cloud Logging bucket with locked retention that keeps Admin Activity entries for Agent Platform and the artifacts bucket longer than 400 days; the approval cross-check reads it"
+        },
+        "audit_retention_days": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Pipewright 1.4.1 (FR-102): how long audit_log_bucket keeps entries (regulated models often serve for years)"
+        },
+        "data_write_logs": {
+          "type": ["boolean", "null"],
+          "description": "Pipewright 1.4.1 (FR-102): Cloud Storage DATA_WRITE audit logs are on (with an exclusion keeping only the artifacts bucket's model folders), so lineage and the alerts can name who wrote a file"
         }
       }
     },

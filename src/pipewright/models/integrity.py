@@ -442,10 +442,23 @@ def evaluation_diff(approved: str, now: str) -> list[str]:
     return out or ["the bytes changed, the metrics and decision did not"]
 
 
+def audit_kept_days(env: Environment) -> int:
+    """How far back Admin Activity entries can be read: 400 days in Cloud Logging's _Required bucket, or the
+    environment's audit log bucket (Pipewright 1.4.1, FR-102: observability.audit_log_bucket with locked retention,
+    observability.audit_retention_days)."""
+    obs = getattr(env, "observability", None) or {}
+    if obs.get("audit_log_bucket") and obs.get("audit_retention_days"):
+        return max(AUDIT_KEPT_DAYS, int(obs["audit_retention_days"]))
+    return AUDIT_KEPT_DAYS
+
+
 def _audit(gcp, env: Environment, filter_: str, limit: int = 5) -> list[dict]:
+    names = [f"projects/{env.project}"]
+    bucket = (getattr(env, "observability", None) or {}).get("audit_log_bucket")
+    if bucket:                  # 1.4.1 (FR-102): entries kept longer than 400 days, in a locked log bucket
+        names.append(f"{bucket.rstrip('/')}/views/_AllLogs")
     r = gcp.post("https://logging.googleapis.com/v2/entries:list",
-                 {"resourceNames": [f"projects/{env.project}"], "filter": filter_, "orderBy": "timestamp desc",
-                  "pageSize": limit})
+                 {"resourceNames": names, "filter": filter_, "orderBy": "timestamp desc", "pageSize": limit})
     if not r.ok:
         raise ConfigError(f"Cloud Audit Logs: HTTP {r.status}")
     return [{"at": e.get("timestamp", "")[:19], "method": (e.get("protoPayload") or {}).get("methodName"),
@@ -713,7 +726,8 @@ def _audit_problem(gcp, env: Environment, model: str, version: str, approval: di
         try:
             at = datetime.datetime.fromisoformat((approval.get("at") or "").replace(" ", "T")[:19]).replace(
                 tzinfo=datetime.timezone.utc)
-            within = datetime.datetime.now(datetime.timezone.utc) - at < datetime.timedelta(days=AUDIT_KEPT_DAYS)
+            within = datetime.datetime.now(datetime.timezone.utc) - at < datetime.timedelta(
+                days=audit_kept_days(env))
         except ValueError:
             within = False
         if within:

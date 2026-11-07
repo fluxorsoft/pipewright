@@ -313,3 +313,48 @@ def protect_now(gcp, env, approved: dict | None, log=print) -> list[str]:
     if not problems:
         log(f"integrity: {len(arts)} approved files protected for at least {threshold_days(pol['days']):g} days")
     return problems
+
+
+# -- the cross-identity check (the launcher, read-only, watches the renewer's work) ---------------------------------
+
+def observe(gcp, env, state: dict, models: dict | None = None) -> list[dict]:
+    """Run by the launcher's watch, not the renewer: each protected artifact's temporary hold and metageneration,
+    compared with the last run. A hold that disappeared, or a metadata change no model.lock.renewed explains, is
+    reported (the renewer's role technically allows both: the spike showed storage.objects.update is needed). A
+    compromised renewer cannot hide its own changes, because another identity reports them. Updates `state` in
+    place; returns model.integrity payloads."""
+    from pipewright.models import approvals
+
+    found = discover(gcp, env, models)
+    previous = state.get("protected") or {}
+    renewed = {}
+    for e in approvals.all_events(gcp, env, "model.lock.renewed"):
+        key = f"{e.get('bucket')}/{e.get('object')}#{e.get('generation')}"
+        renewed[key] = max(renewed.get(key, ""), (e.get("at") or "").replace(" ", "T"))
+    since = state.get("observed_at") or ""
+    now, changes = {}, []
+    for art in found["artifacts"]:
+        r = _meta(gcp, art)
+        if not r.ok:
+            continue
+        key = f"{art.bucket}/{art.object}#{art.generation}"
+        meta = r.body or {}
+        now[key] = {"metageneration": str(meta.get("metageneration")), "hold": bool(meta.get("temporaryHold")),
+                    "event_hold": bool(meta.get("eventBasedHold"))}
+        was = previous.get(key)
+        if not was:
+            continue
+        base = {"usecase": art.usecase, "version": art.version, "where": "protection", "kind": art.type,
+                "object": f"gs://{art.bucket}/{art.object}", "generation": art.generation, "severity": "incident"}
+        if (was["hold"] and not now[key]["hold"]) or (was.get("event_hold") and not now[key]["event_hold"]):
+            changes.append({**base, "status": "hold_released", "previous": "held",
+                            "problems": ["a hold on a protected file was released"]})
+        elif was["metageneration"] != now[key]["metageneration"] and renewed.get(key, "") <= since:
+            changes.append({**base, "status": "metadata_changed", "previous": was["metageneration"],
+                            "problems": [f"metageneration {was['metageneration']} -> {now[key]['metageneration']} "
+                                         "with no model.lock.renewed recorded"]})
+    from datetime import datetime, timezone
+
+    state["protected"] = now
+    state["observed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return changes

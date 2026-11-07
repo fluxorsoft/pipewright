@@ -125,3 +125,41 @@ def test_the_summary_is_failed_degraded_or_healthy():
     assert protection.summary(ok, {"degraded": ["x"]}, 30)["status"] == "degraded"
     bad = protection.summary(ok + [{"status": "failed"}], {"degraded": ["x"]}, 30)
     assert bad["status"] == "failed" and bad["least_protection_remaining_days"] == 20.0 and bad["renewed"] == 1
+
+
+def test_the_launcher_reports_a_released_hold_and_an_unexplained_metadata_change(monkeypatch):
+    from pipewright.models import approvals
+
+    art = Artifact("art", "pr/m/model.pt", "9", "model_file", ["default"], "churn", "4")
+    monkeypatch.setattr(protection, "discover", lambda gcp, env, models=None, now=None: {"artifacts": [art]})
+    meta = {"metageneration": "5", "temporaryHold": True}
+    monkeypatch.setattr(protection, "_meta", lambda gcp, a: SimpleNamespace(ok=True, body=dict(meta)))
+    renewals = []
+    monkeypatch.setattr(approvals, "all_events", lambda gcp, env, kind: renewals)
+    state = {}
+    assert protection.observe(None, None, state) == []                       # the first look records
+    meta.update(metageneration="6")                                          # the renewer extended it, recorded
+    renewals.append({"bucket": "art", "object": "pr/m/model.pt", "generation": "9", "at": "2099-01-01 00:00:00"})
+    assert protection.observe(None, None, state) == []
+    meta.update(metageneration="7")                                          # changed, with no renewal recorded
+    renewals.clear()
+    got = protection.observe(None, None, state)
+    assert [c["status"] for c in got] == ["metadata_changed"] and got[0]["severity"] == "incident"
+    meta.update(temporaryHold=False)
+    assert [c["status"] for c in protection.observe(None, None, state)] == ["hold_released"]
+
+
+def test_the_watch_records_only_changes():
+    from pipewright.models import watch
+
+    u = watch.Use("churn", "churn-classifier", "4", "default", "default")
+    assert watch.transitions({}, [u]) == []                                  # new and unchanged: nothing
+    u.status, u.severity, u.problems = watch.CHANGED, "incident", ["model.pt: changed after the approval"]
+    got = watch.transitions({u.key: {"status": "unchanged"}}, [u])
+    assert got[0]["status"] == "changed" and got[0]["previous"] == "unchanged"
+    assert watch.transitions({u.key: {"status": "changed"}}, [u]) == []      # still changed: said once
+    u.status, u.problems = watch.UNCHANGED, []
+    assert watch.transitions({u.key: {"status": "changed"}}, [u])[0]["status"] == "restored"
+    assert watch.exit_code([u]) == 0
+    u.status = watch.CANNOT
+    assert watch.exit_code([u]) == 2
