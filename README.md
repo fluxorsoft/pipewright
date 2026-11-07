@@ -6,8 +6,10 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.4.0.** What runs is what was approved: approvals fingerprint the model files, serving image and rules,
-> and deploy and promote refuse anything that changed since (see [What runs is what was approved](#what-runs-is-what-was-approved)).
+> **Status: 1.4.1.** What runs is what was approved, and you know when that changes: approvals fingerprint the model
+> files, serving image, rules and (new) the feature definitions; deploy, promote and scoring refuse anything that
+> changed since, scoring and KServe load exactly the approved bytes, and a watch tells you when an approved model or
+> feature changes between deploys (see [What runs is what was approved](#what-runs-is-what-was-approved)).
 > Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
@@ -140,7 +142,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 | Stage | Capabilities |
 |---|---|
 | Configure | Multi-file use cases (one concern per file), JSON Schema validation with path-qualified errors, `${...}` references to manifest names, per-environment overrides on a fixed list of keys, `resolve` to print the effective configuration |
-| Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, **features from feature tables** joined point in time (no value from after a row's cut-off reaches training), tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
+| Data | Data contracts (types, ranges, allowed values, uniqueness, minimum rows), CSV and Parquet on GCS or BigQuery tables and views as sources, **features from feature tables** joined point in time (no value from after a row's cut-off reaches training), **feature contracts** that pin the definitions an approved model was trained on, tables in BigQuery, Parquet on GCS (with external tables) or both, from one schema file |
 | Train | Containers, or **BigQuery ML** with no pipeline code (classification, regression, k-means, PCA, forecasts, imported models); random, stratified and time splits; tuning with parallel trials; experiments; compute per step set in configuration (`steps`), patched into the compiled template with no code change; **Ray** for a step that needs a cluster: on Agent Platform, or on KubeRay in private GKE; one cluster per run, sized in `steps.<step>.ray` within the platform's limits and deleted when the step ends, or on private GKE a standing cluster per team that scales its workers to zero |
 | Evaluate | Metric gates, slice gates, calibration, explainability, comparison with the current champion on the same data, a model card |
 | Release | Component image and pipeline templates by digest, write-once release contracts, a verify gate before going live, live pointers, rollback, several pipelines per use case (training and inference) released together |
@@ -296,6 +298,18 @@ BigQuery itself, and its training-data fetch is still in Preview. Registered fea
 source that resolves to the same tables: `- feature_group: customer_profile` with registered feature names, read
 from the Feature Registry at each run. `pipewright new-usecase --from features` starts from an example with two
 feature tables.
+
+### Feature contracts
+
+New in 1.4.1: the definitions are immutable, the values are not. `pipewright features contract --env <env>
+--usecase <uc>` writes `config/feature_contract.yaml` from the live sources: each source's kind (view, materialized
+view, a table built by a query, a scheduled query), the SHA-256 of its SQL and schema, its features, and a semantic
+version set by what changed (`--check` compares, for CI). The contract travels in the release. With
+`policies.integrity.features.check: on`, training refuses a definition that differs from the release's contract,
+approvals and promotions record the definitions, and deploy, scoring, the watch and rollbacks compare with what was
+approved; tables built by a query are checked by the SQL of the job that wrote them (`built_tables`), and scoring
+runs can record the base tables they read, a row fingerprint and a snapshot (`record_reads`, `fingerprint_rows`,
+`snapshot_days`). The guide: [docs/FEATURES.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/FEATURES.md#the-feature-contract-definitions-that-cannot-change-under-an-approved-model-141).
 
 ## Online features
 
@@ -523,8 +537,23 @@ KServe) and `promote` refuse a version that is not that: a changed file, a moved
 approved, a default made outside Pipewright. Approvals are judged by the released gates and approvers, not your
 working copy; approved files and release contracts can be locked with object retention; each approval is checked
 against Cloud Audit Logs at deploy and promote, so an approval written by hand does not pass. New in 1.4.0; the checks
-refuse by default (`policies.integrity.mode: warn` relaxes an environment). The guide:
-[docs/INTEGRITY.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/INTEGRITY.md).
+refuse by default (`policies.integrity.mode: warn` relaxes an environment, with `until` and `reason` for a time-boxed
+override). The guide: [docs/INTEGRITY.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/INTEGRITY.md).
+
+New in 1.4.1, each a setting under `policies.integrity` with its cost in the guide:
+
+- **Serving the approved bytes** (`pin`, on): a scoring run loads exactly the approved generations of the model
+  files, each checked by SHA-256; KServe pods load an approved copy and check it before the server starts, so a
+  swapped file stops a new pod instead of being served. The register step records the files Agent Platform copied,
+  and an approval refuses a folder that changed since.
+- **Knowing when it changes** (`watch`, off): the launcher re-checks every default and serving version hourly and
+  records `model.integrity` when a result changes, with a heartbeat whose absence alerts; `pipewright integrity check`
+  is the same check for CI (exit 0, 1 or 2); `pipewright model restore-files` puts the approved generations back.
+- **Protected while in use** (`lock.renew`): approved files, KServe copies, rollback candidates and live contracts
+  stay locked while they serve, renewed daily by a separate renewer identity whose work another identity watches.
+- **Audit logs that last**: Admin Activity and DATA_WRITE entries routed to a log bucket kept as long as models serve,
+  so an approval years old is still cross-checked and a changed file names who wrote it.
+- **Feature definitions** (`features.check`, off): see [Feature contracts](#feature-contracts).
 
 ## Every use case on one page
 
@@ -688,11 +717,11 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.4.0"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp]==1.4.1"     # the command is `pipewright`
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.4.0 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.4.1 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -752,7 +781,7 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 | Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test`, `context build`, `context check` |
 | AI agents | `mcp` (the tool server), `review` (the review bundle) |
 | Release | `tables sync`, `release`, `status`, `rollback`, `promote`, `schedules sync`, `alerts sync`, `ci init` |
-| Operate | `run`, `model list`, `model check`, `model approve`, `deploy-model`, `model endpoint`, `model predict`, `monitor status`, `lineage`, `images prune`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
+| Operate | `run`, `model list`, `model check`, `model approve`, `model restore-files`, `model retire`, `integrity check`, `integrity renew`, `features register`, `features contract`, `deploy-model`, `model endpoint`, `model predict`, `monitor status`, `lineage`, `images prune`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze`, `retrain retry`, `loop start`, `loop advance`, `loop show`, `loop rollback`, `decisions pending` |
 | Extend | `plugins` (commands added by installed packages) |
 
@@ -797,7 +826,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | OpenTelemetry export | Planned |
 | A/B testing of models: sticky assignment by customer, a business metric and guardrails, a person decides the winner | Planned |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
@@ -806,6 +835,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | The closed retrain loop, failed retrains and their retry | Built (1.1); used end to end, test to production |
 | What runs is what was approved: approvals fingerprint files, image, rules and BigQuery ML models; deploy and promote refuse a change, cross-checked with Cloud Audit Logs; approved files and release contracts locked | Released in 1.4.0; used end to end on Agent Platform and private GKE, tested as a bank's governance team would |
 | The closed retrain loop's safeguards, online canary with automatic rollback, production data for training, BigQuery ML in the loop | Released in 1.4.0; used end to end, test to production |
+| Serving the approved bytes (scoring and KServe), the watch with alerts and a heartbeat, `integrity check`, `restore-files`, lock renewal by a separate identity, audit logs that last | Released in 1.4.1; used end to end on Agent Platform and private GKE (CMEK, VPC), QA round on both |
+| Feature contracts: definitions fingerprinted and checked from training to scoring, tables built by a query, Feature Store sync health, what scoring read | Released in 1.4.1; used end to end, test to production across projects and under CMEK |
 | Fairness gates, approved images, approvals in GitHub, lineage per run | Built (1.1) |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 | Synthetic data (learned inside the environment and gated, or from the data contract alone) | Released in 1.0.0; used end to end on Agent Platform Pipelines and on Kubeflow in private GKE, inside an enforced perimeter |

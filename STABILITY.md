@@ -33,6 +33,11 @@ These may change in any release:
 - **The one deliberate exception (1.4.0):** the integrity checks refuse to deploy or promote a version that
   is not the one approved, from the release that ships them. A failed check means what would run is not what
   was approved; `policies.integrity.mode: warn` relaxes an environment ([docs/INTEGRITY.md](docs/INTEGRITY.md)).
+- **1.4.1 adds keys and commands in a patch version** (the maintainer's choice while adopters are few): every one
+  of them is off by default or only adds checks to what 1.4.0 already refused (`policies.integrity` `pin`, `watch`,
+  `until`, `lock.renew`, `features`; the `feature_contract` section; `integrity check`, `features contract`), so a
+  configuration that worked on 1.4.0 works unchanged. With `pin` (on by default), scoring loads the approved file
+  generations it already had to match.
 - **Deprecations:** anything on the stable surface that is going away first warns (in `validate`, `doctor` and the
   command's output) for at least one minor version, with the replacement named, before a major version removes it.
 - **Upgrades are per environment:** a platform runs one launcher version per environment, pinned by digest; app

@@ -34,6 +34,7 @@ the approval is refused: approve from the release's commit, or release the chang
 | `loop rollback`, `pipewright rollback` (1.4.1) | the version or release contract going back into use, like a deploy |
 | the launcher's watch (1.4.1, optional) | every default and serving version, hourly by default, with an alert when a result changes |
 | `pipewright integrity check` (1.4.1) | the same as the watch, once, with an exit code for CI |
+| a training run, an approval, a promotion (1.4.1, with `features.check`) | the feature definitions against the use case's feature contract (the release's); approvals record them, and every check above compares them with the approval ([FEATURES.md](FEATURES.md)) |
 | `pipewright lineage` | all of it, shown: the integrity result, the lock, what changed in an approved evaluation and who wrote it, and each approval against Cloud Audit Logs |
 
 A file is compared by its generation first (Cloud Storage gives every write a new one), then, if it was rewritten, by
@@ -59,6 +60,12 @@ policies:
     pin: on                         # 1.4.1, the default: scoring and KServe load the approved generations
     watch: off                      # 1.4.1: on: the launcher re-checks what is in use and alerts on a change
     watch_every: 1h                 # 1.4.1: 1h (the default), 6h, 1d
+    features:                       # 1.4.1 (FR-103), all off: feature definitions against the feature contract
+      check: off                    # on: a changed definition is a problem judged by mode
+      built_tables: false           # tables built by a query: by the SQL of the job that wrote them
+      record_reads: false           # scoring records the base tables it read and when
+      fingerprint_rows: false       # and a row fingerprint per source
+      snapshot_days: 0              # and a snapshot of each base table, kept this many days
 ```
 
 - **mode:** `refuse` is the default. A check that fails means what would run is not what was approved. Set `warn` for an
