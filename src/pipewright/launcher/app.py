@@ -305,6 +305,14 @@ def create_app(registry: Registry | None = None) -> Flask:
         due_in = pol["watch_every_hours"] * 3600 - 300
         if not force and last and (now - datetime.fromisoformat(last)).total_seconds() < due_in:
             return {"status": "not due", "last_run": last}
+        # Claim the run before checking (found live in 1.4.1: a tick cut off by Cloud Run's request timeout kept going
+        # while the scheduler's retry ran, and both emitted the same transition): the first to write last_run checks.
+        state["last_run"] = now.isoformat()
+        try:
+            gen = gcs_write(gcp, bucket, name, json.dumps(state), if_generation_match=gen)
+        except PreconditionFailed:
+            log.info("integrity watch: another run is under way")
+            return {"status": "skipped", "reason": "another watch run is under way"}
         models = {(c.metadata or {}).get("model"): c.usecase for c in live if (c.metadata or {}).get("model")}
         result = iwatch.run(gcp, env, state, models)
         topic = (m.get("observability") or {}).get("events_topic")

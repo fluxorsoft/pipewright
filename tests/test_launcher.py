@@ -255,3 +255,30 @@ def test_the_integrity_watch_records_changes_and_a_heartbeat(monkeypatch):
     assert kinds == ["model.integrity", "model.integrity.check"]
     assert emitted[0]["usecase"] == "churn" and emitted[0]["data"]["status"] == "changed"
     assert "integrity-dev.json" in "".join(files)
+
+
+def test_an_overlapping_watch_run_skips_without_events(monkeypatch):
+    """Found live in 1.4.1: a tick cut off by the request timeout kept running while the retry ran, and both emitted
+    the same transition. A run claims the watch first (last_run, by generation); the one that loses emits nothing."""
+    import pipewright.gcp as g
+    from pipewright.gcp import PreconditionFailed
+    from pipewright.launcher.app import create_app
+    from pipewright.models import watch
+
+    emitted, ran = [], []
+    monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
+    monkeypatch.setattr(g, "gcs_read", lambda gcp, b, n: ('{"results": {}}', 7))
+
+    def write(gcp, b, n, t, content_type=None, if_generation_match=None):
+        if "integrity-" in n:
+            raise PreconditionFailed("changed since it was read")
+        return 1
+
+    monkeypatch.setattr(g, "gcs_write", write)
+    monkeypatch.setattr(watch, "run", lambda *a, **k: ran.append(1))
+    registry = FakeRegistry([V3])
+    registry.manifest.update(project="p", region="r", artifacts_bucket="art", artifact_registry={},
+                             policies={"integrity": {"watch": "on"}})
+    registry.gcp = object()
+    r = create_app(registry).test_client().post("/integrity/tick", json={})
+    assert r.json["status"] == "skipped" and emitted == [] and ran == []

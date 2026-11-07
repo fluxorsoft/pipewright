@@ -56,6 +56,11 @@ manifest and Terraform when you want them; `doctor` lists what is off.
 - `loop rollback` checks the version it restores, and `pipewright rollback` checks the old release's contract against
   its `release.live` fingerprint and locks it again, like the way forward.
 - An approval of an already protected file keeps its later retention date instead of reporting a failed lock.
+- Found in the live test of private GKE: a KServe pod that pulls from the mirror is judged by the image it mirrors
+  (the mirror's manifest digest differs from the source's); `PIPEWRIGHT_KUBERNETES_ENDPOINT`, set inside the VPC,
+  wins over the cluster's DNS endpoint (an environment with no internet egress cannot reach it: the launcher's watch
+  hung until Cloud Run's request timeout); a watch run claims the run before checking, so an overlapping run (a tick
+  cut off by the request timeout and the scheduler's retry) records nothing twice.
 
 ## [1.4.0] - 2026-11-06
 

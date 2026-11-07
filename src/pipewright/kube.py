@@ -44,12 +44,14 @@ class KubeClient:
         """The private endpoint (from the VPC: the launcher), or with `dns` the cluster's DNS endpoint (IAM
         authorized, reachable from outside the VPC: a Fleet View collector), which has a public certificate."""
         k = manifest.get("kubernetes") or {}
-        if dns and k.get("dns_endpoint"):
-            return cls(f"https://{k['dns_endpoint']}", None, gcp)
-        # Inside the cluster (the launcher on GKE): the in-cluster address, the same cluster CA.
+        # Inside the VPC (the launcher in the cluster, or on Cloud Run with VPC egress; the renewer job): the address
+        # the platform gave it, the same cluster CA. It wins over `dns`: an environment with no internet egress cannot
+        # reach the DNS endpoint (found live in 1.4.1: the launcher's watch hung on it until the request timed out).
         inside = os.environ.get("PIPEWRIGHT_KUBERNETES_ENDPOINT")
         if inside:
             return cls(inside, k.get("ca_certificate"), gcp)
+        if dns and k.get("dns_endpoint"):
+            return cls(f"https://{k['dns_endpoint']}", None, gcp)
         if not k.get("endpoint"):
             raise KubeError(0, "the environment manifest has no kubernetes.endpoint (orchestrator kfp)")
         return cls(k["endpoint"], k.get("ca_certificate"), gcp)

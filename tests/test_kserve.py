@@ -250,3 +250,14 @@ def test_a_mirrored_pod_image_is_judged_by_the_image_it_mirrors():
                          "labels": {"pipewright.dev/usecase": "churn"}},
             "spec": {"predictor": {"containers": [{"image": f"{mirror}/{src}", "env": []}]}}}
     assert watch._kserve_use(isvc, "serving", {}, None, mirror).image == src
+
+
+def test_inside_the_vpc_the_platforms_address_wins_over_the_dns_endpoint(monkeypatch):
+    """Found live in 1.4.1: the launcher (no internet egress) hung on the DNS endpoint; the address the platform
+    gives it inside the VPC is used even where code asks for the DNS endpoint."""
+    m = {"kubernetes": {"endpoint": "https://172.16.0.34", "dns_endpoint": "gke-x.gke.goog"}}
+    monkeypatch.delenv("PIPEWRIGHT_KUBERNETES_ENDPOINT", raising=False)
+    assert kube.KubeClient.from_manifest(m, None, dns=True).endpoint == "https://gke-x.gke.goog"
+    assert kube.KubeClient.from_manifest(m, None).endpoint == "https://172.16.0.34"
+    monkeypatch.setenv("PIPEWRIGHT_KUBERNETES_ENDPOINT", "https://172.16.0.34")
+    assert kube.KubeClient.from_manifest(m, None, dns=True).endpoint == "https://172.16.0.34"
