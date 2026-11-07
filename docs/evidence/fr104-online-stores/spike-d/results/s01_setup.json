@@ -1,0 +1,100 @@
+{
+ "plan": {
+  "kind": "setup",
+  "tenants": {
+   "tenant_a": {
+    "fs104d-lookup-a@pw-ebook.iam": "read"
+   },
+   "tenant_c": {
+    "fs104d-lookup-a@pw-ebook.iam": "read"
+   },
+   "tenant_b": {}
+  },
+  "writer": {
+   "tenant_a": "fs104d-agent@pw-ebook.iam",
+   "tenant_c": "fs104d-agent@pw-ebook.iam",
+   "tenant_b": "fs104d-sync-b@pw-ebook.iam"
+  }
+ },
+ "result": {
+  "as": "fs104d-agent@pw-ebook.iam",
+  "statements": [
+   [
+    "REVOKE ALL ON SCHEMA public FROM PUBLIC",
+    "ok"
+   ],
+   [
+    "REVOKE CREATE ON DATABASE features FROM PUBLIC",
+    "ok"
+   ],
+   [
+    "GRANT \"fs104d-agent@pw-ebook.iam\" TO CURRENT_USER",
+    "{'S': 'ERROR', 'V': 'ERROR', 'C': '0LP01', 'M': 'role \"fs104d-agent@pw-ebook.iam\" is a member of role \"fs104d-agent@pw-ebook.iam\"', 'F': 'user.c', 'L': '1851', "
+   ],
+   [
+    "CREATE SCHEMA IF NOT EXISTS tenant_a AUTHORIZATION \"fs104d-agent@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "REVOKE ALL ON SCHEMA tenant_a FROM PUBLIC",
+    "ok"
+   ],
+   [
+    "GRANT USAGE ON SCHEMA tenant_a TO \"fs104d-lookup-a@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "ALTER DEFAULT PRIVILEGES FOR ROLE \"fs104d-agent@pw-ebook.iam\" IN SCHEMA tenant_a GRANT SELECT ON TABLES TO \"fs104d-lookup-a@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "GRANT \"fs104d-agent@pw-ebook.iam\" TO CURRENT_USER",
+    "{'S': 'ERROR', 'V': 'ERROR', 'C': '0LP01', 'M': 'role \"fs104d-agent@pw-ebook.iam\" is a member of role \"fs104d-agent@pw-ebook.iam\"', 'F': 'user.c', 'L': '1851', "
+   ],
+   [
+    "CREATE SCHEMA IF NOT EXISTS tenant_c AUTHORIZATION \"fs104d-agent@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "REVOKE ALL ON SCHEMA tenant_c FROM PUBLIC",
+    "ok"
+   ],
+   [
+    "GRANT USAGE ON SCHEMA tenant_c TO \"fs104d-lookup-a@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "ALTER DEFAULT PRIVILEGES FOR ROLE \"fs104d-agent@pw-ebook.iam\" IN SCHEMA tenant_c GRANT SELECT ON TABLES TO \"fs104d-lookup-a@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "GRANT \"fs104d-sync-b@pw-ebook.iam\" TO CURRENT_USER",
+    "ok"
+   ],
+   [
+    "CREATE SCHEMA IF NOT EXISTS tenant_b AUTHORIZATION \"fs104d-sync-b@pw-ebook.iam\"",
+    "ok"
+   ],
+   [
+    "REVOKE ALL ON SCHEMA tenant_b FROM PUBLIC",
+    "ok"
+   ]
+  ],
+  "schemas": [
+   [
+    "tenant_a",
+    "fs104d-agent@pw-ebook.iam"
+   ],
+   [
+    "tenant_c",
+    "fs104d-agent@pw-ebook.iam"
+   ],
+   [
+    "tenant_b",
+    "fs104d-sync-b@pw-ebook.iam"
+   ]
+  ]
+ },
+ "started": 1794062371.0308657,
+ "seconds": 0.6
+}

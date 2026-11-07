@@ -1,0 +1,107 @@
+{
+ "plan": {
+  "kind": "pg_rate",
+  "schema": "tenant_a",
+  "pool": 16,
+  "entities": 1000000,
+  "secs": 30,
+  "rates": [
+   50,
+   100,
+   200,
+   400,
+   800,
+   1200
+  ]
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1500,
+    "errors": {},
+    "sent_late": 0,
+    "achieved_rps": 50.0,
+    "p50_ms": 4.3,
+    "p95_ms": 5.5,
+    "p99_ms": 7.6,
+    "max_ms": 15.1,
+    "mean_ms": 3.9
+   },
+   {
+    "rate": 100,
+    "secs": 30,
+    "sent": 3000,
+    "ok": 3000,
+    "errors": {},
+    "sent_late": 0,
+    "achieved_rps": 100.0,
+    "p50_ms": 4.1,
+    "p95_ms": 5.0,
+    "p99_ms": 5.7,
+    "max_ms": 11.5,
+    "mean_ms": 3.6
+   },
+   {
+    "rate": 200,
+    "secs": 30,
+    "sent": 6000,
+    "ok": 6000,
+    "errors": {},
+    "sent_late": 0,
+    "achieved_rps": 199.8,
+    "p50_ms": 4.0,
+    "p95_ms": 5.0,
+    "p99_ms": 5.7,
+    "max_ms": 21.2,
+    "mean_ms": 3.6
+   },
+   {
+    "rate": 400,
+    "secs": 30,
+    "sent": 12000,
+    "ok": 12000,
+    "errors": {},
+    "sent_late": 0,
+    "achieved_rps": 399.4,
+    "p50_ms": 2.9,
+    "p95_ms": 4.7,
+    "p99_ms": 6.0,
+    "max_ms": 33.1,
+    "mean_ms": 3.1
+   },
+   {
+    "rate": 800,
+    "secs": 30,
+    "sent": 24000,
+    "ok": 24000,
+    "errors": {},
+    "sent_late": 4,
+    "achieved_rps": 797.2,
+    "p50_ms": 2.7,
+    "p95_ms": 5.2,
+    "p99_ms": 20.3,
+    "max_ms": 164.4,
+    "mean_ms": 3.3
+   },
+   {
+    "rate": 1200,
+    "secs": 30,
+    "sent": 36000,
+    "ok": 36000,
+    "errors": {},
+    "sent_late": 125,
+    "achieved_rps": 1193.1,
+    "p50_ms": 8.6,
+    "p95_ms": 135.2,
+    "p99_ms": 411.7,
+    "max_ms": 2046.8,
+    "mean_ms": 28.4
+   }
+  ]
+ },
+ "started": 1794062628.9861288,
+ "seconds": 182.3
+}

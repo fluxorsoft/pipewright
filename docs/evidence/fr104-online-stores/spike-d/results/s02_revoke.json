@@ -1,0 +1,27 @@
+{
+ "plan": {
+  "kind": "revoke_membership",
+  "roles": [
+   "fs104d-sync-b@pw-ebook.iam"
+  ]
+ },
+ "result": [
+  [
+   "fs104d-sync-b@pw-ebook.iam",
+   "revoked"
+  ],
+  [
+   "member_of",
+   [
+    [
+     "cloudsqlsuperuser"
+    ],
+    [
+     "cloudsqliamserviceaccount"
+    ]
+   ]
+  ]
+ ],
+ "started": 1794062440.020837,
+ "seconds": 0.4
+}

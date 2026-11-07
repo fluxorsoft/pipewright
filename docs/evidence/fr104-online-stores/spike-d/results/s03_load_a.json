@@ -1,0 +1,16 @@
+{
+ "plan": {
+  "kind": "load",
+  "schema": "tenant_a",
+  "method": "rename",
+  "prefix": "export/g1/",
+  "grant_select": []
+ },
+ "result": {
+  "rows": 1000000,
+  "copy_seconds": 53.9,
+  "count": 1000000
+ },
+ "started": 1794062455.6225584,
+ "seconds": 55.3
+}

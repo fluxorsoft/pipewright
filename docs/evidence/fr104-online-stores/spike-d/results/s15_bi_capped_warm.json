@@ -1,0 +1,76 @@
+{
+ "waited": [
+  {
+   "t": 3.0,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 6.6,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 10.4,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 14.1,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 17.7,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 21.4,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 25.0,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 28.5,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 32.1,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  },
+  {
+   "t": 35.8,
+   "billed": 0,
+   "mode": "FULL",
+   "reasons": []
+  }
+ ],
+ "capped": [
+  400,
+  400,
+  400,
+  400,
+  400,
+  400,
+  400,
+  400,
+  400,
+  400
+ ]
+}

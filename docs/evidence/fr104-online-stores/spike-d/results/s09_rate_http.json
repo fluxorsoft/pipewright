@@ -1,0 +1,97 @@
+{
+ "plan": {
+  "kind": "http_rate",
+  "url": "https://fs104d-lookup-dqlu24udla-nw.a.run.app",
+  "entities": 1000000,
+  "secs": 30,
+  "rates": [
+   50,
+   100,
+   200,
+   400,
+   800
+  ]
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 0,
+    "errors": {
+     "403: \n<html><head>\n<meta http-equiv=\"content-type\" content=\"text/html;charset=utf-8\">\n<title>403 Forbidden</title>\n</head>\n<b": 1500
+    },
+    "sent_late": 0,
+    "achieved_rps": 0.0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "max_ms": null,
+    "mean_ms": null
+   },
+   {
+    "rate": 100,
+    "secs": 30,
+    "sent": 3000,
+    "ok": 0,
+    "errors": {
+     "403: \n<html><head>\n<meta http-equiv=\"content-type\" content=\"text/html;charset=utf-8\">\n<title>403 Forbidden</title>\n</head>\n<b": 3000
+    },
+    "sent_late": 24,
+    "achieved_rps": 0.0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "max_ms": null,
+    "mean_ms": null
+   },
+   {
+    "rate": 200,
+    "secs": 30,
+    "sent": 6000,
+    "ok": 4019,
+    "errors": {
+     "403: \n<html><head>\n<meta http-equiv=\"content-type\" content=\"text/html;charset=utf-8\">\n<title>403 Forbidden</title>\n</head>\n<b": 1981
+    },
+    "sent_late": 409,
+    "achieved_rps": 133.5,
+    "p50_ms": 11.5,
+    "p95_ms": 14.8,
+    "p99_ms": 37.9,
+    "max_ms": 195.5,
+    "mean_ms": 12.5
+   },
+   {
+    "rate": 400,
+    "secs": 30,
+    "sent": 12000,
+    "ok": 12000,
+    "errors": {},
+    "sent_late": 2391,
+    "achieved_rps": 396.2,
+    "p50_ms": 11.5,
+    "p95_ms": 256.8,
+    "p99_ms": 900.1,
+    "max_ms": 6591.3,
+    "mean_ms": 64.8
+   },
+   {
+    "rate": 800,
+    "secs": 30,
+    "sent": 24000,
+    "ok": 24000,
+    "errors": {},
+    "sent_late": 6701,
+    "achieved_rps": 788.9,
+    "p50_ms": 11.2,
+    "p95_ms": 119.7,
+    "p99_ms": 640.7,
+    "max_ms": 7816.9,
+    "mean_ms": 44.1
+   }
+  ]
+ },
+ "started": 1794063171.7116823,
+ "seconds": 151.3
+}

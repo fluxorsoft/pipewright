@@ -1634,6 +1634,39 @@ service at its defaults, 1M entities x 30 features.
    (otherwise the launcher deploys the lookup service for it); BigQuery billing while BI Engine reloads a refreshed
    table.
 
+**Spike (d) results** (run and torn down 2026-11-07; `docs/evidence/fr104-online-stores/spike-d/`). Setup:
+PostgreSQL 16, Enterprise, `db-custom-1-3840`, zonal, private IP over PSA only, CMEK, IAM database login, SSL required;
+reads from a VM in the same VPC with a pool of 16; the lookup service on Cloud Run (1 vCPU, 512 MiB, 1 to 5 instances,
+pool 8) with Direct VPC egress and internal ingress.
+
+| Measured | Result |
+|---|---|
+| Direct, one vCPU | 50 to 400 a second: p50 2.9 to 4.3 ms, p99 at most 7.6 ms; 800 a second: p50 2.7 ms, p99 20 ms, no errors; 1,200 a second saturates (p99 412 ms). Database CPU at most about 63% (one-minute average) in every run below 800 a second |
+| Through the lookup service | 50 to 400 a second, no errors: p50 11 to 13 ms end to end (the service's own p50 5 to 7 ms; the rest is HTTPS and Google's front end). The tail grows from 200 a second while new instances start (1 to 4) |
+| The swap | 3.2 to 3.5 ms, first try, zero failed lookups, for both a rename in one transaction and a repointed view |
+| During a full 1M-row load (`COPY`, 52 to 65 s) | lookups through the service: p50 12 ms rose to 20 to 33 ms and p99 to 60 to 150 ms for the minute of the load, then back to 12 ms. (Read in the same process as the load, the figures looked far worse, about 65 ms p50: that was the test client, not the database) |
+| `max_connections` on `db-custom-1-3840` | 100, 3 reserved; Cloud SQL's own backends use some. `pool_size x max_instances` summed over the tenants' services must stay well inside it |
+| IAM login, CMEK, private IP on the default tier | all work; no password user is needed: an IAM user given `cloudsqlsuperuser` with `gcloud sql users assign-roles` creates the database and schemas, and the role is revoked afterwards |
+| Tenancy | a tenant's identity is refused on another tenant's schema (`permission denied for schema`). Catch: whoever creates the database owns `public` and can create in it despite `REVOKE`, so the database is created by an admin identity |
+| Runner scoped to its own Cloud Run services by name | **not possible**: with `run.developer` under a `resource.name` condition (full name or the service name extracted), create, get and update were all refused, even for a matching name; an unconditional control grant worked. So the launcher creates each lookup service (the tenant prefix enforced in code) and grants the tenant's runner `run.developer` on that one service, so `deploy-model` can update it |
+| BI Engine after a table refresh (1M rows, 245 MiB) | lookups were not accelerated for minutes after the refresh (about half at first; 10 out of 10 only after about 8 to 10 minutes), and each such lookup billed the whole table, about $0.0015: roughly $15 per refresh at 50 lookups a second. Also seen right after the reservation was set (the first 150 s, none accelerated) |
+| A byte cap per lookup (`maximumBytesBilled`) | **cannot guard it**: BigQuery checks the cap against its up-front estimate, so capped lookups were refused even when BI Engine would have served them for 0 bytes |
+
+**What the build takes from it:**
+
+- Defaults stand: `db-custom-1-3840` serves up to about 800 lookups a second direct. The lookup service defaults
+  (1 vCPU, pool 8, up to 5 instances) are fine for hundreds a second. `min_instances: 1` is recommended where the tail
+  matters, because cold starts made the tail.
+- The swap is a rename in one transaction (simplest, no view layer), with `lock_timeout` and a retry.
+- The sync loads only changed rows where it can, and `doctor` and the docs state the cost of a full load on one vCPU
+  (about a minute of higher latency) and when to choose 2 vCPUs.
+- The launcher creates the lookup services; the runner updates its own service.
+- The database and schemas are created by an admin identity through `assign-roles`; no password user is kept.
+- `bigquery` type guards are detection, not a cap. The watch reads bytes billed by the serving identity
+  (`INFORMATION_SCHEMA.JOBS`, with the jobs.listAll custom role from FR-103) and alerts when lookups are billed.
+  `doctor` and the docs state the refresh window, its cost at the use case's traffic, and that BI Engine suits low
+  traffic with infrequent refreshes.
+
 **Serving patterns and scope (user, 2026-11-07):** Pipewright ships one implementation between the serving endpoint
 and Cloud SQL, the Cloud Run lookup service, and it is tested end to end during this build in a secure setup: private
 IP, VPC, and Private Service Connect for Agent Platform endpoints (with FR-92). The docs also describe the other

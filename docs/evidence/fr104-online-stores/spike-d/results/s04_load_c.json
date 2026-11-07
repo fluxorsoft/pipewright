@@ -1,0 +1,18 @@
+{
+ "plan": {
+  "kind": "load",
+  "schema": "tenant_c",
+  "method": "view",
+  "prefix": "export/g1/",
+  "grant_select": [
+   "fs104d-lookup-a@pw-ebook.iam"
+  ]
+ },
+ "result": {
+  "rows": 1000000,
+  "copy_seconds": 51.0,
+  "count": 1000000
+ },
+ "started": 1794062521.0678027,
+ "seconds": 52.2
+}

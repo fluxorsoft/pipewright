@@ -1,0 +1,91 @@
+{
+ "plan": {
+  "kind": "http_rate",
+  "url": "https://fs104d-lookup-dqlu24udla-nw.a.run.app",
+  "entities": 1000000,
+  "secs": 30,
+  "rates": [
+   50,
+   100,
+   200,
+   300,
+   400
+  ]
+ },
+ "result": {
+  "runs": [
+   {
+    "rate": 50,
+    "secs": 30,
+    "sent": 1500,
+    "ok": 1500,
+    "errors": {},
+    "sent_late": 0,
+    "achieved_rps": 50.0,
+    "p50_ms": 13.1,
+    "p95_ms": 16.0,
+    "p99_ms": 21.8,
+    "max_ms": 193.3,
+    "mean_ms": 13.8
+   },
+   {
+    "rate": 100,
+    "secs": 30,
+    "sent": 3000,
+    "ok": 3000,
+    "errors": {},
+    "sent_late": 0,
+    "achieved_rps": 99.9,
+    "p50_ms": 12.6,
+    "p95_ms": 18.0,
+    "p99_ms": 29.7,
+    "max_ms": 590.9,
+    "mean_ms": 16.4
+   },
+   {
+    "rate": 200,
+    "secs": 30,
+    "sent": 6000,
+    "ok": 6000,
+    "errors": {},
+    "sent_late": 343,
+    "achieved_rps": 199.1,
+    "p50_ms": 11.9,
+    "p95_ms": 26.0,
+    "p99_ms": 1052.2,
+    "max_ms": 1758.8,
+    "mean_ms": 30.2
+   },
+   {
+    "rate": 300,
+    "secs": 30,
+    "sent": 9000,
+    "ok": 9000,
+    "errors": {},
+    "sent_late": 828,
+    "achieved_rps": 298.3,
+    "p50_ms": 12.3,
+    "p95_ms": 181.3,
+    "p99_ms": 912.5,
+    "max_ms": 2072.0,
+    "mean_ms": 49.0
+   },
+   {
+    "rate": 400,
+    "secs": 30,
+    "sent": 12000,
+    "ok": 12000,
+    "errors": {},
+    "sent_late": 1347,
+    "achieved_rps": 397.4,
+    "p50_ms": 11.3,
+    "p95_ms": 44.1,
+    "p99_ms": 212.9,
+    "max_ms": 1934.9,
+    "mean_ms": 26.3
+   }
+  ]
+ },
+ "started": 1794063333.2032266,
+ "seconds": 151.1
+}

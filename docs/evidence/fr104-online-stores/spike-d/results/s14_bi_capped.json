@@ -1,0 +1,366 @@
+[
+ {
+  "t": 20.1,
+  "refused": true,
+  "status": 400,
+  "ms": 1573,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 24.6,
+  "refused": true,
+  "status": 400,
+  "ms": 1529,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 28.3,
+  "refused": true,
+  "status": 400,
+  "ms": 668,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 32.4,
+  "refused": true,
+  "status": 400,
+  "ms": 1012,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 36.4,
+  "refused": true,
+  "status": 400,
+  "ms": 1089,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 40.4,
+  "refused": true,
+  "status": 400,
+  "ms": 912,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 44.3,
+  "refused": true,
+  "status": 400,
+  "ms": 902,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 47.9,
+  "refused": true,
+  "status": 400,
+  "ms": 535,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 51.2,
+  "refused": true,
+  "status": 400,
+  "ms": 290,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 54.8,
+  "refused": true,
+  "status": 400,
+  "ms": 615,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 59.0,
+  "refused": true,
+  "status": 400,
+  "ms": 1211,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 62.7,
+  "refused": true,
+  "status": 400,
+  "ms": 624,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 66.1,
+  "refused": true,
+  "status": 400,
+  "ms": 423,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 69.4,
+  "refused": true,
+  "status": 400,
+  "ms": 281,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 72.9,
+  "refused": true,
+  "status": 400,
+  "ms": 477,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 76.8,
+  "refused": true,
+  "status": 400,
+  "ms": 929,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 80.2,
+  "refused": true,
+  "status": 400,
+  "ms": 388,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 83.5,
+  "refused": true,
+  "status": 400,
+  "ms": 349,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 86.9,
+  "refused": true,
+  "status": 400,
+  "ms": 331,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 90.2,
+  "refused": true,
+  "status": 400,
+  "ms": 377,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 93.6,
+  "refused": true,
+  "status": 400,
+  "ms": 387,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 97.0,
+  "refused": true,
+  "status": 400,
+  "ms": 382,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 100.3,
+  "refused": true,
+  "status": 400,
+  "ms": 324,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 103.6,
+  "refused": true,
+  "status": 400,
+  "ms": 295,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 107.0,
+  "refused": true,
+  "status": 400,
+  "ms": 349,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 110.3,
+  "refused": true,
+  "status": 400,
+  "ms": 341,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 113.7,
+  "refused": true,
+  "status": 400,
+  "ms": 364,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 117.4,
+  "refused": true,
+  "status": 400,
+  "ms": 687,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 121.0,
+  "refused": true,
+  "status": 400,
+  "ms": 584,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 124.3,
+  "refused": true,
+  "status": 400,
+  "ms": 383,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 127.7,
+  "refused": true,
+  "status": 400,
+  "ms": 319,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 131.0,
+  "refused": true,
+  "status": 400,
+  "ms": 339,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 134.4,
+  "refused": true,
+  "status": 400,
+  "ms": 374,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 137.9,
+  "refused": true,
+  "status": 400,
+  "ms": 484,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 141.1,
+  "refused": true,
+  "status": 400,
+  "ms": 277,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 144.5,
+  "refused": true,
+  "status": 400,
+  "ms": 374,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 147.8,
+  "refused": true,
+  "status": 400,
+  "ms": 335,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 151.2,
+  "refused": true,
+  "status": 400,
+  "ms": 304,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 154.4,
+  "refused": true,
+  "status": 400,
+  "ms": 293,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 157.7,
+  "refused": true,
+  "status": 400,
+  "ms": 274,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 161.0,
+  "refused": true,
+  "status": 400,
+  "ms": 299,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 164.4,
+  "refused": true,
+  "status": 400,
+  "ms": 356,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 167.8,
+  "refused": true,
+  "status": 400,
+  "ms": 471,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 171.1,
+  "refused": true,
+  "status": 400,
+  "ms": 296,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 174.4,
+  "refused": true,
+  "status": 400,
+  "ms": 291,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 177.7,
+  "refused": true,
+  "status": 400,
+  "ms": 268,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 181.1,
+  "refused": true,
+  "status": 400,
+  "ms": 368,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 184.4,
+  "refused": true,
+  "status": 400,
+  "ms": 362,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 187.8,
+  "refused": true,
+  "status": 400,
+  "ms": 334,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 191.1,
+  "refused": true,
+  "status": 400,
+  "ms": 290,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 194.5,
+  "refused": true,
+  "status": 400,
+  "ms": 419,
+  "reason": "bytesBilledLimitExceeded"
+ },
+ {
+  "t": 197.8,
+  "refused": true,
+  "status": 400,
+  "ms": 271,
+  "reason": "bytesBilledLimitExceeded"
+ }
+]

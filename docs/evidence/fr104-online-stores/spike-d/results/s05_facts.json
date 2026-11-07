@@ -1,0 +1,27 @@
+{
+ "plan": {
+  "kind": "facts",
+  "probe_schemas": [
+   "tenant_b",
+   "tenant_a"
+  ]
+ },
+ "result": {
+  "user": "fs104d-agent@pw-ebook.iam",
+  "max_connections": "100",
+  "superuser_reserved_connections": "3",
+  "ssl": "on",
+  "server_version": "16.15",
+  "shared_buffers": "1222MB",
+  "effective_cache_size": "1501856kB",
+  "work_mem": "4MB",
+  "reserved_for_cloudsql": 15,
+  "active_connections": 11,
+  "ssl_in_use": true,
+  "read_tenant_b": "refused: {'S': 'ERROR', 'V': 'ERROR', 'C': '42501', 'M': 'permission denied for schema tenant_b', 'P': '22', 'F': 'aclchk.c', 'L'",
+  "read_tenant_a": "allowed",
+  "create_in_public": "allowed"
+ },
+ "started": 1794062583.4001634,
+ "seconds": 0.3
+}
