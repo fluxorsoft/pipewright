@@ -1628,6 +1628,20 @@ service at its defaults, 1M entities x 30 features.
    (otherwise the launcher deploys the lookup service for it); BigQuery billing while BI Engine reloads a refreshed
    table.
 
+**User docs, part of the release (user, 2026-11-07):** the website's `docs/index.html` and `docs/quickstart.html`
+gain the online feature store, and a full guide covers, with real YAML:
+
+- how the YAML works: every key, its default, where it lives (use case, `environments/<env>.yaml`, the platform's file,
+  the manifest) and the toggles (`online_store.type`, `lookup.provider`);
+- setting up each store, with what it means for latency and cost: BigQuery (and why plain BigQuery is never used
+  online: a full table read per lookup), BigQuery + BI Engine (the reservation, preferred tables, warm-up, the alert),
+  Cloud SQL (sizing against the supported tiers, costs per tier, tenancy, the lookup service or your own), Bigtable,
+  and `http`;
+- how the Parquet export and its manifest let an ML team build its own online store: the files, the manifest's
+  fields, checking a load against it, and the `http` contract to plug the store back into serving.
+
+The core's `docs/FEATURES.md`, README and ONBOARDING, the starter README and the Enterprise docs change to match.
+
 **Rules:** additive and off by default; the stores' costs shown before anyone switches one on; names, digests and
 counts in every message and manifest, never a feature value.
 
