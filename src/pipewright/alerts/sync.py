@@ -47,6 +47,15 @@ EVENTS = {
     # from the launcher's hourly tick (Pipewright 1.2.0, FR-67)
     "run.failed": ('jsonPayload.pipewright_event.event_type="run.failed"', "pipeline run failed",
                    ["pipeline", "job_id", "state", "failed_steps", "error"]),
+    # Pipewright 1.4.1 (FR-101): the watch found an approved version changed, unapproved or not checkable; and a
+    # scoring run refused or warned by the full check. Added for every use case of an environment whose
+    # policies.integrity.watch is on (model.integrity) or inference is warn or refuse (run.integrity).
+    "model.integrity": ('jsonPayload.pipewright_event.event_type="model.integrity" AND '
+                        'jsonPayload.pipewright_event.data.status!="restored"',
+                        "approved model is not what was approved",
+                        ["status", "severity", "version", "where", "problems"]),
+    "run.integrity": ('jsonPayload.pipewright_event.event_type="run.integrity"', "scoring run failed its integrity "
+                      "check", ["mode", "version", "problem"]),
 }
 
 # Retrain decision events (pipewright.retraining): emailed to retraining.decisions.notify.
@@ -149,7 +158,7 @@ def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run:
     gcp = gcp or Gcp()
     alerts = uc.ml["monitoring"]["alerts"]
     severity = alerts["severity"]
-    wanted_emails = wanted_policies(uc)
+    wanted_emails = wanted_policies(uc, env)
     emails = sorted({e for addresses in wanted_emails.values() for e in addresses})
     base = f"{MON}/projects/{env.project}"
     plan = AlertsPlan()
@@ -278,10 +287,17 @@ def prune(env: Environment, repo_usecases: set[str], gcp: Gcp | None = None, dry
     return deleted, kept, errors
 
 
-def wanted_policies(uc: ResolvedUseCase) -> dict[str, list[str]]:
-    """event -> email addresses: monitoring.alerts for its events, retraining.decisions for decision events."""
+def wanted_policies(uc: ResolvedUseCase, env: Environment | None = None) -> dict[str, list[str]]:
+    """event -> email addresses: monitoring.alerts for its events, retraining.decisions for decision events, and
+    (1.4.1) the integrity events when the environment's policies.integrity watch or inference check is on."""
     alerts = uc.ml["monitoring"]["alerts"]
     out = {e: sorted(set(alerts["notify"])) for e in dict.fromkeys(alerts["events"])} if alerts["notify"] else {}
+    integ = ((getattr(env, "policies", None) or {}).get("integrity") or {}) if env is not None else {}
+    if alerts["notify"]:
+        if integ.get("watch") == "on":
+            out.setdefault("model.integrity", sorted(set(alerts["notify"])))
+        if integ.get("inference") in ("warn", "refuse"):
+            out.setdefault("run.integrity", sorted(set(alerts["notify"])))
     retraining = uc.ml.get("retraining") or {}
     decisions = retraining.get("decisions") or {}
     notify = sorted(set(decisions.get("notify") or []))

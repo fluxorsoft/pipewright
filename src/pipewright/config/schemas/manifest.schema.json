@@ -131,6 +131,14 @@
             "pattern": "^https://"
           },
           "description": "every name the launcher answers to (ID token audiences): its Cloud Run URL and its name in the cluster, so releases built under either runtime keep working"
+        },
+        "renewer_job": {
+          "type": ["string", "null"],
+          "description": "Pipewright 1.4.1: the lock renewer's Cloud Run job (projects/<p>/locations/<r>/jobs/<name>), a separate identity from the launcher"
+        },
+        "renewer_service_account": {
+          "type": ["string", "null"],
+          "description": "Pipewright 1.4.1: the renewer's service account (get, setRetention and update on the model folders and contracts only)"
         }
       }
     },

@@ -227,6 +227,155 @@ def check_security(env: Environment, gcp: Gcp, report: Report) -> None:
         report.add(s, Result(INFO, "VPC Service Controls perimeter", sec["perimeter"]))
 
 
+WRITER_ROLES = ("roles/owner", "roles/editor", "roles/storage.admin", "roles/storage.objectAdmin",
+                "roles/storage.objectCreator", "roles/storage.objectUser", "roles/storage.legacyBucketOwner",
+                "roles/storage.legacyBucketWriter", "roles/storage.legacyObjectOwner")
+
+
+def check_integrity(env: Environment, gcp: Gcp, report: Report) -> None:
+    """Pipewright 1.4.1 (FR-101 item 9, FR-102): whether what runs is protected, said plainly. In an environment whose
+    name says production a protection that is off is a warning; elsewhere it is information."""
+    from pipewright.models import integrity
+
+    s = f"Integrity ({env.name})"
+    try:
+        pol = integrity.policy(env)
+    except Exception as e:  # noqa: BLE001
+        report.add(s, Result(FAIL, "policies.integrity", str(e)[:200]))
+        return
+    prod = "prod" in env.name.lower()
+    nudge = WARN if prod else INFO
+    off = []
+    if pol["lock"]["days"] <= 0:
+        off.append("lock.days 0: approved files can be deleted or overwritten in place (versioned buckets keep the "
+                   "approved generation, but nothing prevents its deletion)")
+    if pol["mode"] == "warn":
+        off.append("mode warn: a version that is not the approved one is deployed anyway")
+    if pol["inference"] == "off":
+        off.append("inference off: scoring runs are not checked against their approval")
+    if not pol["watch"]:
+        off.append("watch off: nobody is told when an approved file changes between deploys")
+    if not pol["pin"]:
+        off.append("pin off: scoring and KServe load the live model folder, not the approved generations")
+    for line in off:
+        report.add(s, Result(nudge, "protection off", line, "set it in the manifest's policies.integrity "
+                                                            "(docs/INTEGRITY.md has the cost of each)"))
+    if not off:
+        report.add(s, Result(OK, "protection", "lock, refuse, scoring check, pin and watch all on"))
+    if pol["mode"] == "warn" and not pol["until"]:
+        report.add(s, Result(WARN, "override", "mode warn has no `until`: an open-ended override",
+                             "give it until (a date) and reason; it goes back to refuse on its own"))
+    elif pol["expired_warn"]:
+        report.add(s, Result(INFO, "override", f"mode warn expired on {pol['until']}: refuse applies again"))
+    if 0 < pol["lock"]["days"] < 5 and pol["lock"]["renew"]:
+        report.add(s, Result(WARN, "lock.days", f"{pol['lock']['days']} days: a missed renewal run or two leaves "
+                                                "files unprotected", "7 days or more is recommended"))
+    _check_writers(env, gcp, report, s, nudge)
+    _check_audit_retention(env, gcp, report, s, nudge)
+    _check_renewer(env, gcp, report, s, pol)
+
+
+def _known_runners(env: Environment) -> set[str]:
+    out = {f"serviceAccount:{(env.launcher or {}).get('service_account')}"}
+    for t in (env.tenants or {}).values():
+        for key in ("runner_service_account", "service_account", "runner"):
+            if isinstance(t, dict) and t.get(key):
+                out.add(f"serviceAccount:{t[key]}")
+    renewer = (env.launcher or {}).get("renewer_service_account")
+    if renewer:
+        out.add(f"serviceAccount:{renewer}")
+    return out
+
+
+def _check_writers(env: Environment, gcp: Gcp, report: Report, s: str, level: str) -> None:
+    """FR-102 (4): who, other than the runners, may write or delete in the artifacts bucket (least privilege
+    prevents what the checks only detect)."""
+    found = {}
+    r = gcp.get(f"{GCS}/b/{env.artifacts_bucket}/iam", optionsRequestedPolicyVersion=3)
+    p = gcp.post(f"https://cloudresourcemanager.googleapis.com/v1/projects/{env.project}:getIamPolicy",
+                 {"options": {"requestedPolicyVersion": 3}})
+    if not r.ok and not p.ok:
+        report.add(s, Result(INFO, "artifacts bucket writers", "cannot read the IAM policies (needs "
+                                                               "storage.buckets.getIamPolicy and "
+                                                               "resourcemanager.projects.getIamPolicy)"))
+        return
+    for policy, where in ((r.body if r.ok else {}, "bucket"), (p.body if p.ok else {}, "project")):
+        for b in (policy or {}).get("bindings") or []:
+            if b.get("role") in WRITER_ROLES:
+                for m in b.get("members") or []:
+                    if m.startswith(("projectOwner:", "projectEditor:", "projectViewer:")):
+                        continue
+                    found.setdefault(m, set()).add(f"{b['role'].split('/')[-1]} ({where})")
+    others = {m: roles for m, roles in found.items() if m not in _known_runners(env)
+              and "@gcp-sa-" not in m and "cloudservices.gserviceaccount.com" not in m}
+    if others:
+        listed = "; ".join(f"{m.split(':', 1)[-1]}: {', '.join(sorted(r))}" for m, r in sorted(others.items())[:10])
+        report.add(s, Result(level, "artifacts bucket writers", f"{len(others)} other than the runners: {listed}",
+                             "remove what is not needed: an identity that can write approved folders can replace "
+                             "a model (the checks detect it; least privilege prevents it)"))
+    else:
+        report.add(s, Result(OK, "artifacts bucket writers", "only the runners and the launcher"))
+
+
+def _check_audit_retention(env: Environment, gcp: Gcp, report: Report, s: str, level: str) -> None:
+    """FR-102 (1) and (2): audit entries kept as long as the models serve; who wrote a file."""
+    obs = env.observability or {}
+    bucket = obs.get("audit_log_bucket")
+    if not bucket:
+        report.add(s, Result(level, "audit retention", "Admin Activity is kept 400 days: older approvals are not "
+                                                       "cross-checked", "route it to a locked log bucket "
+                                                                        "(observability.audit_log_bucket)"))
+    else:
+        r = gcp.get(f"https://logging.googleapis.com/v2/{bucket}")
+        if r.ok:
+            b = r.body or {}
+            locked = b.get("locked")
+            report.add(s, Result(OK if locked else WARN, "audit retention",
+                                 f"{bucket.rsplit('/', 1)[-1]}: {b.get('retentionDays')} days, "
+                                 + ("locked" if locked else "NOT locked: its retention can be shortened")))
+        else:
+            report.add(s, Result(WARN, "audit retention", f"{bucket}: cannot be read (HTTP {r.status})"))
+    p = gcp.post(f"https://cloudresourcemanager.googleapis.com/v1/projects/{env.project}:getIamPolicy",
+                 {"options": {"requestedPolicyVersion": 3}})
+    if p.ok:
+        logs = [c for c in (p.body or {}).get("auditConfigs") or []
+                if c.get("service") in ("storage.googleapis.com", "allServices")]
+        on = any(lc.get("logType") == "DATA_WRITE" for c in logs for lc in c.get("auditLogConfigs") or [])
+        report.add(s, Result(OK if on else level, "who wrote a file", "Cloud Storage DATA_WRITE audit logs are "
+                             + ("on" if on else "off: lineage cannot name who changed an approved file"),
+                             "" if on else "turn them on (Terraform: data_write_logs), with the exclusion that keeps "
+                                           "only the model folders"))
+
+
+def _check_renewer(env: Environment, gcp: Gcp, report: Report, s: str, pol: dict) -> None:
+    """Section 8.18: the renewer is a separate identity, only Terraform may act as it, and its detective controls exist
+    before its schedule runs."""
+    if pol["lock"]["days"] <= 0 or not pol["lock"]["renew"]:
+        return
+    launcher = env.launcher or {}
+    job, sa = launcher.get("renewer_job"), launcher.get("renewer_service_account")
+    if not job or not sa:
+        report.add(s, Result(WARN, "lock renewal", "lock.renew is on but no renewer is deployed: protection ends "
+                                                   "lock.days after each approval", "deploy the renewer job (Terraform)"))
+        return
+    r = gcp.get(f"https://run.googleapis.com/v2/{job}")
+    report.add(s, Result(OK if r.ok else FAIL, "renewer job", job.rsplit("/", 1)[-1] if r.ok else
+                         f"{job}: HTTP {r.status}"))
+    if not pol["watch"]:
+        report.add(s, Result(FAIL, "renewer gate", "the watch is off, so nobody checks the renewer's work (the "
+                                                   "cross-identity check)", "set policies.integrity.watch: on"))
+    iam = gcp.post(f"https://iam.googleapis.com/v1/projects/{env.project}/serviceAccounts/{sa}:getIamPolicy", {})
+    if iam.ok:
+        actors = sorted({m for b in (iam.body or {}).get("bindings") or []
+                         if b.get("role") in ("roles/iam.serviceAccountUser", "roles/iam.serviceAccountTokenCreator")
+                         for m in b.get("members") or []})
+        forbidden = [m for m in actors if m in _known_runners(env) and not m.endswith(sa)]
+        report.add(s, Result(FAIL if forbidden else INFO, "who can act as the renewer",
+                             ", ".join(a.split(":", 1)[-1] for a in actors) or "only project owners",
+                             "the launcher and the runners must not act as the renewer (they could release holds)"
+                             if forbidden else ""))
+
+
 # ------------------------------------------------------------- use case --
 
 def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, compile_check: bool = True,
@@ -823,6 +972,7 @@ def run(env: Environment, usecases: list[ResolvedUseCase], gcp: Gcp | None = Non
     gcp = gcp or Gcp()
     report = Report()
     check_environment(env, gcp, report)
+    check_integrity(env, gcp, report)
     for uc in usecases:
         check_usecase(uc, env, gcp, report, compile_check, as_agent=as_agent)
     return report
