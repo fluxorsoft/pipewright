@@ -175,7 +175,9 @@ def check(gcp, env, models: dict | None = None, usecases: set | None = None) -> 
             continue
         missing = [p for p in c.problems if "no model.approved event" in p]
         if missing:
-            u.status, u.problems = UNAPPROVED, missing
+            u.status, u.problems = UNAPPROVED, missing if u.kind == "default" else [
+                f"v{u.version} serves on {u.where.split(':', 1)[-1]} with no model.approved event: deployed outside "
+                "Pipewright (the console, gcloud or the API), so nobody approved it"]
         elif c.problems:
             u.status, u.problems = CHANGED, c.problems
         if u.status != UNCHANGED:
