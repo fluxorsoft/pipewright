@@ -383,3 +383,14 @@ def test_a_snapshot_that_fails_keeps_the_rest_of_the_record(monkeypatch):
                                  run_id="r1")["record"]["feature_reads"]
     item = rec["sources"][0]["base_tables"][0]
     assert item["table"] == "p-test.feat.tx" and "deleteSnapshot" in item["snapshot_error"]
+
+
+def test_a_changed_schema_against_an_approval_names_the_columns():
+    """Found live: against an approval the message said only 'its schema changed'."""
+    gcp = FakeGcp({"p-test.feat.spend": view()})
+    sec = d.build(gcp, FROM, "p-test", "r", None, None)["section"]
+    rec = d.approval_record(sec, d.check(gcp, sec["sources"], FROM, "p-test", "r")[2])
+    renamed = [SCHEMA[0], {**SCHEMA[1], "name": "avg_spend"}, SCHEMA[2]]
+    gcp.tables["p-test.feat.spend"] = view(schema=renamed)
+    problems = d.check(gcp, rec["sources"], None, "p-test", "r")[0]
+    assert "column avg_spend_90d removed; column avg_spend added" in problems[0]

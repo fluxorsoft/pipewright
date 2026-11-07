@@ -333,7 +333,8 @@ def check(gcp, expected: list[dict], features_from: dict | None, project: str, r
         for e in expected:
             try:
                 obj = read(gcp, e["object"])
-                now.append({"name": e["name"], **fingerprint(obj), "location": obj.get("location")})
+                now.append({"name": e["name"], **fingerprint(obj), "schema": obj["schema"],
+                            "location": obj.get("location")})
             except ConfigError as err:
                 now.append({"name": e["name"], "error": str(err)})
     else:
@@ -370,6 +371,8 @@ def approval_record(section: dict, now: list[dict]) -> dict:
         cur = by.get(s["name"], {})
         sources.append({"name": s["name"], "object": cur.get("object"), "kind": s.get("kind"),
                         "sql_sha256": s.get("sql_sha256"), "schema_sha256": s.get("schema_sha256"),
+                        # the columns, so a later check names what changed (found live: only "its schema changed")
+                        **({"schema": s["schema"]} if s.get("schema") else {}),
                         **({"scheduled_query": s["scheduled_query"]} if s.get("scheduled_query") else {})})
     return {"contract_version": section.get("version"), "contract_sha256": contract_digest(section),
             "sources": sources}
