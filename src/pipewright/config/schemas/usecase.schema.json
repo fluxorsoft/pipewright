@@ -236,6 +236,7 @@
     "principal": { "type": "string", "pattern": "^(group|user|serviceAccount):.+$" },
     "approval_mode": { "enum": ["manual", "auto"] },
     "pipeline_name": { "enum": ["training", "inference", "synthetic"], "description": "synthetic: the pipeline Pipewright provides when synthetic.enabled" },
+    "schedule_pipeline_name": { "enum": ["training", "inference", "synthetic", "online_sync"], "description": "synthetic: the pipeline Pipewright provides when synthetic.enabled; online_sync (FR-104): the launcher runs the tenant's sync job, which refreshes the use case's online store (model.serving.online_store bigquery or cloudsql)" },
     "pipeline_ref": {
       "type": "object",
       "additionalProperties": false,
@@ -279,7 +280,7 @@
               "cron": { "type": "string", "minLength": 1 },
               "timezone": { "type": "string", "minLength": 1 },
               "source_uri": { "type": "string", "minLength": 1 },
-              "pipeline": { "$ref": "#/$defs/pipeline_name" }
+              "pipeline": { "$ref": "#/$defs/schedule_pipeline_name" }
             }
           }
         },
