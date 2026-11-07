@@ -113,7 +113,7 @@ def service_spec(contract, manifest: dict, online: dict, ca: str | None) -> dict
         template["vpcAccess"] = {"networkInterfaces": [{"network": lk["network"],
                                                         **({"subnetwork": lk["subnetwork"]}
                                                            if lk.get("subnetwork") else {})}],
-                                 "egress": "PRIVATE_RANGES_ONLY"}
+                                 "egress": lk.get("egress", "PRIVATE_RANGES_ONLY")}
     return {"ingress": lk.get("ingress", "INGRESS_TRAFFIC_INTERNAL_ONLY"),
             "scaling": {"minInstanceCount": size.get("min_instances", 0)},     # service level (Google's advice)
             "labels": {"pipewright-usecase": contract.usecase[:63], "pipewright-tenant": contract.tenant[:63]},

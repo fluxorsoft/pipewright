@@ -1046,6 +1046,10 @@
                 "ingress": {
                   "enum": ["INGRESS_TRAFFIC_INTERNAL_ONLY", "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER", "INGRESS_TRAFFIC_ALL"]
                 },
+                "egress": {
+                  "enum": ["PRIVATE_RANGES_ONLY", "ALL_TRAFFIC"],
+                  "description": "the lookup services' VPC egress (default PRIVATE_RANGES_ONLY); ALL_TRAFFIC where an organization policy requires it (run.allowedVPCEgress)"
+                },
                 "network": {
                   "type": "string"
                 },
