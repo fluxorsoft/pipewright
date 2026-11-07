@@ -756,6 +756,42 @@ def gcs_read_versioned(gcp, bucket: str, name: str, generation) -> tuple[bytes |
     return (r.content, int(generation)) if r.status_code == 200 else (None, 0)
 
 
+def contract_check(gcp, env: Environment, usecase: str, release: str, text: str) -> Check:
+    """Pipewright 1.4.1 (FR-101 item 7): a release contract against the SHA-256 its release.live event recorded
+    (1.4.0 records it). A release with no such event (before 1.4.0) passes with a note."""
+    from pipewright.gcp.bigquery import query, rows
+
+    check = Check()
+    dataset = (env.observability or {}).get("evidence_dataset")
+    if not dataset:
+        check.notes.append("this environment keeps no event log: the contract's fingerprint cannot be compared")
+        return check
+
+    def p(name, value):
+        return {"name": name, "parameterType": {"type": "STRING"}, "parameterValue": {"value": value}}
+
+    sql = (f"SELECT JSON_VALUE(data, '$.data.contract_sha256') AS sha FROM `{env.project}.{dataset}.events` "
+           "WHERE JSON_VALUE(data, '$.event_type') = 'release.live' AND JSON_VALUE(data, '$.usecase') = @uc "
+           "AND JSON_VALUE(data, '$.environment') = @env AND JSON_VALUE(data, '$.release') = @release "
+           "ORDER BY publish_time DESC LIMIT 5")
+    try:
+        found = [r["sha"] for r in rows(query(gcp, env.project, sql, [p("uc", usecase), p("env", env.name),
+                                                                       p("release", release)],
+                                              kms_key=(env.security or {}).get("bigquery_kms_key"))) if r.get("sha")]
+    except Exception as e:  # noqa: BLE001 - an unreadable log means the contract cannot be shown to be the one
+        check.problems.append(f"the event log cannot be read, so release {release}'s contract cannot be checked: "
+                              f"{str(e).splitlines()[0][:160]}")
+        return check
+    if not found:
+        check.notes.append(f"release {release} went live before Pipewright 1.4.0: no contract fingerprint recorded")
+        return check
+    now = contract_sha256(text)
+    if now not in found:
+        check.problems.append(f"release {release}'s contract has sha256 {now[:16]}, not the {found[0][:16]} it went "
+                              "live with")
+    return check
+
+
 def contract_sha256(text: str) -> str:
     import hashlib
 

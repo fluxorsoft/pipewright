@@ -265,9 +265,21 @@ def rollback(usecase: str, env: Environment, gcp: Gcp | None = None, to: str | N
         known = ", ".join(h["release_id"] for h in pointer.history)
         raise ConfigError(f"release {to!r} not in the history of {usecase} (known: {known})")
 
-    contract = read_contract(gcp, env, target["contract"])
+    text, written = gcs_read(gcp, env.artifacts_bucket, target["contract"])
+    if text is None:
+        raise ConfigError(f"contract not found: gs://{env.artifacts_bucket}/{target['contract']}")
+    contract = ReleaseContract.from_json(text)
     contract.validate()
     verify(contract, gcp, gcp.session.credentials)
+    from pipewright.models import integrity
+
+    # 1.4.1 (FR-101 item 7): the old release's contract is still the one fingerprinted when it went live, and it is
+    # locked again before the pointer moves back to it (lock on activation).
+    check = integrity.contract_check(gcp, env, usecase, target["release_id"], text)
+    integrity.enforce(check, env, f"{usecase} is not rolled back to {target['release_id']}", log,
+                      reason="its release contract is not the one that went live",
+                      remedy="release again from the commit you want, rather than rolling back")
+    integrity.lock_contract(gcp, env, env.artifacts_bucket, target["contract"], written, log)
 
     from pipewright.observability.events import approval
 

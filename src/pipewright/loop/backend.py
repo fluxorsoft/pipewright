@@ -231,6 +231,23 @@ class GcpBackend:
         if previous:
             self.approve(self.production.name, previous)
 
+    def verify_restored(self, env: str, version: str) -> None:
+        """Pipewright 1.4.1 (FR-101 item 7): the version a rollback makes the default again is still the one approved
+        (its evaluation record, files and serving image), checked like a deploy before anything moves."""
+        from pipewright.models import integrity
+
+        e, uc = self.envs[env], self.ucs[env]
+        api = f"https://{e.region}-aiplatform.googleapis.com/v1/projects/{e.project}/locations/{e.region}/models"
+        found = self.gcp.get(api, filter=f'display_name="{uc.model["name"]}"')
+        models = (found.body or {}).get("models", []) if found.ok else []
+        if not models:
+            raise ConfigError(f"no model {uc.model['name']!r} in {env}")
+        body = self.gcp.get(f"https://{e.region}-aiplatform.googleapis.com/v1/{models[0]['name'].split('@')[0]}"
+                            f"@{version}").body or {}
+        check = integrity.verify(self.gcp, e, uc.name, str(version), body.get("artifactUri"),
+                                 (body.get("containerSpec") or {}).get("imageUri"), model=body.get("name"))
+        integrity.enforce(check, e, f"v{version} is not made the default again", log=lambda *_: None)
+
     def approve(self, env: str, version: str) -> None:
         from pipewright.models import registry
 

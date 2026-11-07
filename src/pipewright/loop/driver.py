@@ -133,6 +133,9 @@ class Loop:
         previous = (loop.get("promotion") or {}).get("previous_version")
         if loop.get("state") not in ("closed", "verification-failed", "verifying") or not previous:
             raise ConfigError(f"case {self.case_id}: nothing to roll back (state {loop.get('state')})")
+        verify = getattr(self.backend, "verify_restored", None)
+        if verify is not None:          # 1.4.1 (FR-101 item 7): the way back is checked like the way forward
+            verify(self.production, previous)
         self.backend.approve(self.production, previous)
         return self._step("rolled-back", rolled_back_to=previous, reason=reason,
                           _note=f"production default is v{previous} again: {reason}")

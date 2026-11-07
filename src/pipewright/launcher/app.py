@@ -263,7 +263,63 @@ def create_app(registry: Registry | None = None) -> Flask:
         results = decisions().tick(reg().live(), digest=digest)
         m = reg().manifest
         ray = rays().reap(m["project"], m["region"]) if m.get("project") and m.get("region") else []
-        return jsonify(results=results, ray=ray, failed=failed_runs()), 200
+        try:
+            watched = integrity_watch(force=False)
+        except Exception as e:  # noqa: BLE001 - the watch must not stop the tick; its heartbeat goes missing instead
+            log.exception("integrity watch failed")
+            watched = {"status": "error", "reason": str(e)[:300]}
+        return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched), 200
+
+    @app.post("/integrity/tick")
+    def integrity_tick():
+        """The watch now, whatever its interval (Pipewright 1.4.1): for operators and tests."""
+        return jsonify(integrity_watch(force=True)), 200
+
+    def integrity_watch(force: bool) -> dict:
+        """Pipewright 1.4.1 (FR-101 items 4 and 5): with policies.integrity.watch on, every default and serving
+        version re-checked against its approval; model.integrity when a result changes, and a model.integrity.check
+        heartbeat every run (its absence alerts: a broken watch must not look like "unchanged")."""
+        from datetime import datetime, timezone
+
+        from pipewright.config.environment import environment_from_dict
+        from pipewright.gcp import PreconditionFailed, gcs_read, gcs_write
+        from pipewright.models import approvals, integrity
+        from pipewright.models import watch as iwatch
+        from pipewright.observability import events
+
+        m = reg().manifest
+        if not m.get("artifacts_bucket") or not m.get("environment"):
+            return {"status": "skipped", "reason": "no environment in the manifest"}
+        env = environment_from_dict(m)
+        pol = integrity.policy(env)
+        if not pol["watch"] and not force:
+            return {"status": "off"}
+        gcp = getattr(reg(), "gcp", None) or Gcp()
+        bucket, name = m["artifacts_bucket"], f"runs/cache/integrity-{env.name}.json"
+        approvals.use_store(bucket, f"runs/cache/approvals-{env.name}.json")
+        text, gen = gcs_read(gcp, bucket, name)
+        state = json.loads(text) if text else {}
+        now = datetime.now(timezone.utc)
+        last = state.get("last_run")
+        due_in = pol["watch_every_hours"] * 3600 - 300
+        if not force and last and (now - datetime.fromisoformat(last)).total_seconds() < due_in:
+            return {"status": "not due", "last_run": last}
+        models = {(c.metadata or {}).get("model"): c.usecase for c in reg().live()
+                  if (c.metadata or {}).get("model")}
+        result = iwatch.run(gcp, env, state, models)
+        topic = (m.get("observability") or {}).get("events_topic")
+        for change in result["changes"]:
+            events.emit(events.event("model.integrity", change["usecase"], env.name, None, None, None, **change),
+                        topic, gcp, region=env.region)
+        events.emit(events.event("model.integrity.check", None, env.name, None, None, None, **result["heartbeat"],
+                                 every_hours=pol["watch_every_hours"]), topic, gcp, region=env.region)
+        state["last_run"] = now.isoformat()
+        try:
+            gcs_write(gcp, bucket, name, json.dumps(state), if_generation_match=gen)
+        except PreconditionFailed:
+            log.info("integrity watch: another run wrote the state first")
+        log.info("integrity watch: %s", result["heartbeat"])
+        return {"status": "checked", **result["heartbeat"], "changes": result["changes"]}
 
     def failed_runs() -> list:
         """run.failed for each failed run since the last look (Pipewright 1.2.0, FR-67)."""

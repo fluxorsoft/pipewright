@@ -88,6 +88,11 @@ def load_manifest(ref: str, base_dir: Path) -> tuple[dict, str, list[str]]:
 def environment_from_manifest(ref: str, base_dir: Path = Path(".")) -> Environment:
     """An Environment from the manifest alone (platform services with no MLOps repo: launcher, evidence worker)."""
     manifest, source, ignored = load_manifest(ref, base_dir)
+    return environment_from_dict(manifest, source, ignored)
+
+
+def environment_from_dict(manifest: dict, source: str = "manifest", ignored=()) -> Environment:
+    """An Environment from a manifest already read (the launcher holds its manifest as a dict)."""
     return Environment(
         name=manifest["environment"], project=manifest["project"], region=manifest["region"],
         artifact_registry=manifest["artifact_registry"], artifacts_bucket=manifest["artifacts_bucket"],
