@@ -17,6 +17,7 @@ for callers in the cluster) or internal_lb (also an internal load balancer, for 
 
 from __future__ import annotations
 
+import json
 import time
 
 from pipewright.config import Environment, ResolvedUseCase
@@ -57,6 +58,16 @@ def serving_image(image: str, env: Environment, mirror: str | None) -> str:
     if (own and image.startswith(own)) or not mirror:
         return image
     return f"{mirror.rstrip('/')}/{image}"
+
+
+def _pinned_files(isvc: dict | None) -> list | None:
+    """The files (generation, SHA-256) a running InferenceService's pods check, or None when it is not pinned."""
+    pred = ((isvc or {}).get("spec") or {}).get("predictor") or {}
+    for c in pred.get("initContainers") or []:
+        for e in c.get("env") or []:
+            if e.get("name") == "PIPEWRIGHT_APPROVED_FILES":
+                return json.loads(e["value"]).get("files")
+    return None
 
 
 def mirrored_from(image: str | None, mirror: str | None) -> str | None:
@@ -358,10 +369,15 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     current_pin = ((current or {}).get("metadata", {}).get("annotations") or {}).get("pipewright.dev/approved-copy")
     if pinned:
         body["metadata"]["annotations"]["pipewright.dev/approved-copy"] = pinned["folder"]
-    if running == _label(vid) and current_pin == (pinned or {}).get("folder"):
+    same_files = _pinned_files(current) == ((pinned or {}).get("files") or None)
+    if running == _label(vid) and current_pin == (pinned or {}).get("folder") and same_files:
         log(f"v{vid} of {uc.model['name']} is already live on {k.name}")
         log(k.how_to_call() or "")
         return {"version": vid, "status": "live"}
+    if running == _label(vid) and current_pin == (pinned or {}).get("folder") and not same_files:
+        # Found live in 1.4.1: a changed copy was rewritten above, but the pods' check still named the old generations.
+        log("integrity: the serving copy was rewritten from the approved generations (it had changed): the pods' "
+            "check is updated (a rolling update)")
     log(f"{k.apply(body)} InferenceService {k.name}; waiting for it to be ready (pulls the image, loads the model)")
     k.wait_ready(vid, log=log)
     port = body["spec"]["predictor"]["containers"][0]["ports"][0]["containerPort"]

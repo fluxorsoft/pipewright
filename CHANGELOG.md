@@ -61,7 +61,9 @@ manifest and Terraform when you want them; `doctor` lists what is off.
   wins over the cluster's DNS endpoint (an environment with no internet egress cannot reach it: the launcher's watch
   hung until Cloud Run's request timeout); a watch run claims the run before checking, so an overlapping run (a tick
   cut off by the request timeout and the scheduler's retry) records nothing twice; a KServe namespace the watch or the
-  renewer cannot read counts as `cannot_check` (exit 2) and makes the renewal degraded, instead of a note.
+  renewer cannot read counts as `cannot_check` (exit 2) and makes the renewal degraded, instead of a note;
+  `deploy-model` on KServe updates the pods' check when it rewrote a changed copy (it said "already live", and no new
+  pod could start).
 
 ## [1.4.0] - 2026-11-06
 

@@ -200,7 +200,9 @@ alerts in place, and ships paused (`renewer_schedule`) until you have tested the
    with DATA_WRITE logs, who wrote it.
 4. **Restore.** `pipewright model restore-files --env <env> --usecase <uc> --version <N>` (dry run first, then
    `--confirm`) writes the approved generations back as the live files, checks each SHA-256 and records
-   `model.restored` with your name. The watch then reports `restored`.
+   `model.restored` with your name. The watch then reports `restored`. A changed KServe copy (the pods load it, so
+   new pods refuse to start while the running ones keep serving): `pipewright deploy-model` rewrites it from the
+   approved generations and updates the pods' check, a rolling update.
 5. **Override, time-boxed.** If production must keep going first, set `mode: warn` with `until` (a date) and `reason`:
    it is recorded as `policy.override`, alerted while it lasts, and goes back to `refuse` on its own after `until`.
 

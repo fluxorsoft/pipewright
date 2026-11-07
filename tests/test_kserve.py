@@ -261,3 +261,27 @@ def test_inside_the_vpc_the_platforms_address_wins_over_the_dns_endpoint(monkeyp
     assert kube.KubeClient.from_manifest(m, None).endpoint == "https://172.16.0.34"
     monkeypatch.setenv("PIPEWRIGHT_KUBERNETES_ENDPOINT", "https://172.16.0.34")
     assert kube.KubeClient.from_manifest(m, None, dns=True).endpoint == "https://172.16.0.34"
+
+
+def test_a_rewritten_serving_copy_updates_the_pods_check(repo, fake, monkeypatch):
+    """Found live in 1.4.1: after a copy file changed, deploy-model rewrote it from the approved generation but said
+    'already live', so the pods' check still named the old generation and no new pod could start."""
+    from pipewright.models import integrity, protection
+
+    uc, env = serving_env(repo)
+    approved = {"version": "4", "folder": "gs://art/pr/m", "files": [{"file": "model.pt", "generation": "7",
+                                                                       "sha256": "a" * 64}]}
+    monkeypatch.setattr(integrity, "verify", lambda *a, **k: integrity.Check(approval={"version": "4"}))
+    monkeypatch.setattr(integrity, "approved_files", lambda approval: approved if approval else None)
+    monkeypatch.setattr(protection, "protect_now", lambda *a, **k: [])
+    gens = iter(["11", "11", "12"])
+    monkeypatch.setattr(integrity, "pin_copy", lambda gcp, a, log=print: {
+        "folder": "gs://art/pr/m-approved-v4-abcd", "files": [{"file": "model.pt", "generation": next(gens),
+                                                               "sha256": "a" * 64}]})
+    gcp = SimpleNamespace(identity=lambda: "ci@p")
+    assert kserve.deploy(uc, env, gcp, log=lambda *_: None)["status"] == "deployed"
+    assert kserve.deploy(uc, env, gcp, log=lambda *_: None)["status"] == "live"
+    said = []
+    assert kserve.deploy(uc, env, gcp, log=said.append)["status"] == "deployed"
+    assert kserve._pinned_files(fake.isvc)[0]["generation"] == "12"
+    assert any("the pods' check is updated" in line for line in said)
