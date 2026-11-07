@@ -454,6 +454,22 @@ def cmd_features_sync(args, load: bool = True) -> int:
     return 0
 
 
+def cmd_features_online_setup(args) -> int:
+    """FR-104: the Cloud SQL online store's one-time setup, as the platform's admin identity."""
+    from pipewright.config.environment import environment_from_manifest
+    from pipewright.gcp import Gcp
+    from pipewright.online import setup, sync
+
+    env = environment_from_manifest(args.manifest)
+    gcp = Gcp()
+    store = ((env.features or {}).get("online_store") or {}).get("cloudsql") or {}
+
+    def connect_admin(database):
+        return sync.connector(env, gcp, {"instance": store.get("instance", "::"), "database": database})()
+    setup.run(env, gcp, connect_admin, dry_run=args.dry_run)
+    return 0
+
+
 def cmd_features_export(args) -> int:
     return cmd_features_sync(args, load=False)
 
@@ -1346,6 +1362,11 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--usecase", required=True)
         sp.add_argument("--json", action="store_true")
         sp.set_defaults(func=func)
+    sp = fsub.add_parser("online-setup", help="the Cloud SQL online store's one-time setup: the database and each "
+                                              "tenant's grants, as the platform's admin identity (FR-104)")
+    sp.add_argument("--manifest", required=True)
+    sp.add_argument("--dry-run", action="store_true", help="print the statements; run nothing")
+    sp.set_defaults(func=cmd_features_online_setup)
 
     sp = sub.add_parser("report", help="read-only reports from the records Pipewright keeps")
     rsub = sp.add_subparsers(dest="report_command", required=True)
