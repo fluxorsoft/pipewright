@@ -142,6 +142,12 @@ What Pipewright sets up and keeps safe:
 - **Cold starts.** `min_instances: 1` keeps one instance warm (about $14 a month at 1 vCPU, 512Mi); Google may still
   restart it, so `2` keeps a spare (about $28). `cpu_boost` shortens the starts that remain. In our test the tail grew
   only while new instances started.
+- **Where endpoints can reach it.** Agent Platform's public endpoints call from Google's network, outside yours. The
+  starter lets them in (ingress all, still IAM-only: the endpoint's identity is the one caller). Enterprise's
+  guardrails allow Cloud Run internal ingress only, so there Agent Platform endpoints cannot reach Cloud SQL until
+  private endpoints over Private Service Connect (FR-92); until then choose BigQuery with BI Engine for Agent Platform
+  endpoints in Enterprise, or put your own service in front of Cloud SQL inside the network (`lookup.provider: own`).
+  Inside the network the lookup service answered 50 of 50 calls at a p50 of 39 ms in our test.
 - **Sizing.** `pool_size x max_instances` must fit the database's connection limit (100 on the default tier), shared
   with other use cases and the sync.
 
