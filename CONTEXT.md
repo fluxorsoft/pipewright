@@ -1690,6 +1690,21 @@ pool 8) with Direct VPC egress and internal ingress.
   `doctor` and the docs state the refresh window, its cost at the use case's traffic, and that BI Engine suits low
   traffic with infrequent refreshes.
 
+**Where the Parquet export lives (user, 2026-11-07):** by default in the environment's artifacts bucket, under the
+tenant's own prefix, one folder per sync generation:
+`gs://<artifacts_bucket>/online-export/<tenant>/<usecase>/<generation>/part-*.parquet` with `manifest.json` beside the
+files. The use case YAML can set another place, `model.serving.online_store.export.uri: gs://<bucket>/<prefix>`, for
+example a bucket the team's own store loads from. The rules:
+
+- The location must be one the tenant's runner may write (`validate` refuses another tenant's prefix in the artifacts
+  bucket; `doctor` checks the runner can write there). The bucket's encryption stays the platform's (CMEK where the
+  manifest sets it).
+- `export.keep` (default `3`) generations are kept; older ones are deleted by the sync after a successful swap, so the
+  last good generation is always there to reload or to compare. Manifests are never rewritten: each generation is new.
+- `export.readers`: service accounts of the tenant given read on that prefix (for `lookup.provider: own` or a team's
+  own store). Nothing else gains access.
+- Messages and the manifest name files, generations, digests and counts, never a value.
+
 **Serving patterns and scope (user, 2026-11-07):** Pipewright ships one implementation between the serving endpoint
 and Cloud SQL, the Cloud Run lookup service, and it is tested end to end during this build in a secure setup: private
 IP, VPC, and Private Service Connect for Agent Platform endpoints (with FR-92). The docs also describe the other
