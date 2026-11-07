@@ -142,11 +142,55 @@ def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, slee
     invoker = f"serviceAccount:{contract.runner_service_account}"
     pol = gcp.post(f"{base}/{name}:getIamPolicy", {})
     policy = pol.body if pol.ok else {}
-    bindings = [b for b in policy.get("bindings", []) if b.get("role") != "roles/run.invoker"]
-    bindings.append({"role": "roles/run.invoker", "members": [invoker]})
+    mine = ("roles/run.invoker", "roles/run.viewer")      # call it, and read its URL (the lookup client)
+    bindings = [b for b in policy.get("bindings", []) if b.get("role") not in mine]
+    bindings += [{"role": role, "members": [invoker]} for role in mine]
     set_ = gcp.post(f"{base}/{name}:setIamPolicy", {"policy": {**policy, "bindings": bindings}})
     if not set_.ok:
         raise ConfigError(f"the lookup service {name}: the endpoint's identity could not be allowed to call it "
                           f"(HTTP {set_.status})")
     return {"usecase": contract.usecase, "service": name, "status": action, "url": svc.get("uri"),
             "min_instances": spec["scaling"]["minInstanceCount"], "invoker": contract.runner_service_account}
+
+
+def request_from_cli(uc, env, log=print, gcp=None, wait: float = 900, sleep=time.sleep) -> dict | None:
+    """deploy-model's part: before a model with Pipewright's Cloud SQL lookup is deployed, the launcher creates or
+    updates its lookup service from the live release. Directly, or over the run requests topic in a private
+    environment (then deploy-model waits until the service is ready)."""
+    online = (getattr(uc, "ml", None) or {}).get("online_features") or {}
+    if online.get("type") != "cloudsql" or online.get("provider", "pipewright") != "pipewright":
+        return None
+    from pipewright.runs import launch
+
+    payload = {"usecase": uc.name, "kind": "online.lookup_service"}
+    release = launch.live_release(env, uc.name, gcp)
+    if release:
+        payload["release"] = release
+    topic = (env.launcher or {}).get("run_requests_topic")
+    import os
+
+    if not topic or os.environ.get("PIPEWRIGHT_RUN_VIA", "").lower() == "http":
+        out = launch.call(env, {k: v for k, v in payload.items() if k != "kind"}, path="/online/lookup-service")
+        log(f"lookup service {out.get('service')} {out.get('status')}: {out.get('url')}")
+        return out
+    launch.request(env, topic, payload, gcp)
+    from pipewright.gcp import Gcp
+
+    gcp = gcp or Gcp()
+    url = f"{RUN}/projects/{env.project}/locations/{env.region}/services/{online['service']}"
+    log(f"lookup service {online['service']}: requested from the launcher; waiting until it is ready")
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        r = gcp.get(url)
+        if r.status == 403:
+            log("cannot read the lookup service to wait for it (run.services.get); deploying anyway")
+            return {"service": online["service"], "status": "requested"}
+        body = r.body if r.ok else {}
+        if body.get("reconciling") is False and (body.get("terminalCondition") or {}).get("state") == \
+                "CONDITION_SUCCEEDED" and release and (body.get("labels") or {}).get("pipewright-release") in (
+                None, release.lower()[:63]) and body.get("uri"):
+            log(f"lookup service {online['service']} ready: {body['uri']}")
+            return {"service": online["service"], "status": "ready", "url": body["uri"]}
+        sleep(10)
+    raise ConfigError(f"the lookup service {online['service']} was not ready in {int(wait)} s: see the launcher's "
+                      "logs")

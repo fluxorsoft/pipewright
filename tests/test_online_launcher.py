@@ -96,10 +96,39 @@ def test_ensure_creates_waits_and_lets_the_endpoint_call_it():
     create = next(c for c in gcp.calls if c[0] == "POST" and c[1].endswith("/services"))
     assert create[3] == {"serviceId": "pwl-churn-churn-x"}
     policy = next(c for c in gcp.calls if c[1].endswith(":setIamPolicy"))[2]["policy"]
-    assert policy["bindings"] == [{"role": "roles/run.invoker",
-                                   "members": ["serviceAccount:runner-churn@acme-ml-dev.iam.gserviceaccount.com"]}]
+    runner = ["serviceAccount:runner-churn@acme-ml-dev.iam.gserviceaccount.com"]
+    assert policy["bindings"] == [{"role": "roles/run.invoker", "members": runner},
+                                  {"role": "roles/run.viewer", "members": runner}]
 
 
 def test_ensure_refuses_a_release_without_pipewrights_lookup():
     with pytest.raises(ConfigError, match="has no Pipewright lookup service"):
         ol.ensure_lookup_service(contract({**ONLINE, "provider": "own"}), MANIFEST, Gcp({}))
+
+
+def test_deploy_model_asks_the_launcher_directly_or_over_the_topic(monkeypatch):
+    from pipewright.runs import launch
+
+    uc = SimpleNamespace(name="churn-x", ml={"online_features": ONLINE})
+    env = SimpleNamespace(name="dev", project="acme-ml-dev", region="europe-west2", launcher={"url": "https://l"})
+    calls = []
+    monkeypatch.setattr(launch, "live_release", lambda env, name, gcp=None: "R1")
+    monkeypatch.setattr(launch, "call", lambda env, payload, path="/run": calls.append((path, payload)) or {
+        "service": "pwl-churn-churn-x", "status": "created", "url": "https://u"})
+    assert ol.request_from_cli(uc, env, log=lambda m: None)["status"] == "created"
+    assert calls == [("/online/lookup-service", {"usecase": "churn-x", "release": "R1"})]
+
+    published = []
+    monkeypatch.setattr(launch, "request", lambda env, topic, payload, gcp=None: published.append(payload))
+    env.launcher = {"url": "https://l", "run_requests_topic": "projects/p/topics/runs"}
+    ready = Gcp({("GET", "/services/pwl-churn-churn-x"): (200, {
+        "reconciling": False, "terminalCondition": {"state": "CONDITION_SUCCEEDED"}, "uri": "https://u",
+        "labels": {"pipewright-release": "r1"}})})
+    out = ol.request_from_cli(uc, env, log=lambda m: None, gcp=ready, sleep=lambda s: None)
+    assert published[0]["kind"] == "online.lookup_service" and out == {
+        "service": "pwl-churn-churn-x", "status": "ready", "url": "https://u"}
+
+
+def test_deploy_model_does_nothing_for_other_stores():
+    uc = SimpleNamespace(name="x", ml={"online_features": {"type": "bigquery"}})
+    assert ol.request_from_cli(uc, SimpleNamespace(), log=lambda m: None) is None

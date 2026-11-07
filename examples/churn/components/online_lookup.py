@@ -149,6 +149,30 @@ def _http(online, ids):
     return out
 
 
+def service_url(online):
+    """The URL of Pipewright's lookup service, read once from the Cloud Run Admin API (the launcher lets the endpoint's
+    identity read and call that one service). A model's configuration is fixed when it is uploaded, the service's
+    URL only when the launcher creates it."""
+    key = "url:" + online["service"]
+    with _lock:
+        if key in _cache:
+            return _cache[key]
+    url = "https://run.googleapis.com/v2/projects/{}/locations/{}/services/{}".format(
+        online["project"], online["region"], online["service"])
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + access_token()})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as r:
+            uri = json.loads(r.read()).get("uri")
+    except urllib.error.HTTPError as e:
+        raise ValueError("the lookup service {} cannot be read (HTTP {}): has deploy-model created it?".format(
+            online["service"], e.code)) from None
+    if not uri:
+        raise ValueError("the lookup service {} has no URL yet".format(online["service"]))
+    with _lock:
+        _cache[key] = uri
+    return uri
+
+
 def fetch_many(online, ids):
     """{entity ID: {feature: value}} for the entities the store has."""
     kind = online.get("type", "bigtable")
@@ -157,9 +181,11 @@ def fetch_many(online, ids):
     if kind == "bigquery":
         return _bigquery(online, ids)
     if kind == "cloudsql":
-        if online.get("provider") == "own" or not online.get("url"):
+        if online.get("provider") == "own":
             raise ValueError("this model's features are in Cloud SQL with the team's own lookup "
                              "(lookup.provider own): the team's serving code reads them")
+        if not online.get("url"):
+            online = dict(online, url=service_url(online))
         return _http(online, ids)
     if kind == "http":
         return _http(online, ids)

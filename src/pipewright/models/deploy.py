@@ -201,6 +201,9 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     if p.already_deployed:
         log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return
+    from pipewright.online import launcher as online_launcher
+
+    online_launcher.request_from_cli(uc, env, log)       # FR-104: its Cloud SQL lookup service, before the model
     registered = ai.Model.list(filter=f'display_name="{p.model}"')[0]
     model = ai.Model(model_name=f"{registered.resource_name}@default")
     endpoints = ai.Endpoint.list(filter=f'display_name="{p.endpoint}"')

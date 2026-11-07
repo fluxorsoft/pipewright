@@ -119,7 +119,7 @@ def resolve(spec: dict, ml: dict, env, tenant: str, usecase: str, problems: list
             problems += sizing.lookup_problems(lookup, (store.get("lookup") or {}).get("limits"),
                                                f"{where}.lookup", share)
             out["lookup"] = {k: lookup[k] for k in sizing.LOOKUP_DEFAULTS}
-            out["service"] = service_name(tenant, usecase)
+            out.update(service=service_name(tenant, usecase), project=env.project, region=env.region)
         elif provider == "own":
             sized = [k for k in (spec.get("lookup") or {}) if k in sizing.LOOKUP_DEFAULTS]
             if sized:

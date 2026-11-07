@@ -97,3 +97,24 @@ def test_a_store_error_is_every_entitys_answer_without_ids():
     obj._batch_rows(["e1", "e2"], 5, down)
     assert obj._errors == {5: "the online store (lookup http) answered HTTP 503",
                            6: "the online store (lookup http) answered HTTP 503"}
+
+
+def test_the_lookup_service_url_is_read_once(monkeypatch):
+    import io
+
+    reads = []
+
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(lc, "access_token", lambda: "a")
+    monkeypatch.setattr(lc.urllib.request, "urlopen", lambda req, timeout=None: reads.append(req.full_url) or R(
+        b'{"uri": "https://pwl-churn-x-123.europe-west2.run.app"}'))
+    online = {"type": "cloudsql", "service": "pwl-churn-x", "project": "acme-ml-dev", "region": "europe-west2"}
+    lc._cache.pop("url:pwl-churn-x", None)
+    assert lc.service_url(online) == lc.service_url(online) == "https://pwl-churn-x-123.europe-west2.run.app"
+    assert reads == ["https://run.googleapis.com/v2/projects/acme-ml-dev/locations/europe-west2/services/pwl-churn-x"]

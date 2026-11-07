@@ -541,6 +541,15 @@ def create_app(registry: Registry | None = None) -> Flask:
             log.info("retrain decision for %s: %s", contract.usecase,
                      {k: v for k, v in result.items() if k != "training"})
             return jsonify(result), 200            # a refusal is recorded on the case: acknowledged
+        if body.get("kind") == "online.lookup_service":      # FR-104, from deploy-model in a private environment
+            contract = reg().get(body.get("usecase") or "", release=body.get("release"))
+            if contract is None:
+                return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 503
+            try:
+                return jsonify(online_launcher.ensure_lookup_service(contract, reg().manifest, Gcp(), wait=240)), 200
+            except Exception as e:  # noqa: BLE001 - a refusal never gets better: acknowledge it
+                log.exception("lookup service of %s", contract.usecase)
+                return jsonify(status="dropped", reason=str(e)[:400]), 200
         if body.get("kind") == "ray.cluster":
             # Pub/Sub does not say who published: the message carries the runner's ID token.
             try:
@@ -568,7 +577,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         if contract is None:
             return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 404
         try:
-            return jsonify(online_launcher.ensure_lookup_service(contract, reg().manifest, Gcp())), 200
+            return jsonify(online_launcher.ensure_lookup_service(contract, reg().manifest, Gcp(), wait=240)), 200
         except Exception as e:  # noqa: BLE001
             log.exception("lookup service of %s", contract.usecase)
             return jsonify(status="error", reason=str(e)[:400]), 500
