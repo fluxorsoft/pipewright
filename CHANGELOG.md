@@ -3,6 +3,60 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [1.4.1] - unreleased
+
+Phase 7: serving what was approved, and knowing when it changes (FR-101, FR-102). A live test showed that KServe and
+scoring runs load the model folder at every start, so a file swapped after approval reached them without a deploy;
+1.4.1 makes them load the approved bytes, tells people when an approved file changes, and keeps approved files
+protected while they are in use. A patch version by the maintainers' choice while adopters are few: it adds keys,
+commands and events, all additive. Pinning is on by default under `refuse` (the 1.4.0 default); everything else is
+off until set. The guide is [docs/INTEGRITY.md](docs/INTEGRITY.md), with the cost of each setting.
+
+### Upgrading
+
+Nothing to change in a use case. Rebuild a release with 1.4.1 for scoring runs to be pinned (its inference pipeline
+then declares `approved_files`); until then the launcher says the run loads the model folder. KServe services are
+pinned at their next `deploy-model`. Turn on the watch, lock renewal, DATA_WRITE logs and audit retention in the
+manifest and Terraform when you want them; `doctor` lists what is off.
+
+### Added
+
+- **Scoring loads the approved bytes** (`policies.integrity.pin`, on by default): with `inference: warn` or `refuse`
+  the launcher runs the full check of the version a scoring run uses and passes its approved files
+  (`approved_files`); the reference example's `load_model` downloads exactly those generations and checks each
+  SHA-256 (`pipewright_runtime.approved_download`).
+- **KServe serves an approved copy, checked at every pod start**: `deploy-model` copies the approved generations next
+  to the model folder, locks them, and every predictor pod checks the copy's generations and SHA-256 in an init
+  container before the server starts (`kserve.verifier_image` for an image without Python).
+- **Agent Platform: approval covers what serves**: the register step records the files Agent Platform copies
+  (`model.registered` `files`, `pipewright_runtime.folder_files`), and `model approve` refuses a folder changed since.
+- **The watch** (`policies.integrity.watch`, `watch_every`): the launcher re-checks every default and serving version
+  and records `model.integrity` when a result changes, with a `model.integrity.check` heartbeat; `/integrity/tick`
+  runs it now. It also checks the renewer's work (holds and metadata of protected files).
+- **`pipewright integrity check`**: the same check once, exit 0, 1 or 2, for CI.
+- **Lock renewal** (`lock.renew`, `lock.rollback_days`): lock on activation in `deploy-model`; `pipewright integrity
+  renew`, run daily by a dedicated renewer identity, keeps every artifact an active version needs protected
+  (defaults, serving versions, the rollback candidate, KServe copies, live contracts), never shortening, and records
+  `model.lock.renewed`, `model.lock.failed` and `model.lock.reconciliation`.
+- **`pipewright model restore-files`** (approved generations written back, `model.restored`) and **`pipewright model
+  retire`** (`--release-holds`, `model.retired`).
+- **A time-boxed override** (`policies.integrity.until`, `reason`): recorded as `policy.override`, back to `refuse` on
+  its own after the date.
+- **Audit logs that last** (FR-102): `observability.audit_log_bucket` and `audit_retention_days` (the approval
+  cross-check reads them), `data_write_logs`; the starter and the blueprint create the log bucket, its sink, DATA_WRITE
+  logs with an exclusion that keeps only approved folders and contracts, the renewer and the environment alerts.
+- **`doctor`**: an integrity section (protection that is off, an open-ended or expired override, short `lock.days`,
+  who else can write the artifacts bucket, audit retention, DATA_WRITE logs, the renewer and who can act as it).
+- **`alerts sync`**: `model.integrity` and `run.integrity` for each use case when the watch or the scoring check is on.
+
+### Changed
+
+- Integrity checks read the event log once and then only what is new (`models/approvals.py`) instead of one full scan
+  per version, which made a watch affordable (100 use cases hourly: about $1.91 a month instead of about $1,254).
+- `loop rollback` checks the version it restores, and `pipewright rollback` checks the old release's contract against
+  its `release.live` fingerprint and locks it again, like the way forward.
+- An approval of an already protected file keeps its later retention date instead of reporting a failed lock.
+
 ## [1.4.0] - 2026-11-06
 
 Phase 6: what runs is what was approved. An approval records what it approved, and nothing is deployed or promoted
