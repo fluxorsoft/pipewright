@@ -980,6 +980,126 @@
         "required": {
           "type": "boolean",
           "description": "models in this environment must take every feature from data.features_from"
+        },
+        "online_store": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Pipewright 1.4.2 (FR-104): the online stores this environment offers and their settings",
+          "properties": {
+            "types": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "bigtable",
+                  "bigquery",
+                  "cloudsql",
+                  "http"
+                ]
+              },
+              "description": "the types use cases may choose (default bigtable only)"
+            },
+            "bigquery": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "bi_engine_gib": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "serving_service_account": {
+                  "type": "string"
+                }
+              }
+            },
+            "cloudsql": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "instance": {
+                  "type": "string",
+                  "pattern": "^[^:]+:[^:]+:[^:]+$",
+                  "description": "project:region:name"
+                },
+                "private_ip": {
+                  "type": "string"
+                },
+                "database": {
+                  "type": "string"
+                },
+                "settings": {
+                  "type": "object",
+                  "description": "the instance's settings as the platform YAML set them (edition, tier, availability, disk), for doctor"
+                }
+              }
+            },
+            "lookup": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "image": {
+                  "type": "string"
+                },
+                "network": {
+                  "type": "string"
+                },
+                "subnetwork": {
+                  "type": "string"
+                },
+                "defaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "min_instances": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cpu_boost": {
+                      "type": "boolean"
+                    },
+                    "billing": {
+                      "enum": [
+                        "request",
+                        "instance"
+                      ]
+                    }
+                  }
+                },
+                "limits": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "max_cpu": {
+                      "type": "number"
+                    },
+                    "max_memory": {
+                      "type": "string"
+                    },
+                    "max_instances": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "max_min_instances": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "min_min_instances": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "sync": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "image": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -999,6 +1119,14 @@
           "type": "string",
           "pattern": "^projects/[^/]+/locations/[^/]+/featureOnlineStores/[^/]+$",
           "description": "the tenant's Feature Store online store (Bigtable): use cases with model.serving.features online read their features from its views (Pipewright 1.1)"
+        },
+        "lookup_service_account": {
+          "type": "string",
+          "description": "the identity of the tenant's lookup services"
+        },
+        "sync_job": {
+          "type": "string",
+          "description": "the tenant's Cloud Run job that syncs its online tables, projects/<p>/locations/<r>/jobs/<name>"
         }
       }
     }

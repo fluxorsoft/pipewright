@@ -233,8 +233,17 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         for where, uri in [*named, ("retraining.source_uri", retrain_source)]:
             if uri and uri.startswith("gs://"):
                 problems.append(f"{where}: with data.features_from the source is the entity table, a bq:// table")
+    store_spec = model["serving"].get("online_store") or {}
+    if store_spec and model["serving"].get("features") != "online":
+        problems.append("model.serving.online_store: needs model.serving.features online (the endpoint then takes "
+                        "entity IDs and reads their features from the store)")
     if model["serving"].get("features") == "online":     # FR-51: only when set; 1.0 use cases resolve as before
-        online = _online_features(ml, env, tenant, problems)
+        if store_spec.get("type", "bigtable") != "bigtable":     # FR-104: only when a use case chooses another store
+            from pipewright.online import config as online_config
+
+            online = online_config.resolve(store_spec, ml, env, tenant, meta["name"], problems)
+        else:
+            online = _online_features(ml, env, tenant, problems)
         if online:
             ml["online_features"] = online
     if model["serving"].get("fill_missing") is False:    # FR-73: only when set; the default (fill) is not written

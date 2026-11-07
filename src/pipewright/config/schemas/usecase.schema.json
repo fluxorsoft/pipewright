@@ -902,7 +902,174 @@
           }
         },
         "scale_to_zero": { "type": "boolean", "description": "with replicas.min 0: an idle endpoint runs no replica, and the first request after a quiet spell waits for one to start (Pipewright 1.2.0; Agent Platform preview)" },
-        "fill_missing": { "type": "boolean", "description": "the endpoint fills an empty feature with its training median, as batch scoring does (Pipewright 1.2.0, default true); false: it answers an error naming the feature" }
+        "fill_missing": { "type": "boolean", "description": "the endpoint fills an empty feature with its training median, as batch scoring does (Pipewright 1.2.0, default true); false: it answers an error naming the feature" },
+        "online_store": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "which online store serves this use case's features (Pipewright 1.4.2, FR-104); without it the tenant's Bigtable online store (1.1). Needs model.serving.features online",
+          "properties": {
+            "type": {
+              "enum": [
+                "bigtable",
+                "bigquery",
+                "cloudsql",
+                "http"
+              ],
+              "description": "bigtable (Feature Store, the default), bigquery (with BI Engine), cloudsql (PostgreSQL, synced by Pipewright) or http (the team's own store)"
+            },
+            "bigquery": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_]{1,1024}$",
+                  "description": "the served table in the tenant's dataset (default pw_online_<usecase>)"
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 50,
+                  "maximum": 30000
+                }
+              }
+            },
+            "cloudsql": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]{0,62}$",
+                  "description": "where the table goes (default public; a named schema per team is the guideline in a shared instance)"
+                },
+                "table": {
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]{0,62}$",
+                  "description": "the table, created at each sync (default pw_online_<usecase>)"
+                }
+              }
+            },
+            "http": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https://"
+                },
+                "audience": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 50,
+                  "maximum": 30000
+                }
+              }
+            },
+            "lookup": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "between the endpoint and Cloud SQL: Pipewright's Cloud Run lookup service (the default) and its size, or the team's own",
+              "properties": {
+                "provider": {
+                  "enum": [
+                    "pipewright",
+                    "own"
+                  ]
+                },
+                "reader": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$",
+                  "description": "provider own: the tenant's service account given SELECT"
+                },
+                "cpu": {
+                  "type": "number",
+                  "description": "1, 2, 4, 6 or 8 vCPU (Cloud Run)"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(Mi|Gi)$"
+                },
+                "min_instances": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "max_instances": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "pool_size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 50,
+                  "maximum": 30000
+                },
+                "cpu_boost": {
+                  "type": "boolean"
+                },
+                "billing": {
+                  "enum": [
+                    "request",
+                    "instance"
+                  ]
+                }
+              }
+            },
+            "sync": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "full",
+                    "changed"
+                  ],
+                  "description": "full: every row each sync; changed: only rows whose values changed (less load on the database)"
+                }
+              }
+            },
+            "export": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "publish each generation as Parquet with a manifest, for a team's own store (off by default)",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "uri": {
+                  "type": "string",
+                  "pattern": "^gs://[a-z0-9._-]+(/.*)?$"
+                },
+                "keep": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "readers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "approvals": {

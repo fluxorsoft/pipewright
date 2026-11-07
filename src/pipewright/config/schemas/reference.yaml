@@ -383,6 +383,37 @@ model.serving.accelerator.type: The accelerator type, for example NVIDIA_L4.
 model.serving.accelerator.count: How many per replica (default 1).
 model.serving.scale_to_zero: With replicas.min 0, an idle endpoint runs no replica and costs nothing while idle; the first request after a quiet spell waits for a replica to start (Pipewright 1.2.0, an Agent Platform preview). Without it, min 0 deploys one replica, as in 1.x.
 model.serving.fill_missing: The endpoint fills an empty feature (request or online) with the median the model was trained with, as batch scoring does (Pipewright 1.2.0, default true). Set false to answer an error naming the feature instead.
+model.serving.online_store: "Which online store serves the features (FR-104). Leave it out for the tenant's Bigtable online store (Pipewright 1.1). Needs model.serving.features online; the environment lists the types it offers. `pipewright doctor` shows each choice's standing cost."
+model.serving.online_store.type: "bigtable (Feature Store, the default: about 12 ms, about $781 a month per node); bigquery (BigQuery with the environment's BI Engine reservation: about 200 ms, no copy of the data; unaccelerated lookups are billed as a full table read, for minutes after each refresh); cloudsql (PostgreSQL synced by Pipewright: about 3 ms direct, 12 ms through the lookup service, about $61 a month for the default instance); http (your own store answering POST /lookup)."
+model.serving.online_store.bigquery.table: The served table in the tenant's dataset, one row per entity, refreshed by the sync. Default pw_online_<usecase>.
+model.serving.online_store.bigquery.timeout_ms: How long a lookup may take before the endpoint fills or refuses the features (default 1000).
+model.serving.online_store.cloudsql.schema: "The PostgreSQL schema the table goes in, created by the sync. Default public; in an instance other teams share, give your team a schema of its own (doctor warns about public). Pipewright never writes a schema or table another tenant owns."
+model.serving.online_store.cloudsql.table: The table, one row per entity, created and replaced at each sync without lookups seeing half a load. Default pw_online_<usecase>.
+model.serving.online_store.http.url: "Your lookup, an https:// URL answering POST /lookup {\"entity_ids\": [...]} with {\"features\": {id: {name: value}}}. Pipewright checks the names and types it gets back; what happens inside your store is yours."
+model.serving.online_store.http.audience: The ID token audience the endpoint calls it with (default the URL).
+model.serving.online_store.http.timeout_ms: How long a lookup may take (default 1000).
+model.serving.online_store.lookup: "What sits between the endpoint and Cloud SQL: Pipewright's Cloud Run lookup service (provider pipewright, the default) sized here, or your own (provider own)."
+model.serving.online_store.lookup.provider: "pipewright: Pipewright deploys and updates the lookup service with deploy-model. own: Pipewright syncs the table and grants `reader`; you decide what sits between the endpoint and the database (a service on GKE, your own Cloud Run, anything)."
+model.serving.online_store.lookup.reader: With provider own, the tenant's service account that reads the table; Pipewright grants it SELECT on the table only.
+model.serving.online_store.lookup.cpu: vCPU per instance, 1, 2, 4, 6 or 8 (default 1). Cloud Run's fractional CPU is refused, since it serves one request at a time.
+model.serving.online_store.lookup.memory: Memory per instance (default 512Mi). Cloud Run takes up to 4Gi per vCPU, and at least 2Gi with 4 vCPU and 4Gi with 6 or 8.
+model.serving.online_store.lookup.min_instances: "Instances kept warm so callers do not wait for a cold start (default 0, or the environment's default; never below its floor). Best effort: Google may restart one, so 2 keeps a spare. About $14 a month each (1 vCPU, 512Mi, idle)."
+model.serving.online_store.lookup.max_instances: The most instances under load (default 5). pool_size x max_instances must fit the database's connections.
+model.serving.online_store.lookup.concurrency: Requests one instance serves at once (default 80, 1 to 1000).
+model.serving.online_store.lookup.pool_size: Database connections per instance (default 8, 1 to 50). A bounded pool keeps a burst from exhausting the database's connections.
+model.serving.online_store.lookup.timeout_ms: How long one lookup may take (default 1000).
+model.serving.online_store.lookup.cpu_boost: "Startup CPU boost (default true): double CPU while an instance starts and for 10 seconds after, so cold starts are shorter. About $0.0005 a start."
+model.serving.online_store.lookup.billing: "request (default): idle warm instances are billed at the low idle rate. instance (CPU always allocated): the full rate for each instance's whole life and no per-request charge, cheaper only for steady high traffic (about $60 a month an instance)."
+model.serving.online_store.sync: How Pipewright refreshes the served table (bigquery and cloudsql), on a schedule with pipeline online_sync.
+model.serving.online_store.sync.mode: "full (default): every row at each sync. changed: only rows whose values changed, so the database works less while lookups run (a full 1M-row load on one vCPU raised lookup latency for about a minute)."
+model.serving.online_store.export: "Publish each generation as Parquet files with a manifest, for a store you build yourself (off by default). Off, nothing is published: Pipewright's own sync moves the rows through a staging extract it deletes after the swap."
+model.serving.online_store.export.enabled: Turn the export on (default false).
+model.serving.online_store.export.uri: "Where the generations go, gs://bucket/prefix. Default gs://<artifacts bucket>/online-export/<tenant>/<usecase>; it must be somewhere your runner may write."
+model.serving.online_store.export.keep: How many generations are kept (default 3); older ones are deleted after a successful sync.
+model.serving.online_store.export.readers: Service accounts of your tenant given read on the export, for example the job that loads your own store.
+model.serving.online_store.bigquery: Settings for type bigquery.
+model.serving.online_store.cloudsql: Settings for type cloudsql.
+model.serving.online_store.http: Settings for type http.
 
 approvals: Which changes need a person.
 approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.

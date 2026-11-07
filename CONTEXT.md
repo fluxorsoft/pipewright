@@ -1741,6 +1741,15 @@ gain the online feature store, and a full guide covers, with real YAML:
 - how the Parquet export and its manifest let an ML team build its own online store: the files, the manifest's
   fields, checking a load against it, and the `http` contract to plug the store back into serving.
 
+- a pattern for ML teams building their own sync (user, 2026-11-07), with best practices taken from what the live
+  test records: latest values per entity in one query, a staging table and a check against the manifest before an
+  atomic swap, IAM login and no passwords, a bounded connection pool, load only changed rows where writes cost, check
+  every write, keep the last good generation, schedule refreshes away from peak traffic, alert on freshness;
+  with a diagram of the BigQuery to Cloud SQL sync.
+
+Everything measured during the live test (each sync step's timings, row counts, manifests, lookup latencies, costs)
+is recorded in `docs/evidence/fr104-live-test/`, for the docs, the guide above and the announcement.
+
 The core's `docs/FEATURES.md`, README and ONBOARDING, the starter README and the Enterprise docs change to match.
 
 **Rules:** additive and off by default; the stores' costs shown before anyone switches one on; names, digests and
