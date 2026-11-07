@@ -126,7 +126,11 @@ def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, slee
         raise ConfigError(f"{contract.usecase}'s release has no Pipewright lookup service (online_store cloudsql "
                           "with lookup.provider pipewright)")
     project, region = manifest["project"], manifest["region"]
-    spec = service_spec(contract, manifest, online, server_ca(gcp, online["instance"]))
+    ca = server_ca(gcp, online["instance"])
+    if not ca:      # fail closed (found live: without it the service would encrypt but not verify the database)
+        raise ConfigError(f"cannot read the server CA of {online['instance']}: the launcher needs "
+                          "cloudsql.instances.get (roles/cloudsql.viewer)")
+    spec = service_spec(contract, manifest, online, ca)
     base = f"{RUN}/projects/{project}/locations/{region}/services"
     name = online["service"]
     current = gcp.get(f"{base}/{name}")

@@ -144,3 +144,10 @@ def test_deploy_model_asks_the_launcher_directly_or_over_the_topic(monkeypatch):
 def test_deploy_model_does_nothing_for_other_stores():
     uc = SimpleNamespace(name="x", ml={"online_features": {"type": "bigquery"}})
     assert ol.request_from_cli(uc, SimpleNamespace(), log=lambda m: None) is None
+
+
+def test_no_server_ca_no_service():
+    gcp = Gcp({("GET", "sqladmin"): (403, {})})
+    with pytest.raises(ConfigError, match="needs cloudsql.instances.get"):
+        ol.ensure_lookup_service(contract(), MANIFEST, gcp)
+    assert not any(c[0] == "POST" for c in gcp.calls)
