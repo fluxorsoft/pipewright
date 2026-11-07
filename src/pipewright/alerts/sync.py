@@ -56,6 +56,11 @@ EVENTS = {
                         ["status", "severity", "version", "where", "problems"]),
     "run.integrity": ('jsonPayload.pipewright_event.event_type="run.integrity"', "scoring run failed its integrity "
                       "check", ["mode", "version", "problem"]),
+    # FR-104, from the launcher's tick: added for every use case whose online store Pipewright syncs
+    "online.stale": ('jsonPayload.pipewright_event.event_type="online.stale"', "online features not synced",
+                     ["type", "last_generation", "hours", "limit_hours"]),
+    "online.billed": ('jsonPayload.pipewright_event.event_type="online.billed"', "online lookups billed as full "
+                      "table reads (BI Engine did not serve them)", ["table", "billed_lookups", "bytes_billed"]),
 }
 
 # Retrain decision events (pipewright.retraining): emailed to retraining.decisions.notify.
@@ -298,6 +303,11 @@ def wanted_policies(uc: ResolvedUseCase, env: Environment | None = None) -> dict
             out.setdefault("model.integrity", sorted(set(alerts["notify"])))
         if integ.get("inference") in ("warn", "refuse"):
             out.setdefault("run.integrity", sorted(set(alerts["notify"])))
+        kind = (uc.ml.get("online_features") or {}).get("type")
+        if kind in ("bigquery", "cloudsql"):
+            out.setdefault("online.stale", sorted(set(alerts["notify"])))
+        if kind == "bigquery":
+            out.setdefault("online.billed", sorted(set(alerts["notify"])))
     retraining = uc.ml.get("retraining") or {}
     decisions = retraining.get("decisions") or {}
     notify = sorted(set(decisions.get("notify") or []))

@@ -299,7 +299,15 @@ def create_app(registry: Registry | None = None) -> Flask:
         except Exception as e:  # noqa: BLE001 - the watch must not stop the tick; its heartbeat goes missing instead
             log.exception("integrity watch failed")
             watched = {"status": "error", "reason": str(e)[:300]}
-        return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched), 200
+        try:                                  # FR-104: stale syncs and billed BigQuery lookups
+            from pipewright.online import watch as online_watch
+
+            online = online_watch.tick(Gcp(), m, reg().live(),
+                                       lambda t, c, data: _event(t, c, None, None, **data))
+        except Exception as e:  # noqa: BLE001
+            log.exception("online store health not checked")
+            online = {"status": "error", "reason": str(e)[:300]}
+        return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched, online=online), 200
 
     @app.post("/integrity/tick")
     def integrity_tick():

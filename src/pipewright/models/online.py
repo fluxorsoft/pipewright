@@ -55,9 +55,33 @@ def packaged_store(env_vars: dict, serving_json: dict | None) -> tuple[str | Non
     return online.get("store"), "serving.json in its files"
 
 
+# FR-104: what places a typed lookup in an environment; a model that names another is reading another's store.
+_PLACE = ("type", "project", "table", "instance", "database", "schema", "service", "url")
+
+
+def packaged_lookup(env_vars: dict, serving_json: dict | None) -> tuple[dict | None, str]:
+    value = env_vars.get(ENV_VAR)
+    if value:
+        try:
+            return json.loads(value) or None, "its serving container (PIPEWRIGHT_ONLINE_FEATURES)"
+        except ValueError:
+            return None, "an unreadable PIPEWRIGHT_ONLINE_FEATURES"
+    return (serving_json or {}).get("online_features"), "serving.json in its files"
+
+
 def check(expected: dict | None, env_vars: dict, serving_json: dict | None, environment: str) -> str | None:
     """A problem when the model would read another project's online store than the environment's, else None."""
     if not expected:
+        return None
+    if expected.get("type"):                  # FR-104: bigquery, cloudsql, http
+        got, source = packaged_lookup(env_vars, serving_json)
+        if not got:
+            return f"the model carries no online lookup ({source}): train it with model.serving.online_store set"
+        differ = [k for k in _PLACE if (got.get(k) or None) != (expected.get(k) or None)]
+        if differ:
+            return (f"the model would read another online store than {environment}'s ({source}: "
+                    f"{', '.join(differ)} differ). Promote it again, which gives a promoted model the destination's "
+                    "store, or retrain it here")
         return None
     store, source = packaged_store(env_vars, serving_json)
     if store is None:

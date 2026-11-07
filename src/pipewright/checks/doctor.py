@@ -606,7 +606,12 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
                                  "(roles/bigquery.dataViewer on the dataset)"))
 
     _check_feature_tables(uc, env, gcp, report)
-    _check_online_features(uc, gcp, report)
+    if (uc.ml.get("online_features") or {}).get("type"):     # FR-104: bigquery, cloudsql, http
+        from pipewright.online import doctor as online_doctor
+
+        online_doctor.check(uc, env, gcp, report)
+    else:
+        _check_online_features(uc, gcp, report)
     _check_retraining(uc, env, gcp, report)
     requests_retrain =retrain["enabled"] and {"drift", "performance"} & set(retrain["when"])
     if not requests_retrain or env.launcher.get("run_requests_topic"):
