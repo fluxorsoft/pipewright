@@ -17,9 +17,12 @@ def load_model(
     required: bool,
     model: dsl.Output[dsl.Model],
     version: str = "",
+    approved_files: str = "",
 ) -> NamedTuple("Champion", [("found", str), ("version", str), ("resource_name", str)]):
     """found is "yes" or "no". With required=True (inference) a missing model fails the run. version: a named
-    version instead of the default (a closed retrain loop: what production serves, or a candidate it validates)."""
+    version instead of the default (a closed retrain loop: what production serves, or a candidate it validates).
+    approved_files (Pipewright 1.4.1, set by the launcher with policies.integrity.inference on and pin on): the
+    approved generation and SHA-256 of each file; they are loaded exactly, and the run fails if one differs."""
     import logging
     import os
     from collections import namedtuple
@@ -38,17 +41,30 @@ def load_model(
         return out("no", "", "")
     name = existing[0].resource_name + (f"@{version}" if version else "")
     default = aiplatform.Model(model_name=name)                          # without a version: the default
-    bucket_name, _, prefix = default.uri.removeprefix("gs://").partition("/")
-    client = storage.Client(project=project)
-    copied = []
-    for name in ("model.pt", "features.json", "training_stats.json"):
-        blob = client.bucket(bucket_name).blob(f"{prefix.rstrip('/')}/{name}")
-        if blob.exists():
-            blob.download_to_filename(os.path.join(model.path, name))
-            copied.append(name)
+    wanted = ("model.pt", "features.json", "training_stats.json")
+    if approved_files:
+        import json
+
+        from pipewright_runtime import approved_download
+
+        spec = json.loads(approved_files)
+        if spec.get("version") and str(spec["version"]) != str(default.version_id):
+            raise RuntimeError(f"v{default.version_id} is the version now, not the approved v{spec['version']} the "
+                               "launcher checked: not scored (run again)")
+        copied = approved_download(spec, model.path, project, only=list(wanted))
+        logging.info("pinned: the approved generations of %s, each checked by SHA-256", copied)
+    else:
+        bucket_name, _, prefix = default.uri.removeprefix("gs://").partition("/")
+        client = storage.Client(project=project)
+        copied = []
+        for name in wanted:
+            blob = client.bucket(bucket_name).blob(f"{prefix.rstrip('/')}/{name}")
+            if blob.exists():
+                blob.download_to_filename(os.path.join(model.path, name))
+                copied.append(name)
     if "model.pt" not in copied:
         raise RuntimeError(f"default version of {model_display_name} has no model.pt at {default.uri}")
     model.metadata.update({"resourceName": default.resource_name, "versionId": default.version_id,
-                           "artifactUri": default.uri, "files": copied})
+                           "artifactUri": default.uri, "files": copied, "pinned": bool(approved_files)})
     logging.info("champion %s version %s (%s)", default.resource_name, default.version_id, copied)
     return out("yes", str(default.version_id), default.resource_name)

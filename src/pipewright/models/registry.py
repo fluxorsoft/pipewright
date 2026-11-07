@@ -187,6 +187,15 @@ def _judged(uc: ResolvedUseCase, env: Environment, creds, resource: str, version
         files, image = None, None
     if files:
         record["files"] = files
+        registered = registered_problem(gcp, env, uc.name, version, files)
+        if registered.get("record"):
+            record["registered_files"] = registered["record"]
+        if registered.get("problems"):
+            integrity.enforce(integrity.Check(problems=registered["problems"]), env,
+                              f"v{version} of {uc.model['name']} cannot be approved", log,
+                              reason="what Agent Platform serves is the copy it took at registration, and the model "
+                                     "folder has changed since",
+                              remedy="retrain (or register the folder again) so the copy and the folder match")
     if image:
         record["serving_image"] = image
     if labels.get("pipewright-engine") == "bqml" and labels.get("pipewright-bq-model"):
@@ -195,6 +204,30 @@ def _judged(uc: ResolvedUseCase, env: Environment, creds, resource: str, version
         if model:
             record["bq_model"] = model
     return rules, record, folder
+
+
+def registered_problem(gcp, env: Environment, usecase: str, version: str, files: dict) -> dict:
+    """Pipewright 1.4.1 (FR-101 item 3): the register step records the folder's files when Agent Platform copies it
+    (model.registered `files`). Every file it recorded must still be in the folder with the same SHA-256; files added
+    after registration (lineage.json) are fine. Returns {"record", "problems"}; empty when nothing was recorded
+    (registered before 1.4.1)."""
+    from pipewright.models import approvals
+
+    try:
+        found = approvals.events(gcp, env, "model.registered", usecase, str(version)) or []
+    except Exception:  # noqa: BLE001 - an unreadable log is said by the approval check itself
+        return {}
+    reg = next((e.get("files") for e in found if (e.get("files") or {}).get("files")), None)
+    if not reg:
+        return {}
+    now = {f["file"]: f["sha256"] for f in files.get("files") or []}
+    problems = []
+    for f in reg["files"]:
+        if f["file"] not in now:
+            problems.append(f"{f['file']}: registered (sha256 {f['sha256'][:16]}), now missing from the folder")
+        elif now[f["file"]] != f["sha256"]:
+            problems.append(f"{f['file']}: sha256 {f['sha256'][:16]} when registered, {now[f['file']][:16]} now")
+    return {"record": {"sha256": reg.get("sha256"), "count": reg.get("count")}, "problems": problems}
 
 
 def _check_rules(uc: ResolvedUseCase, env: Environment, rules, identity: str | None, approved: bool,

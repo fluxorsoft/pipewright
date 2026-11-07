@@ -389,6 +389,16 @@
                   ],
                   "default": "unlocked",
                   "description": "locked: nobody can shorten or remove it, not even an owner."
+                },
+                "renew": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Pipewright 1.4.1 (FR-101): while a version is in use (a default, serving, or the rollback candidate) the renewer keeps its approved files locked lock.days ahead; a retired version keeps its last date."
+                },
+                "rollback_days": {
+                  "type": ["integer", "null"],
+                  "minimum": 0,
+                  "description": "Pipewright 1.4.1: how long the previous default stays protected as the rollback candidate after it is replaced (default lock.days; 0: no rollback window, serving versions stay protected)."
                 }
               }
             },
@@ -400,6 +410,32 @@
               ],
               "default": "off",
               "description": "A scoring run whose default version has no approval: off (as before), warn (the launcher logs it) or refuse (the run is not submitted)."
+            },
+            "until": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+              "description": "Pipewright 1.4.1 (FR-102): with mode warn, the last day the override applies; afterwards the policy is refuse again on its own. The override is recorded and alerted while it lasts."
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 300,
+              "description": "Pipewright 1.4.1 (FR-102): why mode is warn (recorded with who set it and until when)."
+            },
+            "pin": {
+              "enum": ["on", "off"],
+              "default": "on",
+              "description": "Pipewright 1.4.1 (FR-101): scoring runs (with inference warn or refuse) and KServe use the approved file generations, each checked by SHA-256 before use, not the live model folder. off: as before."
+            },
+            "watch": {
+              "enum": ["off", "on"],
+              "default": "off",
+              "description": "Pipewright 1.4.1 (FR-101): the launcher re-checks every default and serving version against its approval and records model.integrity when the result changes (alerts sync alerts on it)."
+            },
+            "watch_every": {
+              "type": "string",
+              "pattern": "^[0-9]+[hd]$",
+              "default": "1h",
+              "description": "Pipewright 1.4.1: how often the watch runs, on the launcher's hourly tick: 1h, 6h, 1d."
             }
           }
         }

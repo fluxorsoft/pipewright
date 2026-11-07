@@ -26,6 +26,7 @@ Routes:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -81,22 +82,35 @@ def create_app(registry: Registry | None = None) -> Flask:
               recorded: dict | None = None) -> dict:
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
+        params_extra: dict = {}
         if pipeline == "inference":
-            # Phase 6 (policies.integrity.inference, off by default): score only with an approved default version.
+            # Phase 6 (policies.integrity.inference, off by default): score only with an approved version.
             from pipewright.models import integrity
 
-            mode, problem = integrity.inference_check(getattr(reg(), "gcp", None), reg().manifest, contract)
+            # 1.4.1 (FR-101 item 1): the full check of the version the run will use, and with pin on (the default)
+            # the approved files passed to the run, which loads exactly those generations and checks each SHA-256.
+            gate = integrity.inference_gate(getattr(reg(), "gcp", None), reg().manifest, contract,
+                                            (extra or {}).get("model_version") or None)
+            mode, problem = gate["mode"], gate["problem"]
             if problem:
                 _event("run.integrity", contract, rid, pipeline=pipeline, trigger=trigger, mode=mode,
-                       problem=problem)
+                       problem=problem, **({"version": gate["version"]} if gate["version"] else {}))
                 if mode == "refuse":
                     log.warning("refused %s %s: %s", contract.usecase, pipeline, problem)
                     return {"usecase": contract.usecase, "pipeline": pipeline, "status": "refused",
                             "reason": problem}
                 log.warning("integrity (warn) %s %s: %s", contract.usecase, pipeline, problem)
+            elif gate["approved_files"] and "approved_files" in target.parameters:
+                params_extra = {"approved_files": json.dumps(gate["approved_files"], sort_keys=True)}
+                recorded = {**(recorded or {}), "pinned": {"version": gate["version"],
+                                                           "files": len(gate["approved_files"]["files"])}}
+            elif gate["approved_files"]:
+                log.warning("integrity: %s %s does not declare approved_files, so it loads the live model folder: "
+                            "rebuild the release with Pipewright 1.4.1 to pin the approved files",
+                            contract.usecase, pipeline)
         try:
-            params = parameters_for(contract, target, source_uri, rid, {**(extra or {}), **({"ml_config": ml}
-                                                                                        if ml else {})})
+            params = parameters_for(contract, target, source_uri, rid, {**(extra or {}), **params_extra,
+                                                                        **({"ml_config": ml} if ml else {})})
             name = adapters.submit(contract, target, params, jid,
                                    labels_for(contract, trigger, rid, pipeline, loop), reg().manifest.get("security"),
                                    manifest=reg().manifest, gcp=getattr(reg(), "gcp", None))

@@ -24,6 +24,9 @@ LAUNCHER_PARAMETERS = ("project", "region", "source_uri", "run_id")
 RUN_OVERRIDES = ("champion_version", "model_version")     # set per run when given (release.contract)
 # Optional parameter: when a template declares it, Pipewright passes the resolved ML sections (dict).
 ML_CONFIG_PARAMETER = "ml_config"
+# Optional parameter (Pipewright 1.4.1, FR-101): the launcher passes the approved files of the version a scoring run
+# uses (policies.integrity.pin), so the run loads exactly those generations.
+PINNED_PARAMETER = "approved_files"
 PLACEHOLDER_IMAGE = "pipewright.invalid/compile-check@sha256:" + "0" * 64
 
 
@@ -154,7 +157,7 @@ def check_parameters(uc: ResolvedUseCase, infos) -> tuple[list[str], list[str]]:
         for p in LAUNCHER_PARAMETERS:
             if p not in info.parameters:
                 problems.append(f"{prefix}template has no parameter {p!r}; the launcher always passes it")
-        supplied = set(LAUNCHER_PARAMETERS) | set(RUN_OVERRIDES) | set(static_parameters(uc, info))
+        supplied = set(LAUNCHER_PARAMETERS) | set(RUN_OVERRIDES) | {PINNED_PARAMETER} | set(static_parameters(uc, info))
         for pname, p in info.parameters.items():
             if pname not in supplied and not p["optional"]:
                 problems.append(f"{prefix}template parameter {pname!r} has no default and nothing supplies it")

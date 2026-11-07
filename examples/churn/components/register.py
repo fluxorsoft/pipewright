@@ -89,6 +89,11 @@ def register_model(
     blob = storage.Client(project=project).bucket(bucket_name).blob(f"{prefix}/evaluation.json")
     blob.upload_from_string(json.dumps(evaluation, indent=2), content_type="application/json")
 
+    # Pipewright 1.4.1 (FR-101): the files as Agent Platform copies them now, at upload: it serves that copy, so an
+    # approval can be shown to cover exactly what serves (names, generations and digests; never contents).
+    from pipewright_runtime import folder_files
+
+    registered_files = folder_files(model.uri, project)
     existing = aiplatform.Model.list(filter=f'display_name="{model_display_name}"', order_by="create_time desc")
     make_default = ml_config["registry"]["set_default"] == "on_approval" or not existing
     alias = re.sub(r"[^a-z0-9-]", "-", f"run-{run_id}".lower())[:127]
@@ -127,7 +132,7 @@ def register_model(
     from pipewright_runtime import emit_event
 
     emit_event("model.registered", ml_config, run_id, model=model_display_name, version=registered.version_id,
-               default=make_default, primary_metric=primary, primary_value=value)
+               default=make_default, primary_metric=primary, primary_value=value, files=registered_files)
     # Lineage (Pipewright 1.1): the release, config digest, rows, sources and evaluation, next to the model files.
     from pipewright_runtime import lineage_record, write_lineage
 

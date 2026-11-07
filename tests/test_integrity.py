@@ -20,11 +20,33 @@ def env(**policies):
 # -- the policy ----------------------------------------------------------------------------------------------------
 
 def test_the_policy_refuses_by_default_and_rejects_unknown_modes():
-    assert integrity.policy(env()) == {"mode": "refuse", "lock": {"days": 0, "mode": "unlocked"}}
-    assert integrity.policy(env(integrity={"mode": "warn", "lock": {"days": 30, "mode": "locked"}})) == {
-        "mode": "warn", "lock": {"days": 30, "mode": "locked"}}
+    p = integrity.policy(env())
+    assert (p["mode"], p["lock"], p["pin"], p["watch"], p["inference"]) == (
+        "refuse", {"days": 0, "mode": "unlocked", "renew": False, "rollback_days": 0}, True, False, "off")
+    p = integrity.policy(env(integrity={"mode": "warn", "lock": {"days": 30, "mode": "locked"}}))
+    assert (p["mode"], p["lock"]) == ("warn", {"days": 30, "mode": "locked", "renew": True, "rollback_days": 30})
     with pytest.raises(ConfigError, match="refuse, warn"):
         integrity.policy(env(integrity={"mode": "ignore"}))
+
+
+def test_a_time_boxed_warn_goes_back_to_refuse_after_its_date():
+    import datetime
+
+    p = env(integrity={"mode": "warn", "until": "2026-11-10", "reason": "incident 42"})
+    assert integrity.policy(p, today=datetime.date(2026, 11, 10))["mode"] == "warn"
+    after = integrity.policy(p, today=datetime.date(2026, 11, 11))
+    assert (after["mode"], after["expired_warn"], after["reason"]) == ("refuse", True, "incident 42")
+    with pytest.raises(ConfigError, match="YYYY-MM-DD"):
+        integrity.policy(env(integrity={"mode": "warn", "until": "soon"}))
+
+
+def test_the_watch_interval_and_lock_renewal_defaults():
+    p = integrity.policy(env(integrity={"watch": "on", "watch_every": "6h", "lock": {"days": 30, "rollback_days": 7}}))
+    assert (p["watch"], p["watch_every_hours"], p["lock"]["renew"], p["lock"]["rollback_days"]) == (True, 6, True, 7)
+    assert integrity.policy(env(integrity={"watch_every": "1d"}))["watch_every_hours"] == 24
+    assert integrity.policy(env(integrity={"lock": {"days": 30, "renew": False}}))["lock"]["renew"] is False
+    with pytest.raises(ConfigError, match="watch_every"):
+        integrity.policy(env(integrity={"watch_every": "hourly"}))
 
 
 # -- a fake Cloud Storage: objects by name with generation and bytes ----------------------------------------------
@@ -596,3 +618,70 @@ def test_a_deploy_under_warn_is_recorded_as_such_with_its_problems():
     got = warned.deployed()
     assert got["result"].startswith("warned: deployed under policies.integrity.mode warn")
     assert got["problems_found"] == warned.problems and got["problems"] == 1
+
+
+# -- 1.4.1 (FR-101): scoring pins the approved files; approval compares with what was registered ------------------
+
+APPROVAL = {"at": "2026-11-07T10:00:00", "version": "4", "by": "ana@example.com",
+            "files": {"folder": FOLDER, "count": 1, "sha256": "d", "files": [
+                {"file": "model.pt", "generation": 1, "sha256": hashlib.sha256(b"weights").hexdigest()}]}}
+
+
+def test_approved_files_come_from_the_approval_and_need_files():
+    got = integrity.approved_files(APPROVAL)
+    assert got == {"version": "4", "folder": FOLDER, "files": [
+        {"file": "model.pt", "generation": "1", "sha256": hashlib.sha256(b"weights").hexdigest()}]}
+    assert integrity.approved_files({"version": "4"}) is None          # approved before 1.4.0: no files recorded
+
+
+class Registry:
+    def __init__(self, version):
+        self.version = version
+
+    def get(self, url, **params):
+        if url.endswith("/models"):
+            return SimpleNamespace(ok=True, status=200, body={"models": [{"name": "projects/p/models/m"}]})
+        return SimpleNamespace(ok=True, status=200, body={"versionId": self.version, "name": "projects/p/models/m",
+                                                          "artifactUri": FOLDER, "containerSpec": {}})
+
+
+def contract():
+    return SimpleNamespace(metadata={"model": "churn-classifier"}, region="r", project="p", environment="prod",
+                           usecase="churn")
+
+
+def test_a_scoring_run_is_pinned_to_the_approved_files_when_it_verifies(monkeypatch):
+    monkeypatch.setattr(integrity, "inference_check", lambda gcp, manifest, c: ("refuse", None))
+    monkeypatch.setattr(integrity, "verify", lambda *a, **k: integrity.Check(approval=APPROVAL))
+    manifest = {"policies": {"integrity": {"inference": "refuse"}}}
+    gate = integrity.inference_gate(Registry("4"), manifest, contract())
+    assert gate["problem"] is None and gate["version"] == "4"
+    assert gate["approved_files"]["files"][0]["file"] == "model.pt"
+    manifest["policies"]["integrity"]["pin"] = "off"
+    assert integrity.inference_gate(Registry("4"), manifest, contract())["approved_files"] is None
+    assert integrity.inference_gate(Registry("4"), {}, contract())["mode"] == "off"
+
+
+def test_a_scoring_run_whose_files_changed_is_refused_by_the_full_check(monkeypatch):
+    monkeypatch.setattr(integrity, "inference_check", lambda gcp, manifest, c: ("refuse", None))
+    monkeypatch.setattr(integrity, "verify", lambda *a, **k: integrity.Check(
+        problems=["model.pt: changed after the approval (sha256 0123456789abcdef approved)"], approval=APPROVAL))
+    gate = integrity.inference_gate(Registry("4"), {"policies": {"integrity": {"inference": "refuse"}}}, contract())
+    assert "model.pt: changed after the approval" in gate["problem"] and gate["approved_files"] is None
+
+
+def test_approval_refuses_a_folder_changed_since_registration(monkeypatch):
+    from pipewright.models import approvals, registry
+
+    reg = {"sha256": "r", "count": 2, "files": [{"file": "model.pt", "sha256": "a" * 64},
+                                                 {"file": "features.json", "sha256": "b" * 64}]}
+    monkeypatch.setattr(approvals, "events", lambda gcp, env, kind, uc, v: [{"files": reg}])
+    now = {"files": [{"file": "model.pt", "sha256": "a" * 64}, {"file": "features.json", "sha256": "c" * 64},
+                     {"file": "lineage.json", "sha256": "d" * 64}]}
+    got = registry.registered_problem(None, env(), "churn", "4", now)
+    assert got["record"] == {"sha256": "r", "count": 2}
+    assert got["problems"] == [f"features.json: sha256 {'b' * 16} when registered, {'c' * 16} now"]
+    same = {"files": reg["files"] + [{"file": "lineage.json", "sha256": "d" * 64}]}       # added later: fine
+    assert registry.registered_problem(None, env(), "churn", "4", same)["problems"] == []
+    monkeypatch.setattr(approvals, "events", lambda gcp, env, kind, uc, v: [])            # registered before 1.4.1
+    assert registry.registered_problem(None, env(), "churn", "4", now) == {}

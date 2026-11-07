@@ -15,6 +15,8 @@ log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
 ray_cluster   a Ray on Agent Platform cluster for this step of this run (steps.<step>.ray), deleted when the block ends
 ray_job       runs a Ray job on that cluster and waits for it (needs ray[default] and google-cloud-aiplatform[ray])
+approved_download  downloads exactly the approved generation of each model file and checks its SHA-256 (1.4.1)
+folder_files  every file of a model folder with its generation and SHA-256, as an approval records them (1.4.1)
 
 Everything here takes the `ml_config` the component received; it needs only google-cloud-* and pandas/pyarrow,
 which the component image already has. Owned by the platform: do not edit in the use case.
@@ -1052,6 +1054,71 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
             client.stop_job(job)
         raise RuntimeError(f"Ray job {job} ended {status}: {logs[-1000:]}")
     return logs
+
+
+# -- the approved bytes (Pipewright 1.4.1, FR-101) -------------------------------------------------------------------
+
+def folder_files(uri: str, project: str) -> dict:
+    """Every file under a model folder with its generation and SHA-256, and one digest over them all: the same record
+    an approval keeps (integrity.model_files), taken here by the register step at the moment Agent Platform copies
+    the folder. Names and digests only, never contents."""
+    import hashlib
+
+    from google.cloud import storage
+
+    bucket_name, _, prefix = uri.removeprefix("gs://").partition("/")
+    prefix = prefix.rstrip("/") + "/"
+    client = storage.Client(project=project)
+    files = []
+    for blob in sorted(client.list_blobs(bucket_name, prefix=prefix), key=lambda b: b.name):
+        if blob.name == prefix:
+            continue
+        h = hashlib.sha256()
+        with client.bucket(bucket_name).blob(blob.name, generation=blob.generation).open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        files.append({"file": blob.name[len(prefix):], "generation": int(blob.generation), "size": int(blob.size or 0),
+                      "sha256": h.hexdigest()})
+    digest = hashlib.sha256(json.dumps([[f["file"], f["sha256"]] for f in files]).encode()).hexdigest()
+    return {"folder": uri.rstrip("/"), "count": len(files), "sha256": digest, "files": files}
+
+
+def approved_download(approved_files: str | dict, dest: str, project: str, only: list[str] | None = None) -> list[str]:
+    """Downloads each approved file by its generation into dest and checks its SHA-256; raises if one differs or its
+    generation is gone, so a run never scores with bytes nobody approved (a new version put over an approved file
+    does not change the approved generation). approved_files: the run's `approved_files` parameter (JSON).
+    only: the file names wanted (others are skipped). Returns the names downloaded."""
+    import hashlib
+
+    from google.api_core.exceptions import NotFound
+    from google.cloud import storage
+
+    spec = json.loads(approved_files) if isinstance(approved_files, str) else approved_files
+    bucket_name, _, prefix = spec["folder"].removeprefix("gs://").partition("/")
+    prefix = prefix.rstrip("/") + "/"
+    client = storage.Client(project=project)
+    os.makedirs(dest, exist_ok=True)
+    got = []
+    for f in spec["files"]:
+        if only is not None and f["file"] not in only:
+            continue
+        target = os.path.join(dest, f["file"])
+        os.makedirs(os.path.dirname(target) or dest, exist_ok=True)
+        blob = client.bucket(bucket_name).blob(prefix + f["file"], generation=int(f["generation"]))
+        try:
+            blob.download_to_filename(target)
+        except NotFound:
+            raise RuntimeError(f"{f['file']}: the approved generation {f['generation']} is gone (versioning off, or "
+                               "deleted): re-approve a version whose files exist") from None
+        h = hashlib.sha256()
+        with open(target, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != f["sha256"]:
+            raise RuntimeError(f"{f['file']}: generation {f['generation']} has sha256 {h.hexdigest()[:16]}, not the "
+                               f"approved {f['sha256'][:16]}: not used")
+        got.append(f["file"])
+    return got
 
 
 if __name__ == "__main__":       # `python pipewright_runtime.py` prints the format version (image smoke test)

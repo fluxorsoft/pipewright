@@ -28,14 +28,44 @@ _MANIFEST_TYPES = ", ".join([
     "application/vnd.docker.distribution.manifest.v2+json"])
 
 
-def policy(env: Environment) -> dict:
-    """The environment's integrity policy, with its defaults: refuse, and no lock."""
+def _every_hours(value) -> int:
+    text = str(value or "1h").strip().lower()
+    if text[:-1].isdigit() and text[-1] in "hd" and int(text[:-1]) > 0:
+        return int(text[:-1]) * (24 if text[-1] == "d" else 1)
+    raise ConfigError(f"policies.integrity.watch_every must look like 1h, 6h or 1d, not {value!r}")
+
+
+def policy(env: Environment, today=None) -> dict:
+    """The environment's integrity policy, with its defaults: refuse, no lock, pinned approved bytes, no watch.
+
+    Pipewright 1.4.1 (FR-102): `mode: warn` may carry `until` (a date) and `reason`; after `until` the policy is
+    refuse again on its own (`expired_warn` says so). Pipewright 1.4.1 (FR-101): `pin` (scoring and KServe load the
+    approved generations), `watch` and `watch_every`, `lock.renew` and `lock.rollback_days`."""
+    import datetime
+
     p = dict((getattr(env, "policies", None) or {}).get("integrity") or {})
     mode = p.get("mode", "refuse")
     if mode not in MODES:
         raise ConfigError(f"policies.integrity.mode must be one of {', '.join(MODES)}, not {mode!r}")
+    until = p.get("until")
+    expired = False
+    if until:
+        try:
+            end = datetime.date.fromisoformat(str(until)[:10])
+        except ValueError:
+            raise ConfigError(f"policies.integrity.until must be a date (YYYY-MM-DD), not {until!r}") from None
+        if mode == "warn" and (today or datetime.date.today()) > end:
+            mode, expired = "refuse", True
     lock = dict(p.get("lock") or {})
-    return {"mode": mode, "lock": {"days": int(lock.get("days") or 0), "mode": lock.get("mode", "unlocked")}}
+    days = int(lock.get("days") or 0)
+    rollback = lock.get("rollback_days")
+    return {"mode": mode, "until": str(until)[:10] if until else None, "reason": p.get("reason"),
+            "expired_warn": expired,
+            "lock": {"days": days, "mode": lock.get("mode", "unlocked"),
+                     "renew": bool(lock.get("renew", True)) and days > 0,
+                     "rollback_days": days if rollback is None else int(rollback)},
+            "inference": p.get("inference") or "off", "pin": (p.get("pin") or "on") == "on",
+            "watch": (p.get("watch") or "off") == "on", "watch_every_hours": _every_hours(p.get("watch_every"))}
 
 
 # -- model files (FR-94) ------------------------------------------------------------------------------------------
@@ -261,26 +291,14 @@ def released_rules(uc: ResolvedUseCase, env: Environment, gcp, release_id: str |
 # -- the approval record and the check before deploy and promote (FR-93) ------------------------------------------
 
 def approval_events(gcp, env: Environment, usecase: str, version: str) -> list[dict] | None:
-    """The version's model.approved events, newest first. None when the environment keeps no event log."""
-    dataset = (env.observability or {}).get("evidence_dataset")
-    if not dataset:
-        return None
-    from pipewright.gcp.bigquery import query, rows
+    """The version's model.approved events, newest first. None when the environment keeps no event log.
 
-    def p(name, value):
-        return {"name": name, "parameterType": {"type": "STRING"}, "parameterValue": {"value": value}}
+    Pipewright 1.4.1 (FR-101 item 0): read through `approvals.events`, which keeps the environment's approvals and
+    asks BigQuery only for what was published since it last looked (partition-pruned), instead of one full scan of
+    the event log per version per check."""
+    from pipewright.models import approvals
 
-    sql = (f"SELECT CAST(publish_time AS STRING) AS published, TO_JSON_STRING(data) AS event "
-           f"FROM `{env.project}.{dataset}.events` WHERE JSON_VALUE(data, '$.event_type') = 'model.approved' "
-           "AND JSON_VALUE(data, '$.usecase') = @usecase AND JSON_VALUE(data, '$.environment') = @env "
-           "AND JSON_VALUE(data, '$.data.version') = @version ORDER BY publish_time DESC LIMIT 20")
-    found = rows(query(gcp, env.project, sql, [p("usecase", usecase), p("env", env.name), p("version", str(version))],
-                       kms_key=(env.security or {}).get("bigquery_kms_key")))
-    out = []
-    for row in found:
-        event = json.loads(row["event"] or "{}")
-        out.append({"at": (row["published"] or "")[:19], **(event.get("data") or {})})
-    return out
+    return approvals.events(gcp, env, "model.approved", usecase, str(version))
 
 
 @dataclass
@@ -538,6 +556,69 @@ def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
     if events == []:
         return mode, f"v{version} of {name} has no model.approved event: it became the default outside Pipewright"
     return mode, None
+
+
+def approved_files(approval: dict | None) -> dict | None:
+    """What a pinned run or server loads (1.4.1, FR-101): the approved folder and each file's generation and SHA-256,
+    from the approval. None when the approval records no files (approved before 1.4.0)."""
+    files = (approval or {}).get("files") or {}
+    if not files.get("files"):
+        return None
+    return {"version": str((approval or {}).get("version") or ""), "folder": files.get("folder"),
+            "files": [{"file": f["file"], "generation": str(f["generation"]), "sha256": f["sha256"]}
+                      for f in files["files"]]}
+
+
+def inference_gate(gcp, manifest: dict, contract, version: str | None = None) -> dict:
+    """Pipewright 1.4.1 (FR-101 item 1): before a scoring run, with policies.integrity.inference warn or refuse, the
+    full check of the version it will use (the default, or `version`): its approval exists, and the evaluation
+    record, files, serving image and BigQuery ML model are the approved ones. With `pin` on (the default) the result
+    carries the approved files for the run's `approved_files` parameter, so the run loads exactly those generations.
+
+    Returns {"mode", "problem", "approved_files", "version"}; mode off checks nothing (as before)."""
+    from types import SimpleNamespace
+
+    integ = ((manifest.get("policies") or {}).get("integrity") or {})
+    mode = integ.get("inference") or "off"
+    out = {"mode": mode, "problem": None, "approved_files": None, "version": version}
+    if mode == "off":
+        return out
+    checked_mode, problem = inference_check(gcp, manifest, contract) if not version else (mode, None)
+    out["mode"] = checked_mode
+    if problem:
+        out["problem"] = problem
+        return out
+    name = (contract.metadata or {}).get("model")
+    if not name:
+        return out
+    api = f"https://{contract.region}-aiplatform.googleapis.com/v1"
+    found = gcp.get(f"{api}/projects/{contract.project}/locations/{contract.region}/models",
+                    filter=f'display_name="{name}"')
+    models = (found.body or {}).get("models", []) if found.ok else []
+    if not models:
+        return out
+    r = gcp.get(f"{api}/{models[0]['name'].split('@')[0]}@{version or 'default'}")
+    if not r.ok:
+        out["problem"] = f"v{version or 'default'} of {name} cannot be read (HTTP {r.status})"
+        return out
+    body = r.body or {}
+    vid = str(body.get("versionId"))
+    out["version"] = vid
+    env = SimpleNamespace(name=contract.environment, project=contract.project, region=contract.region,
+                          observability=manifest.get("observability") or {}, security=manifest.get("security") or {},
+                          policies=manifest.get("policies") or {})
+    try:
+        check = verify(gcp, env, contract.usecase, vid, body.get("artifactUri"),
+                       (body.get("containerSpec") or {}).get("imageUri"), model=body.get("name"))
+    except Exception as e:  # noqa: BLE001 - a check that cannot run is a problem, not a pass
+        out["problem"] = f"the approval of v{vid} cannot be checked: {str(e).splitlines()[0][:160]}"
+        return out
+    if check.problems:
+        out["problem"] = "; ".join(check.problems)[:900]
+        return out
+    if integ.get("pin", "on") == "on":
+        out["approved_files"] = approved_files(check.approval)
+    return out
 
 
 def _audit_problem(gcp, env: Environment, model: str, version: str, approval: dict, check: Check) -> None:

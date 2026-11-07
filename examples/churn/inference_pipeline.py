@@ -30,6 +30,7 @@ def churn_inference_pipeline(
     model_display_name: str = "churn-classifier",
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
     model_version: str = "",       # a closed retrain loop validates its candidate before it is the default
+    approved_files: str = "",      # 1.4.1: set by the launcher (pin): load exactly the approved generations
 ):
     data = load_data(project=project, source_uri=source_uri, ml_config=ml_config,
                      run_id=run_id).set_display_name("load-data")
@@ -38,7 +39,7 @@ def churn_inference_pipeline(
     validate.set_display_name("validate-data")
 
     champion = load_model(project=project, region=region, model_display_name=model_display_name, required=True,
-                          version=model_version)
+                          version=model_version, approved_files=approved_files)
     champion.set_display_name("load-champion").set_caching_options(False)
 
     score = score_batch(project=project, bq_dataset=bq_dataset, run_id=run_id, data=data.outputs["data"],
