@@ -102,7 +102,10 @@ def build_contract(uc: ResolvedUseCase, env: Environment, infos: dict[str, Templ
         metadata={"owner": uc.owner, "objective": uc.objective, "description": uc.description,
                   "contacts": list(uc.contacts), "model": uc.model["name"],
                   # Phase 6 (FR-96): approvals are judged by the release's rules, not a working copy's
-                  "approvals": dict(uc.approvals or {})},
+                  "approvals": dict(uc.approvals or {}),
+                  # 1.4.1 (FR-103): where a scoring run's feature snapshots go (only with a feature contract)
+                  **({"dataset": (uc.resources or {}).get("bigquery_dataset")}
+                     if uc.ml.get("feature_contract") else {})},
         ray=({"image": ray_image, "ray_version": uc.ray["ray_version"], "steps": uc.ray["steps"],
               # the mode the release was built for (a standing release names its tenant's cluster)
               **({"mode": "standing", "standing": uc.ray.get("standing")} if uc.ray.get("mode") == "standing" else {})}

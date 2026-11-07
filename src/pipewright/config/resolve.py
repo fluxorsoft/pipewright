@@ -614,6 +614,6 @@ def _retraining_policy(retraining: dict, approvals: dict, env: Environment, prob
 
 
 def _ml_keys() -> tuple[str, ...]:
-    from pipewright.config.ml import SECTIONS
+    from pipewright.config.ml import OPTIONAL_SECTIONS, SECTIONS
 
-    return SECTIONS
+    return SECTIONS + OPTIONAL_SECTIONS

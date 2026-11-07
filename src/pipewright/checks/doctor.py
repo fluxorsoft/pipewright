@@ -270,6 +270,20 @@ def check_integrity(env: Environment, gcp: Gcp, report: Report) -> None:
     if 0 < pol["lock"]["days"] < 5 and pol["lock"]["renew"]:
         report.add(s, Result(WARN, "lock.days", f"{pol['lock']['days']} days: a missed renewal run or two leaves "
                                                 "files unprotected", "7 days or more is recommended"))
+    f = pol["features"]
+    if f["check"]:
+        extra = [k for k in ("built_tables", "record_reads", "fingerprint_rows") if f[k]]
+        extra += [f"snapshot_days {f['snapshot_days']}"] if f["snapshot_days"] else []
+        report.add(s, Result(OK, "feature definitions", "checked against each use case's feature_contract"
+                             + (f" ({', '.join(extra)})" if extra else "")))
+        if not f["built_tables"]:
+            report.add(s, Result(INFO, "feature definitions", "built_tables off: a feature table built by a query "
+                                 "is checked by schema only (its SQL lives in the job that wrote it)"))
+    else:
+        report.add(s, Result(nudge, "feature definitions", "policies.integrity.features check off: a changed "
+                             "feature definition reaches approved models unnoticed",
+                             "write each use case's contract (`pipewright features contract`), then set "
+                             "features.check: on (docs/FEATURES.md)"))
     _check_writers(env, gcp, report, s, nudge)
     _check_audit_retention(env, gcp, report, s, nudge)
     _check_renewer(env, gcp, report, s, pol)

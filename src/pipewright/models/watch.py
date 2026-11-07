@@ -169,13 +169,60 @@ def _copy_problems(gcp, copy: dict) -> list[str]:
     return out
 
 
-def check(gcp, env, models: dict | None = None, usecases: set | None = None) -> tuple[list[Use], list[str]]:
-    """Every use, verified against its newest approval."""
+def feature_views(gcp, env, groups: dict) -> tuple[list[Use], list[str]]:
+    """FR-103: each feature view serving a feature group a live release's contract reads ({group: use case}). Its
+    newest sync failed: it serves the last good values (found live: a breaking change fails the sync and serving
+    goes on, with no error to the caller), reported as changed; a sync that succeeded is unchanged."""
+    if not groups:
+        return [], []
+    base = f"https://{env.region}-aiplatform.googleapis.com/v1/projects/{env.project}/locations/{env.region}"
+    r = gcp.get(f"{base}/featureOnlineStores")
+    if not r.ok:
+        return [], [f"feature online stores cannot be listed (HTTP {r.status})"]
+    uses, notes = [], []
+    for store in (r.body or {}).get("featureOnlineStores") or []:
+        vr = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{store['name']}/featureViews")
+        if not vr.ok:
+            notes.append(f"feature views of {store['name'].rsplit('/', 1)[-1]} cannot be listed (HTTP {vr.status})")
+            continue
+        for view in (vr.body or {}).get("featureViews") or []:
+            served = [g.get("featureGroupId") for g in
+                      ((view.get("featureRegistrySource") or {}).get("featureGroups") or [])]
+            mine = [g for g in served if g in groups]
+            if not mine:
+                continue
+            where = f"feature_view:{store['name'].rsplit('/', 1)[-1]}/{view['name'].rsplit('/', 1)[-1]}"
+            u = Use(groups[mine[0]], "", "-", where, "feature_view")
+            sr = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{view['name']}/featureViewSyncs",
+                         pageSize="5", orderBy="create_time desc")
+            syncs = [s for s in (sr.body or {}).get("featureViewSyncs") or [] if s.get("finalStatus") is not None
+                     or (s.get("runTime") or {}).get("endTime")] if sr.ok else None
+            if syncs is None:
+                u.status, u.problems = CANNOT, [f"the syncs of {where} cannot be read (HTTP {sr.status})"]
+            elif syncs and int((syncs[0].get("finalStatus") or {}).get("code") or 0) != 0:
+                u.status, u.problems = CHANGED, [
+                    f"the newest sync of {where} ({', '.join(mine)}) failed, so it serves the last good values: "
+                    f"{str((syncs[0].get('finalStatus') or {}).get('message'))[:160]}"]
+                u.severity = "incident"
+            uses.append(u)
+    return uses, notes
+
+
+def check(gcp, env, models: dict | None = None, usecases: set | None = None,
+          groups: dict | None = None) -> tuple[list[Use], list[str]]:
+    """Every use, verified against its newest approval; with `groups`, the feature views serving them (FR-103)."""
     from pipewright.models import integrity
 
     uses, notes = in_use(gcp, env, models, usecases)
+    if groups:
+        try:
+            found, said = feature_views(gcp, env, groups)
+            uses += found
+            notes += said
+        except Exception as e:  # noqa: BLE001 - said, not hidden
+            notes.append(f"feature views cannot be checked: {str(e).splitlines()[0][:160]}")
     for u in uses:
-        if u.status == CANNOT:
+        if u.status == CANNOT or u.kind == "feature_view":
             continue
         try:
             if u.kind == "kserve" and u.copy:
@@ -221,9 +268,9 @@ def transitions(previous: dict, uses: list[Use]) -> list[dict]:
     return out
 
 
-def run(gcp, env, state: dict, models: dict | None = None) -> dict:
+def run(gcp, env, state: dict, models: dict | None = None, groups: dict | None = None) -> dict:
     """One watch run: check, compare with `state` (the last results, updated in place) and return what to record."""
-    uses, notes = check(gcp, env, models)
+    uses, notes = check(gcp, env, models, groups=groups)
     changes = transitions(state.get("results") or {}, uses)
     state["results"] = {u.key: {"status": u.status} for u in uses}
     counts = {s: sum(1 for u in uses if u.status == s) for s in (UNCHANGED, CHANGED, UNAPPROVED, CANNOT)}

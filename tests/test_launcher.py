@@ -243,7 +243,7 @@ def test_the_integrity_watch_records_changes_and_a_heartbeat(monkeypatch):
                         files.__setitem__(n, (t, 1)) or 1)
     change = {"usecase": "churn", "version": "4", "where": "default", "status": "changed", "previous": "unchanged",
               "severity": "incident", "problems": ["model.pt: changed after the approval"]}
-    monkeypatch.setattr(watch, "run", lambda gcp, env, state, models=None: {
+    monkeypatch.setattr(watch, "run", lambda gcp, env, state, models=None, groups=None: {
         "changes": [change], "heartbeat": {"checked": 1, "changed": 1, "notes": []}, "uses": []})
     registry = FakeRegistry([V3])
     registry.manifest.update(project="p", region="r", artifacts_bucket="art", artifact_registry={},

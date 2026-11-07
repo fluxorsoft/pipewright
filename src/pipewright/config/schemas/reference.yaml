@@ -391,3 +391,16 @@ approvals.approvers: Who may approve, as user:<email> or group:<email>.
 
 features_store: Reserved for a later version; leave it out.
 environments: Per-environment overrides, by environment name. Usually kept in environments/<env>.yaml instead.
+feature_contract: "The approved definitions of the feature sources the use case reads (data.features_from), one entry per source (Pipewright 1.4.1, FR-103). `pipewright features contract` writes it from the live sources; commit it with the use case. It travels in the release contract, approvals record it, and with policies.integrity.features check on a definition that differs is an integrity problem. Without it, nothing changes."
+feature_contract.version: "The contract's semantic version, MAJOR.MINOR.PATCH. `pipewright features contract` sets it: a removed or retyped column is major, changed SQL or an added column minor, descriptions a patch."
+feature_contract.sources: "One entry per data.features_from source."
+feature_contract.sources.name: "The source's name: its feature group, or its table's ID (the same in every environment)."
+feature_contract.sources.kind: "view, materialized_view, table (built by a query, a pipeline or dbt) or scheduled_query: what the source's BigQuery object is."
+feature_contract.sources.sql_sha256: "SHA-256 of the defining SQL, whitespace normalised and the source's own project written {project}: a view's or materialized view's from the object, a table's from its sql_file or scheduled query. Null for a table with neither (checked by schema only)."
+feature_contract.sources.schema_sha256: "SHA-256 of the schema as names, types and modes (never descriptions)."
+feature_contract.sources.schema: "The schema, one `name TYPE MODE` per column, for a readable diff."
+feature_contract.sources.sql_file: "A table built by a query: the file holding the SQL that builds it, relative to the use case folder. With policies.integrity.features built_tables on, the SQL of the job that last wrote the table must match it."
+feature_contract.sources.scheduled_query: "A table built by a BigQuery scheduled query: its transfer config name (projects/.../transferConfigs/...). Its SQL is fingerprinted from the config."
+feature_contract.sources.features: "The features the use case reads from the source, each with its type and an optional description (kept when the contract is updated)."
+feature_contract.sources.features.<name>.type: "The feature's BigQuery type, from the source's schema."
+feature_contract.sources.features.<name>.description: "What the feature means, in business terms (yours to write; kept on updates)."

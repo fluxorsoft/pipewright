@@ -77,6 +77,11 @@ def create_app(registry: Registry | None = None) -> Flask:
                                  contract.release_id, rid, **data), topic, getattr(reg(), "gcp", None),
                     region=contract.region, attributes=attributes)
 
+    def _policy_env(contract: ReleaseContract):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(name=contract.environment, policies=reg().manifest.get("policies") or {})
+
     def start(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str,
               hint: str = "", extra: dict | None = None, loop: str | None = None, ml: dict | None = None,
               recorded: dict | None = None) -> dict:
@@ -108,6 +113,28 @@ def create_app(registry: Registry | None = None) -> Flask:
                 log.warning("integrity: %s %s does not declare approved_files, so it loads the live model folder: "
                             "rebuild the release with Pipewright 1.4.1 to pin the approved files",
                             contract.usecase, pipeline)
+        # 1.4.1 (FR-103): with a feature contract, a training run's definitions are checked first (features check
+        # on), and run.submitted records the contract and, for scoring with record_reads, what the run reads.
+        from pipewright.models import integrity as _integrity
+
+        try:
+            fg = _integrity.feature_gate(getattr(reg(), "gcp", None), reg().manifest, contract, pipeline, ml, rid)
+        except Exception as e:  # noqa: BLE001 - a check that cannot run is a problem, not a pass
+            pol = _integrity.policy(_policy_env(contract))
+            fg = {"mode": "off", "problem": None, "record": {}}
+            if pol["features"]["check"] and pipeline == "training":
+                fg = {"mode": pol["mode"], "record": {},
+                      "problem": f"the feature definitions cannot be checked: {str(e).splitlines()[0][:200]}"}
+        if fg["problem"]:
+            _event("run.integrity", contract, rid, pipeline=pipeline, trigger=trigger, mode=fg["mode"],
+                   problem=fg["problem"], check="features")
+            if fg["mode"] == "refuse":
+                log.warning("refused %s %s: %s", contract.usecase, pipeline, fg["problem"])
+                return {"usecase": contract.usecase, "pipeline": pipeline, "status": "refused",
+                        "reason": fg["problem"]}
+            log.warning("integrity (warn) %s %s: %s", contract.usecase, pipeline, fg["problem"])
+        if fg["record"]:
+            recorded = {**(recorded or {}), **fg["record"]}
         try:
             params = parameters_for(contract, target, source_uri, rid, {**(extra or {}), **params_extra,
                                                                         **({"ml_config": ml} if ml else {})})
@@ -275,6 +302,24 @@ def create_app(registry: Registry | None = None) -> Flask:
         """The watch now, whatever its interval (Pipewright 1.4.1): for operators and tests."""
         return jsonify(integrity_watch(force=True)), 200
 
+    def feature_groups(live) -> dict:
+        """FR-103: {feature group: use case} for live releases with a feature contract (the watch checks the feature
+        views serving them)."""
+        from pipewright.retraining.service import ml_config
+
+        out = {}
+        for c in live:
+            try:
+                cfg = ml_config(c)
+            except Exception:  # noqa: BLE001 - a release without ml_config has no contract
+                continue
+            if not cfg.get("feature_contract"):
+                continue
+            for src in ((cfg.get("data") or {}).get("features_from") or {}).get("sources") or []:
+                if src.get("feature_group"):
+                    out[str(src["feature_group"])] = c.usecase
+        return out
+
     def integrity_watch(force: bool) -> dict:
         """Pipewright 1.4.1 (FR-101 items 4 and 5): with policies.integrity.watch on, every default and serving
         version re-checked against its approval; model.integrity when a result changes, and a model.integrity.check
@@ -314,7 +359,8 @@ def create_app(registry: Registry | None = None) -> Flask:
             log.info("integrity watch: another run is under way")
             return {"status": "skipped", "reason": "another watch run is under way"}
         models = {(c.metadata or {}).get("model"): c.usecase for c in live if (c.metadata or {}).get("model")}
-        result = iwatch.run(gcp, env, state, models)
+        groups = feature_groups(live) if pol["features"]["check"] else {}
+        result = iwatch.run(gcp, env, state, models, groups)
         topic = (m.get("observability") or {}).get("events_topic")
         if pol["lock"]["days"] > 0:
             # The cross-identity check: this read-only identity watches what the renewer (or anyone) did to the

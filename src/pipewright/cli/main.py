@@ -406,6 +406,76 @@ def cmd_features_register(args) -> int:
     return 0
 
 
+def cmd_features_contract(args) -> int:
+    """Pipewright 1.4.1 (FR-103): write or check the use case's feature contract from its live feature sources.
+    Exit codes with --check: 0 the sources match the contract, 1 they differ, 2 they cannot be checked."""
+    import yaml as _yaml
+
+    from pipewright.gcp import Gcp
+    from pipewright.models import definitions, integrity
+
+    env = load_environment(Path(args.root), args.env)
+    path = _selected(Path(args.root), [args.usecase])[args.usecase]
+    uc = resolve_usecase(path, env)
+    folder = path if path.is_dir() else path.parent
+    features_from = (uc.ml.get("data") or {}).get("features_from")
+    existing = uc.ml.get("feature_contract")
+    gcp = Gcp()
+    pol = integrity.policy(env)["features"]
+    kms = (env.security or {}).get("bigquery_kms_key")
+    if args.check:
+        if not existing:
+            print(f"{uc.name}: no feature_contract yet (`pipewright features contract --env {env.name} "
+                  f"--usecase {uc.name}` writes one)")
+            return 1
+        try:
+            problems, notes, _ = definitions.check(gcp, existing.get("sources") or [], features_from, env.project,
+                                                   env.region, args.built_tables or pol["built_tables"], kms)
+        except ConfigError as e:
+            print(f"cannot check: {e}")
+            return 2
+        for n in notes:
+            print(f"note: {n}")
+        for p in problems:
+            print(f"DIFFERS {p}")
+        print(f"{uc.name}: feature contract {existing.get('version')} "
+              + ("does NOT match the live sources" if problems else f"matches the live sources in {env.name}"))
+        return 1 if problems else 0
+    out = definitions.build(gcp, features_from, env.project, env.region, existing, folder)
+    section = out["section"]
+    for c in out["changes"]:
+        print(f"  {c}")
+    for s in section["sources"]:
+        if s["kind"] == "table" and not (s.get("sql_file") or s.get("scheduled_query")):
+            print(f"note: {s['name']} is a table built by a query: add its sql_file (or scheduled_query) to check "
+                  "its SQL; until then it is checked by schema only")
+    if existing and out["level"] is None:
+        print(f"{uc.name}: feature contract {existing.get('version')} matches the live sources; nothing to write")
+        return 0
+    what = "new" if not existing else f"{out['level']} change: {existing.get('version')} -> {section['version']}"
+    target = None
+    for f in sorted(folder.rglob("*.y*ml")):
+        try:
+            doc = _yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        except (OSError, _yaml.YAMLError):
+            continue
+        if isinstance(doc, dict) and "feature_contract" in doc:
+            target = f
+            break
+    target = target or folder / "config" / "feature_contract.yaml"
+    if args.dry_run:
+        print(f"{uc.name}: feature contract {section['version']} ({what}); would write {target}")
+        return 0
+    header = ("# The feature contract (Pipewright 1.4.1, FR-103): the approved definitions of the feature sources\n"
+              "# this use case reads. Written by `pipewright features contract`; commit it with the use case.\n"
+              "# Descriptions, sql_file and scheduled_query are yours to edit; the fingerprints are not.\n")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(header + _yaml.safe_dump({"feature_contract": section}, sort_keys=False, width=110),
+                      encoding="utf-8")
+    print(f"{uc.name}: wrote feature contract {section['version']} ({what}) to {target}")
+    return 0
+
+
 def cmd_report_fleet(args) -> int:
     """Phase 6 (FR-86): every use case in every environment on one read-only HTML page."""
     from pipewright.gcp import Gcp
@@ -1197,6 +1267,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="say what would be created; create nothing")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_features_register)
+    sp = fsub.add_parser("contract", help="write (or --check) the use case's feature contract from its live feature "
+                                          "sources (FR-103)")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--env", required=True)
+    sp.add_argument("--usecase", required=True)
+    sp.add_argument("--check", action="store_true", help="compare the contract with the live sources: exit 0 same, "
+                                                         "1 different, 2 cannot check (for CI)")
+    sp.add_argument("--built-tables", action="store_true", help="with --check: also the SQL of the job that last "
+                                                                "wrote each table built by a query")
+    sp.add_argument("--dry-run", action="store_true", help="say what would change; write nothing")
+    sp.set_defaults(func=cmd_features_contract)
 
     sp = sub.add_parser("report", help="read-only reports from the records Pipewright keeps")
     rsub = sp.add_subparsers(dest="report_command", required=True)

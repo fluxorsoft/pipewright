@@ -250,6 +250,40 @@ def _evaluated(gcp: Gcp, artifact_uri: str | None) -> dict:
     return {"evaluation": found} if found else {}
 
 
+def destination_features(gcp: Gcp, uc_dst, dst_env: Environment, source, log=print) -> dict | None:
+    """FR-103: the release's feature contract checked in the destination before anything is promoted (with
+    policies.integrity.features check on there, a definition that differs refuses the promotion, or warns under
+    mode warn). Returns the approval's `features` record, or None when the release has no contract."""
+    from pipewright.models import definitions, integrity
+    from pipewright.retraining.service import ml_config
+
+    section = ml_config(source).get("feature_contract")
+    if not section:
+        return None
+    pol = integrity.policy(dst_env)["features"]
+    features_from = (ml_config(source).get("data") or {}).get("features_from")
+    if (uc_dst.ml.get("data") or {}).get("features_from"):
+        features_from = uc_dst.ml["data"]["features_from"]           # interpolated for the destination
+    problems, notes, now = definitions.check(gcp, section.get("sources") or [], features_from, dst_env.project,
+                                             dst_env.region, pol["built_tables"],
+                                             (dst_env.security or {}).get("bigquery_kms_key"))
+    for n in notes:
+        log(f"integrity: {n}")
+    if problems and pol["check"]:
+        integrity.enforce(integrity.Check(problems=problems), dst_env,
+                          f"release {source.release_id} of {uc_dst.name} is not promoted to {dst_env.name}", log,
+                          reason=f"the feature definitions in {dst_env.name} are not the ones in feature contract "
+                                 f"{section.get('version')}",
+                          remedy="make the destination's feature sources match the contract, or release a new "
+                                 "contract")
+    elif problems:
+        for p in problems:
+            log(f"integrity WARNING (policies.integrity.features.check off in {dst_env.name}): {p}")
+    else:
+        log(f"integrity: feature contract {section.get('version')}: {len(now)} sources match in {dst_env.name}")
+    return definitions.approval_record(section, now)
+
+
 def _judged_copy(gcp: Gcp, dst_env: Environment, model: dict, rules, log=print) -> dict:
     """Phase 6: what a promotion's approval approved in the destination (its copied files and the serving image,
     by fingerprint, and the rules), and the lock on those files. A fingerprint that cannot be taken is said and
@@ -529,6 +563,7 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
         from pipewright.models import integrity
 
         integrity.check_source(gcp, src_env, dst_env, uc_dst.name, checked_version, chosen, loop_case, log)
+    dst_features = destination_features(gcp, uc_dst, dst_env, source, log)
 
     # 4. Templates: compiled for the destination (at the destination's image addresses), compared with the
     # source's, before anything is copied.
@@ -651,7 +686,8 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
                                  model=model["name"], version=model["version"], previous=None, by=who,
                                  via="promotion", source_environment=src_env.name,
                                  **_evaluated(gcp, model.get("artifact_uri")),
-                                 **_judged_copy(gcp, dst_env, model, released_rules, log)),
+                                 **_judged_copy(gcp, dst_env, model, released_rules, log),
+                                 **({"features": dst_features} if dst_features else {})),
                     dst_env.observability.get("events_topic"), gcp, stream=_quiet(), region=dst_env.region)
     from pipewright.models.integrity import contract_sha256
 

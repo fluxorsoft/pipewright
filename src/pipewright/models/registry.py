@@ -198,12 +198,46 @@ def _judged(uc: ResolvedUseCase, env: Environment, creds, resource: str, version
                               remedy="retrain (or register the folder again) so the copy and the folder match")
     if image:
         record["serving_image"] = image
+    features = _features_judged(uc, env, gcp, rules, version, log)
+    if features:
+        record["features"] = features
     if labels.get("pipewright-engine") == "bqml" and labels.get("pipewright-bq-model"):
         dataset = (uc.resources or {}).get("bigquery_dataset")
         model = integrity.bq_model(gcp, f"{env.project}.{dataset}.{labels['pipewright-bq-model']}")
         if model:
             record["bq_model"] = model
     return rules, record, folder
+
+
+def _features_judged(uc: ResolvedUseCase, env: Environment, gcp, rules, version: str, log=print) -> dict | None:
+    """FR-103 (story 8): the approval covers the feature definitions. With a feature contract (the one the version
+    was trained with), its sources are read live and recorded on the approval; with policies.integrity.features
+    check on, a definition that differs from the contract refuses the approval (under mode warn, says so)."""
+    from pipewright.models import definitions, integrity
+
+    section = rules.features
+    pol = integrity.policy(env)["features"]
+    if not section:
+        if pol["check"] and (uc.ml.get("data") or {}).get("features_from"):
+            log("integrity: the use case has no feature_contract, so the approval cannot pin its feature definitions "
+                "(`pipewright features contract`)")
+        return None
+    problems, notes, now = definitions.check(gcp, section.get("sources") or [], uc.ml["data"].get("features_from"),
+                                             env.project, env.region, pol["built_tables"],
+                                             (env.security or {}).get("bigquery_kms_key"))
+    for n in notes:
+        log(f"integrity: {n}")
+    if problems:
+        if pol["check"]:
+            integrity.enforce(integrity.Check(problems=problems), env,
+                              f"v{version} of {uc.model['name']} cannot be approved",
+                              log, reason=f"its feature definitions are not the ones in feature contract "
+                                          f"{section.get('version')}, which it was trained with",
+                              remedy="update the contract (`pipewright features contract`), release and retrain")
+        else:
+            for p in problems:
+                log(f"integrity WARNING (policies.integrity.features.check off): {p}")
+    return definitions.approval_record(section, now)
 
 
 def registered_problem(gcp, env: Environment, usecase: str, version: str, files: dict) -> dict:

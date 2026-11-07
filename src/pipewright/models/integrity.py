@@ -65,7 +65,35 @@ def policy(env: Environment, today=None) -> dict:
                      "renew": bool(lock.get("renew", True)) and days > 0,
                      "rollback_days": days if rollback is None else int(rollback)},
             "inference": p.get("inference") or "off", "pin": (p.get("pin") or "on") == "on",
-            "watch": (p.get("watch") or "off") == "on", "watch_every_hours": _every_hours(p.get("watch_every"))}
+            "watch": (p.get("watch") or "off") == "on", "watch_every_hours": _every_hours(p.get("watch_every")),
+            "features": features_policy(p.get("features"))}
+
+
+def features_policy(value) -> dict:
+    """policies.integrity.features (Pipewright 1.4.1, FR-103): everything off by default."""
+    f = dict(value or {})
+    days = int(f.get("snapshot_days") or 0)
+    if days < 0:
+        raise ConfigError("policies.integrity.features.snapshot_days must be 0 or more")
+    return {"check": (f.get("check") or "off") == "on", "built_tables": bool(f.get("built_tables")),
+            "record_reads": bool(f.get("record_reads")) or bool(f.get("fingerprint_rows")) or days > 0,
+            "fingerprint_rows": bool(f.get("fingerprint_rows")), "snapshot_days": days}
+
+
+def compare_features(gcp, env: Environment, approved: dict | None) -> tuple[list[str], list[str]]:
+    """FR-103: the feature sources an approval recorded, against what they are now (policies.integrity.features
+    check on). (problems, notes); nothing when the check is off or the approval recorded no features."""
+    if not approved or not approved.get("sources"):
+        return [], []
+    pol = features_policy(((getattr(env, "policies", None) or {}).get("integrity") or {}).get("features"))
+    if not pol["check"]:
+        return [], []
+    from pipewright.models import definitions
+
+    problems, notes, _ = definitions.check(gcp, approved["sources"], None, env.project,
+                                           getattr(env, "region", None) or "", pol["built_tables"],
+                                           ((getattr(env, "security", None) or {}).get("bigquery_kms_key")))
+    return problems, notes
 
 
 # -- model files (FR-94) ------------------------------------------------------------------------------------------
@@ -235,6 +263,7 @@ class Rules:
     source: str                                   # release, or working copy (with the reason in `note`)
     note: str | None = None
     differs: list[str] = field(default_factory=list)
+    features: dict | None = None                  # FR-103: the feature contract the version was trained with
 
     def record(self) -> dict:
         return {"release": self.release, "source": self.source, "evaluation_sha256": _canonical(self.evaluation),
@@ -261,9 +290,11 @@ def released_rules(uc: ResolvedUseCase, env: Environment, gcp, release_id: str |
     has the gates (its ml_config) but not the approvers: those then come from the working copy, with a note. The
     working copy may be stricter, never looser: `differs` names the keys where it is not the released value."""
     local_eval, local_appr = dict(uc.ml.get("evaluation") or {}), dict(uc.approvals or {})
+    local_feat = uc.ml.get("feature_contract")
     if not release_id:
         return Rules(local_eval, local_appr, None, "working copy",
-                     "the version names no release (trained before Pipewright 1.1): the working copy's rules apply")
+                     "the version names no release (trained before Pipewright 1.1): the working copy's rules apply",
+                     features=local_feat)
     from pipewright.release.contract import contract_name
     from pipewright.release.service import read_contract
     from pipewright.retraining.service import ml_config
@@ -273,14 +304,18 @@ def released_rules(uc: ResolvedUseCase, env: Environment, gcp, release_id: str |
     except ConfigError:
         return Rules(local_eval, local_appr, release_id, "working copy",
                      f"release {release_id} has no contract in {env.name} (trained elsewhere): the working copy's "
-                     "rules apply")
+                     "rules apply", features=local_feat)
     released_eval = dict(ml_config(contract).get("evaluation") or {})
     released_appr = dict((contract.metadata or {}).get("approvals") or {})
     note = None if released_appr else (f"release {release_id} predates Pipewright 1.4.0 and does not record its "
                                        "approvers: "
                                        "the working copy's approvers apply")
+    released_feat = ml_config(contract).get("feature_contract")
     rules = Rules(released_eval or local_eval, released_appr or local_appr, release_id,
-                  "release" if released_eval else "working copy", note)
+                  "release" if released_eval else "working copy", note,
+                  features=released_feat if released_eval else local_feat)
+    if released_eval and _canonical(released_feat) != _canonical(local_feat):
+        rules.differs.append("feature_contract")
     if released_eval and _canonical(released_eval) != _canonical(local_eval):
         rules.differs.append("ml.evaluation")
     if released_appr and _canonical(released_appr) != _canonical(local_appr):
@@ -373,6 +408,9 @@ def verify(gcp, env: Environment, usecase: str, version: str, folder: str | None
         check.notes.append("the approval records no model files (approved before Pipewright 1.4.0)")
     check.problems += compare_image(gcp, approval.get("serving_image"), image)
     check.problems += compare_bq_model(gcp, approval.get("bq_model"))
+    found, said = compare_features(gcp, env, approval.get("features"))
+    check.problems += found
+    check.notes += said
     return check
 
 
@@ -854,7 +892,32 @@ def contract_check(gcp, env: Environment, usecase: str, release: str, text: str)
     if now not in found:
         check.problems.append(f"release {release}'s contract has sha256 {now[:16]}, not the {found[0][:16]} it went "
                               "live with")
+    rollback_features(gcp, env, release, text, check)
     return check
+
+
+def rollback_features(gcp, env: Environment, release: str, text: str, check: Check) -> None:
+    """FR-103 (story 10): rolling back to a release with a feature contract checks that the feature sources are
+    still the definitions it was released with (policies.integrity.features check on): a model and its features go
+    back together, or not at all. Pipewright never rewrites a team's feature SQL: the problem says what changed."""
+    if not policy(env)["features"]["check"]:
+        return
+    from pipewright.models import definitions
+    from pipewright.release.contract import ReleaseContract
+    from pipewright.retraining.service import ml_config
+
+    try:
+        cfg = ml_config(ReleaseContract.from_dict(json.loads(text)))
+    except Exception:  # noqa: BLE001 - an unreadable contract is reported by the fingerprint check
+        return
+    section = cfg.get("feature_contract")
+    if not section:
+        return
+    problems, notes, _ = definitions.check(gcp, section.get("sources") or [], (cfg.get("data") or {}).get(
+        "features_from"), env.project, env.region, policy(env)["features"]["built_tables"],
+        (env.security or {}).get("bigquery_kms_key"))
+    check.problems += [f"release {release}: {p} (feature contract {section.get('version')})" for p in problems]
+    check.notes += notes
 
 
 def contract_sha256(text: str) -> str:
@@ -921,3 +984,96 @@ def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
            " with a temporary hold (the bucket has no object retention: a hold has no end date, release it when the "
            "version is retired)"))
     return out
+
+
+# -- feature definitions at run submission (FR-103) ---------------------------------------------------------------
+
+def feature_gate(gcp, manifest: dict, contract, pipeline: str, ml: dict | None = None, run_id: str | None = None,
+                 now=None) -> dict:
+    """Pipewright 1.4.1 (FR-103, stories 3, 4 and 6): what the launcher does about feature definitions before it
+    submits a run of a release that has a feature contract. Returns {"mode", "problem", "record"}: `record` goes on
+    run.submitted (the contract's version and digest; with record_reads, what a scoring run reads).
+
+    - training, with policies.integrity.features check on: the contract against the live sources; a difference is
+      a problem judged by policies.integrity.mode (refuse: not submitted).
+    - scoring, with record_reads: each source's base tables (a free dry run's referencedTables), their last-modified
+      time and row count, and the read time; fingerprint_rows adds a row fingerprint per source (one scan each);
+      snapshot_days adds a snapshot of each base table in the use case's dataset, expiring after that many days."""
+    from types import SimpleNamespace
+
+    from pipewright.models import definitions
+    from pipewright.retraining.service import ml_config
+
+    cfg = ml or ml_config(contract)
+    section = (cfg or {}).get("feature_contract")
+    out = {"mode": "off", "problem": None, "record": {}}
+    if not section:
+        return out
+    env = SimpleNamespace(name=contract.environment, project=contract.project, region=contract.region,
+                          policies=manifest.get("policies") or {}, security=manifest.get("security") or {})
+    pol = policy(env)
+    feat = pol["features"]
+    kms = (env.security or {}).get("bigquery_kms_key")
+    out["record"]["feature_contract"] = {"version": section.get("version"),
+                                         "sha256": definitions.contract_digest(section)}
+    features_from = (cfg.get("data") or {}).get("features_from")
+    if pipeline == "training" and feat["check"]:
+        out["mode"] = pol["mode"]
+        problems, _, _ = definitions.check(gcp, section.get("sources") or [], features_from, contract.project,
+                                           contract.region, feat["built_tables"], kms)
+        if problems:
+            out["problem"] = (f"the feature definitions are not the ones in feature contract {section.get('version')}"
+                              f": " + "; ".join(problems))[:900]
+    if pipeline == "inference" and feat["record_reads"]:
+        try:
+            out["record"]["feature_reads"] = record_reads(gcp, features_from, contract, feat,
+                                                          (contract.metadata or {}).get("dataset"), kms, run_id, now)
+        except Exception as e:  # noqa: BLE001 - recording what was read must not stop scoring; it is said
+            out["record"]["feature_reads"] = {"error": str(e).splitlines()[0][:200]}
+    return out
+
+
+def record_reads(gcp, features_from: dict | None, contract, feat: dict, dataset: str | None, kms: str | None,
+                 run_id: str | None, now=None) -> dict:
+    """What a scoring run reads, so its inputs can be rebuilt: time travel on the base tables within the dataset's
+    window, or the snapshots. A view cannot be read as of a time or snapshotted (found live), so it is the view's
+    base tables that are recorded and snapshotted."""
+    import datetime
+
+    from pipewright.gcp.bigquery import BQ, query, rows
+    from pipewright.models import definitions
+
+    at = now or datetime.datetime.now(datetime.timezone.utc)
+    sources = []
+    for src in (features_from or {}).get("sources") or []:
+        ref = definitions.resolve(gcp, src, contract.project, contract.region)
+        p, d, t = definitions.parse_ref(ref)
+        dry = gcp.post(f"{BQ}/projects/{contract.project}/jobs", {
+            "configuration": {"dryRun": True, "query": {"query": f"SELECT * FROM `{ref}`", "useLegacySql": False}}})
+        if not dry.ok:
+            raise ConfigError(f"{ref}: a dry run failed (HTTP {dry.status})")
+        refs = (((dry.body or {}).get("statistics") or {}).get("query") or {}).get("referencedTables")
+        refs = refs or [{"projectId": p, "datasetId": d, "tableId": t}]
+        base = []
+        for r in refs:
+            bref = f"{r['projectId']}.{r['datasetId']}.{r['tableId']}"
+            meta = gcp.get(f"{BQ}/projects/{r['projectId']}/datasets/{r['datasetId']}/tables/{r['tableId']}")
+            body = meta.body if meta.ok else {}
+            item = {"table": bref, "last_modified": body.get("lastModifiedTime"), "rows": body.get("numRows")}
+            if feat["snapshot_days"] and dataset and body.get("type") == "TABLE":
+                snap = f"{r['tableId']}_snap_{(run_id or at.strftime('%Y%m%d%H%M%S'))}"[:1024]
+                expires = (at + datetime.timedelta(days=feat["snapshot_days"])).strftime("%Y-%m-%d %H:%M:%S")
+                query(gcp, contract.project,
+                      f"CREATE SNAPSHOT TABLE `{contract.project}.{dataset}.{snap}` CLONE `{bref}` "
+                      f"OPTIONS (expiration_timestamp = TIMESTAMP '{expires}')", kms_key=kms)
+                item["snapshot"] = f"{contract.project}.{dataset}.{snap}"
+            base.append(item)
+        entry = {"name": definitions.source_name(src), "object": ref, "base_tables": base}
+        if feat["fingerprint_rows"]:
+            found = rows(query(gcp, contract.project,
+                               f"SELECT COUNT(*) AS n, BIT_XOR(FARM_FINGERPRINT(TO_JSON_STRING(t))) AS fp "
+                               f"FROM `{ref}` AS t", kms_key=kms))
+            entry["rows"], entry["row_fingerprint"] = (found[0]["n"], str(found[0]["fp"])) if found else (0, None)
+        sources.append(entry)
+    return {"read_at": at.strftime("%Y-%m-%dT%H:%M:%SZ"), "sources": sources}
+

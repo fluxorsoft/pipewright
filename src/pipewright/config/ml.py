@@ -80,11 +80,17 @@ DEFAULTS = {
     "synthetic": SYNTHETIC_DEFAULTS,               # FR-49: off unless synthetic.enabled
 }
 SECTIONS = tuple(DEFAULTS)
+# Pipewright 1.4.1 (FR-103): sections with no defaults, present only when the use case has them, so a use case
+# without one resolves (and releases) exactly as before.
+OPTIONAL_SECTIONS = ("feature_contract",)
 
 
 def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[str],
                problems: list[str]) -> dict:
     ml = {name: deep_merge(DEFAULTS[name], spec.get(name) or {}) for name in SECTIONS}
+    if spec.get("feature_contract"):
+        ml["feature_contract"] = _feature_contract(spec["feature_contract"], ml["data"].get("features_from"),
+                                                   problems)
     data, features, training, evaluation = ml["data"], ml["features"], ml["training"], ml["evaluation"]
     monitoring, retraining, protection = ml["monitoring"], ml["retraining"], ml["data_protection"]
 
@@ -449,3 +455,37 @@ def _features_from(spec: dict | None, columns: dict, label: str | None, known, p
             if name == label:
                 problems.append(f"{at}: feature {name!r} is the label; the label comes from the entity table")
             known(name, f"{at}.features")
+
+
+def _feature_contract(section: dict, features_from: dict | None, problems: list[str]) -> dict:
+    """feature_contract (FR-103): one entry per data.features_from source, by name (its feature group, or its
+    table's ID); written by `pipewright features contract`."""
+    from pipewright.models.definitions import KINDS, _version, source_name
+
+    try:
+        _version(section.get("version"))
+    except Exception as e:  # noqa: BLE001 - said as a problem with the others
+        problems.append(str(e))
+    names = []
+    for src in (features_from or {}).get("sources") or []:
+        try:
+            names.append(source_name(src))
+        except Exception:  # noqa: BLE001 - a bad source is reported by the features_from checks
+            pass
+    seen = []
+    for entry in section.get("sources") or []:
+        name = entry.get("name")
+        seen.append(name)
+        if not features_from:
+            problems.append("feature_contract: the use case reads no feature tables (data.features_from)")
+            break
+        if name not in names:
+            problems.append(f"feature_contract.sources: {name!r} is not a data.features_from source "
+                            f"({', '.join(names) or 'none'})")
+        if entry.get("kind") not in KINDS:
+            problems.append(f"feature_contract.sources.{name}.kind must be one of {', '.join(KINDS)}")
+    missing = [n for n in names if n not in seen]
+    if features_from and missing:
+        problems.append(f"feature_contract: no entry for {', '.join(missing)}: run `pipewright features contract`")
+    return section
+

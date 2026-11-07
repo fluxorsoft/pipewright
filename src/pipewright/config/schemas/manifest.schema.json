@@ -444,6 +444,18 @@
               "pattern": "^[0-9]+[hd]$",
               "default": "1h",
               "description": "Pipewright 1.4.1: how often the watch runs, on the launcher's hourly tick: 1h, 6h, 1d."
+            },
+            "features": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Pipewright 1.4.1 (FR-103): feature definitions checked against the feature contract and the approval. All off by default.",
+              "properties": {
+                "check": { "enum": ["on", "off"], "default": "off", "description": "a changed definition is an integrity problem, judged by policies.integrity.mode" },
+                "built_tables": { "type": "boolean", "default": false, "description": "tables built by a query: the SQL of the job that last wrote them (needs bigquery.jobs.listAll)" },
+                "record_reads": { "type": "boolean", "default": false, "description": "scoring runs record the base tables they read and when" },
+                "fingerprint_rows": { "type": "boolean", "default": false, "description": "and a row fingerprint per source (one full scan each)" },
+                "snapshot_days": { "type": "integer", "minimum": 0, "default": 0, "description": "and an immutable snapshot of each base table, kept this many days" }
+              }
             }
           }
         }
