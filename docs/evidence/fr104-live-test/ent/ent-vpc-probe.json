@@ -1,0 +1,1 @@
+{"asked": 200, "calls": 50, "entities_found": 150, "features": ["avg_monthly_usage_gb", "contract_length_months", "has_paperless_billing", "monthly_charges", "num_products", "num_support_tickets", "tenure_months", "total_charges"], "max_ms": 680.4, "ok": 50, "p50_ms": 38.9, "p95_ms": 175.5}

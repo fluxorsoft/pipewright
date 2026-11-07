@@ -1,0 +1,7 @@
+Online store of churnfq
+  INFO  store: BigQuery pw-ebook.pw_demo.pw_online_churnfq with BI Engine (1 GiB reserved, about $38 a month for the environment)
+  WARN  served table: pw-ebook.pw_demo.pw_online_churnfq: not synced yet
+        -> run `pipewright features sync` or wait for the online_sync schedule
+  WARN  last sync: none yet
+        -> add a schedule with pipeline online_sync, or run `pipewright features sync`
+

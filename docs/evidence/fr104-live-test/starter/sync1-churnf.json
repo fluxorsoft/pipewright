@@ -1,0 +1,39 @@
+{
+ "usecase": "churnf",
+ "tenant": "demo",
+ "environment": "test",
+ "type": "cloudsql",
+ "generation": "g20261107T171653Z",
+ "as_of": "2026-11-07 17:16:53+00",
+ "rows": 5000,
+ "latest_table": "pw-ebook.pw_demo.pw_online_churnf__latest",
+ "latest_job": "job_M6NkLkVwjUuiBFdI-p4EDaEMdFa5",
+ "bytes_billed": 20971520,
+ "feature_contract": {
+  "version": "1.1.0",
+  "sha256": "7b4f8d91a492869d9424476a2535c2272937fbee415204f44ecd5fe99349d181"
+ },
+ "release": "9c0879f85070-dirty-1794070869",
+ "files": 1,
+ "bytes": 108890,
+ "manifest": "gs://pw-ebook-pw-artifacts/online-export/demo/churnf/g20261107T171653Z/manifest.json",
+ "manifest_sha256": "e53bae99408c7fefaa628683ed29d10d8800ece95878bc61c4da9d3d4753f5dd",
+ "load": {
+  "swap": {
+   "ms": 13.6,
+   "tries": 1
+  },
+  "rows": 5000
+ },
+ "pruned": [],
+ "timings": {
+  "latest_s": 2.7,
+  "extract_s": 2.3,
+  "read_s": 0.1,
+  "load_s": 1.0,
+  "copy_s": 0.5,
+  "index_s": 0.1,
+  "total_s": 6.5
+ },
+ "synced_at": "2026-11-07T17:17:00.235642+00:00"
+}

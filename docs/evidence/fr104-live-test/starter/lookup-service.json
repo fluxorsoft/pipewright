@@ -1,0 +1,132 @@
+{
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+    "annotations": {
+      "run.googleapis.com/ingress": "internal",
+      "run.googleapis.com/ingress-status": "internal",
+      "run.googleapis.com/maxScale": "5",
+      "run.googleapis.com/minScale": "1",
+      "run.googleapis.com/operation-id": "e3734401-480b-475a-a073-0af2fb53aefd",
+      "run.googleapis.com/urls": "[\"https://pwl-demo-churnf-522129413870.europe-west2.run.app\",\"https://pwl-demo-churnf-dqlu24udla-nw.a.run.app\"]",
+      "serving.knative.dev/creator": "pw-launcher@pw-ebook.iam.gserviceaccount.com",
+      "serving.knative.dev/lastModifier": "pw-launcher@pw-ebook.iam.gserviceaccount.com"
+    },
+    "creationTimestamp": "2026-11-07T17:21:27.673010Z",
+    "generation": 1,
+    "labels": {
+      "cloud.googleapis.com/location": "europe-west2",
+      "pipewright-tenant": "demo",
+      "pipewright-usecase": "churnf",
+      "run.googleapis.com/satisfiesPzs": "true"
+    },
+    "name": "pwl-demo-churnf",
+    "namespace": "522129413870",
+    "resourceVersion": "AAZfsvX6Yks",
+    "selfLink": "/apis/serving.knative.dev/v1/namespaces/522129413870/services/pwl-demo-churnf",
+    "uid": "f6854f87-42da-4302-92e8-bab1c156be1b"
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "autoscaling.knative.dev/maxScale": "3",
+          "autoscaling.knative.dev/minScale": "0",
+          "run.googleapis.com/cpu-throttling": "true",
+          "run.googleapis.com/execution-environment": "gen2",
+          "run.googleapis.com/network-interfaces": "[{\"network\":\"projects/pw-ebook/global/networks/pw-online\",\"subnetwork\":\"projects/pw-ebook/regions/europe-west2/subnetworks/pw-online\"}]",
+          "run.googleapis.com/sessionAffinity": "false",
+          "run.googleapis.com/startup-cpu-boost": "true",
+          "run.googleapis.com/vpc-access-egress": "private-ranges-only"
+        },
+        "labels": {
+          "pipewright-release": "9c0879f85070-dirty-1794070869",
+          "pipewright-tenant": "demo",
+          "pipewright-usecase": "churnf",
+          "run.googleapis.com/startupProbeType": "Custom"
+        }
+      },
+      "spec": {
+        "containerConcurrency": 80,
+        "containers": [
+          {
+            "command": [
+              "python",
+              "-m",
+              "pipewright.online.server"
+            ],
+            "env": [
+              {
+                "name": "PIPEWRIGHT_LOOKUP",
+                "value": "{\"host\":\"10.45.240.3\",\"database\":\"features\",\"schema\":\"team_demo\",\"table\":\"pw_online_churnf\",\"key\":\"customer_id\",\"features\":[\"tenure_months\",\"monthly_charges\",\"total_charges\",\"contract_length_months\",\"num_products\",\"has_paperless_billing\",\"num_support_tickets\",\"avg_monthly_usage_gb\"],\"pool_size\":8,\"timeout_ms\":1000,\"server_ca\":null}"
+              }
+            ],
+            "image": "europe-west2-docker.pkg.dev/pw-ebook/pw-images/pipewright-launcher@sha256:8216dc0e56a6694aa914811da26db3be11950f07111403d69ae80b62c074f9bb",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "name": "http1"
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              }
+            },
+            "startupProbe": {
+              "failureThreshold": 20,
+              "httpGet": {
+                "path": "/healthz",
+                "port": 8080
+              },
+              "periodSeconds": 3,
+              "timeoutSeconds": 1
+            }
+          }
+        ],
+        "serviceAccountName": "pw-pwl-demo@pw-ebook.iam.gserviceaccount.com",
+        "timeoutSeconds": 300
+      }
+    },
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100
+      }
+    ]
+  },
+  "status": {
+    "address": {
+      "url": "https://pwl-demo-churnf-dqlu24udla-nw.a.run.app"
+    },
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-11-07T17:21:35.908427Z",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-11-07T17:21:28.639604Z",
+        "status": "True",
+        "type": "ConfigurationsReady"
+      },
+      {
+        "lastTransitionTime": "2026-11-07T17:21:35.866924Z",
+        "status": "True",
+        "type": "RoutesReady"
+      }
+    ],
+    "latestCreatedRevisionName": "pwl-demo-churnf-00001-9fn",
+    "latestReadyRevisionName": "pwl-demo-churnf-00001-9fn",
+    "observedGeneration": 1,
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100,
+        "revisionName": "pwl-demo-churnf-00001-9fn"
+      }
+    ],
+    "url": "https://pwl-demo-churnf-dqlu24udla-nw.a.run.app"
+  }
+}

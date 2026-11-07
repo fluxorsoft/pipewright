@@ -1,0 +1,82 @@
+{
+ "environment_online_store": {
+  "types": [
+   "bigtable",
+   "cloudsql",
+   "bigquery"
+  ],
+  "cloudsql": {
+   "instance": "pw-ebook:europe-west2:pw-features",
+   "tier": "db-custom-1-3840",
+   "availability": "zonal",
+   "monthly_usd": 61.24
+  },
+  "bi_engine": {
+   "gib": 1,
+   "monthly_usd": 37.96
+  }
+ },
+ "usecases": {
+  "churnf": {
+   "online": {
+    "type": "cloudsql",
+    "provider": "pipewright",
+    "schema": "team_demo",
+    "table": "pw_online_churnf",
+    "service": "pwl-demo-churnf",
+    "lookup": {
+     "cpu": 1,
+     "memory": "512Mi",
+     "min_instances": 1,
+     "max_instances": 3
+    },
+    "lookup_monthly_usd": 13.8
+   },
+   "online_sync": {
+    "type": "cloudsql",
+    "generation": "g20261107T180021Z",
+    "rows": 5000,
+    "as_of": "2026-11-07 18:00:21+00",
+    "synced_at": "2026-11-07T18:00:27.728924+00:00",
+    "manifest_sha256": "1552095baf4da8992fa078971a5a74b59e5c95e607fcf45b3bccf1dfbfedb1ee",
+    "feature_contract": {
+     "version": "1.1.0",
+     "sha256": "7b4f8d91a492869d9424476a2535c2272937fbee415204f44ecd5fe99349d181"
+    },
+    "timings": {
+     "latest_s": 2.6,
+     "extract_s": 2.3,
+     "read_s": 0.1,
+     "load_s": 1.0,
+     "copy_s": 0.5,
+     "index_s": 0.1,
+     "total_s": 6.6
+    },
+    "release": "9c0879f85070-dirty-1794074351"
+   }
+  },
+  "churnfq": {
+   "online": {
+    "type": "bigquery",
+    "table": "pw-ebook.pw_demo.pw_online_churnfq"
+   },
+   "online_sync": {
+    "type": "bigquery",
+    "generation": "g20261107T180221Z",
+    "rows": 5000,
+    "as_of": "2026-11-07 18:02:21+00",
+    "synced_at": "2026-11-07T18:02:24.589448+00:00",
+    "manifest_sha256": null,
+    "feature_contract": {
+     "version": "1.1.0",
+     "sha256": "7b4f8d91a492869d9424476a2535c2272937fbee415204f44ecd5fe99349d181"
+    },
+    "timings": {
+     "latest_s": 2.7,
+     "total_s": 3.0
+    },
+    "release": "9c0879f85070-dirty-1794071056"
+   }
+  }
+ }
+}

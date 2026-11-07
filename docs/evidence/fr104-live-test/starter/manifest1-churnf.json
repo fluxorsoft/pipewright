@@ -1,0 +1,65 @@
+{
+ "kind": "pipewright.online.generation",
+ "version": 1,
+ "usecase": "churnf",
+ "environment": "test",
+ "generation": "g20261107T171653Z",
+ "as_of": "2026-11-07 17:16:53+00",
+ "entity_key": "customer_id",
+ "rows": 5000,
+ "schema": [
+  {
+   "name": "customer_id",
+   "type": "STRING"
+  },
+  {
+   "name": "tenure_months",
+   "type": "INTEGER"
+  },
+  {
+   "name": "monthly_charges",
+   "type": "FLOAT"
+  },
+  {
+   "name": "total_charges",
+   "type": "FLOAT"
+  },
+  {
+   "name": "contract_length_months",
+   "type": "INTEGER"
+  },
+  {
+   "name": "num_products",
+   "type": "INTEGER"
+  },
+  {
+   "name": "has_paperless_billing",
+   "type": "INTEGER"
+  },
+  {
+   "name": "num_support_tickets",
+   "type": "INTEGER"
+  },
+  {
+   "name": "avg_monthly_usage_gb",
+   "type": "FLOAT"
+  },
+  {
+   "name": "feature_timestamp",
+   "type": "TIMESTAMP"
+  }
+ ],
+ "files": [
+  {
+   "name": "online-export/demo/churnf/g20261107T171653Z/part-000000000000.parquet",
+   "generation": "1794071817523151",
+   "bytes": 108890,
+   "sha256": "4089bbffc44505f350a3487f1d48bc8bfe0ca3fea4c65e7d184ad2260d6f2aa0"
+  }
+ ],
+ "latest_job": "job_M6NkLkVwjUuiBFdI-p4EDaEMdFa5",
+ "feature_contract": {
+  "version": "1.1.0",
+  "sha256": "7b4f8d91a492869d9424476a2535c2272937fbee415204f44ecd5fe99349d181"
+ }
+}

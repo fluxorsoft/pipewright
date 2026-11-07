@@ -1,0 +1,39 @@
+{
+ "usecase": "churnf",
+ "tenant": "churn",
+ "environment": "ent",
+ "type": "cloudsql",
+ "generation": "g20261107T184547Z",
+ "as_of": "2026-11-07 18:45:47+00",
+ "rows": 5000,
+ "latest_table": "pipewright-enterprise.pw_ent_churn.pw_online_churnf__latest",
+ "latest_job": "job_KFHnavPzGq7jLRyPg0T6WYDDvHyk",
+ "bytes_billed": 20971520,
+ "feature_contract": {
+  "version": "1.2.0",
+  "sha256": "414d826b0d98185cb5a82b7c47688420c4ab8d10fba07abc2deb7b8f84a3c976"
+ },
+ "release": "local-1794076799",
+ "files": 1,
+ "bytes": 108974,
+ "manifest": "gs://pipewright-enterprise-pw-ent-artifacts/online-export/churn/churnf/g20261107T184547Z/manifest.json",
+ "manifest_sha256": "daf1a3ec14a330ecacfb64e733eb6c7e53609bdd0955faf2b9b94d4d78ae2772",
+ "load": {
+  "swap": {
+   "ms": 11.3,
+   "tries": 1
+  },
+  "rows": 5000
+ },
+ "pruned": [],
+ "timings": {
+  "latest_s": 3.0,
+  "extract_s": 2.4,
+  "read_s": 0.1,
+  "load_s": 2.6,
+  "copy_s": 1.8,
+  "index_s": 0.1,
+  "total_s": 8.6
+ },
+ "synced_at": "2026-11-07T18:45:56.190164+00:00"
+}

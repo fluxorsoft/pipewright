@@ -1,0 +1,12 @@
+{
+ "id": "EV-17",
+ "title": "Online features served from recorded, checked generations",
+ "status": "pass",
+ "detail": "4 sync(s), the newest 0 h ago; feature contract 1.1.0",
+ "evidence": [
+  "g20261107T171653Z: 5000 entities as of 2026-11-07 17:16:53+00, manifest e53bae99408c, feature contract 1.1.0, release 9c0879f85070-dirty-1794070869",
+  "g20261107T175641Z: 5000 entities as of 2026-11-07 17:56:41+00, manifest e93f2199fc1a, feature contract 1.1.0, release 9c0879f85070-dirty-1794070869",
+  "g20261107T180000Z: 5000 entities as of 2026-11-07 18:00:00+00, manifest c4f5be9bd73d, feature contract 1.1.0, release 9c0879f85070-dirty-1794074351",
+  "g20261107T180021Z: 5000 entities as of 2026-11-07 18:00:21+00, manifest 1552095baf4d, feature contract 1.1.0, release 9c0879f85070-dirty-1794074351"
+ ]
+}

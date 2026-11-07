@@ -1,0 +1,17 @@
+Online store of churnf
+  INFO  store: Cloud SQL pipewright-enterprise:us-central1:pw-ent-features (enterprise, db-custom-1-3840, zonal), about $61 a month
+  OK    instance: RUNNABLE, tier db-custom-1-3840
+  INFO  lookup service: pwl-churn-churnf: 1 vCPU, 512Mi, 1 to 3 instances, warm instances about $14 a month (best effort: Google may restart one)
+  WARN  lookup service: not created yet
+        -> deploy-model creates it before it deploys the model
+  INFO  Parquet export: on: gs://pipewright-enterprise-pw-ent-artifacts/online-export/churn/churnf, the last 2 generations kept
+  WARN  last sync: none yet
+        -> add a schedule with pipeline online_sync, or run `pipewright features sync`
+
+Online store of churnfq
+  INFO  store: BigQuery pipewright-enterprise.pw_ent_churn.pw_online_churnfq with BI Engine (1 GiB reserved, about $38 a month for the environment)
+  WARN  served table: pipewright-enterprise.pw_ent_churn.pw_online_churnfq: not synced yet
+        -> run `pipewright features sync` or wait for the online_sync schedule
+  WARN  last sync: none yet
+        -> add a schedule with pipeline online_sync, or run `pipewright features sync`
+

@@ -1,0 +1,22 @@
+{
+ "usecase": "churnfq",
+ "tenant": "demo",
+ "environment": "test",
+ "type": "bigquery",
+ "generation": "g20261107T171653Z",
+ "as_of": "2026-11-07 17:16:53+00",
+ "rows": 5000,
+ "latest_table": "pw-ebook.pw_demo.pw_online_churnfq",
+ "latest_job": "job_BsFOqMNVEp-8WAXf9lbMQjYd3K-F",
+ "bytes_billed": 20971520,
+ "feature_contract": {
+  "version": "1.1.0",
+  "sha256": "7b4f8d91a492869d9424476a2535c2272937fbee415204f44ecd5fe99349d181"
+ },
+ "release": "9c0879f85070-dirty-1794071056",
+ "timings": {
+  "latest_s": 2.7,
+  "total_s": 3.0
+ },
+ "synced_at": "2026-11-07T17:16:56.409598+00:00"
+}

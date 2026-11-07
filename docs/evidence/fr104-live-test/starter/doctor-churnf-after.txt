@@ -1,0 +1,8 @@
+Online store of churnf
+  INFO  store: Cloud SQL pw-ebook:europe-west2:pw-features (enterprise, db-custom-1-3840, zonal), about $61 a month
+  OK    instance: RUNNABLE, tier db-custom-1-3840
+  INFO  lookup service: pwl-demo-churnf: 1 vCPU, 512Mi, 1 to 3 instances, warm instances about $14 a month (best effort: Google may restart one)
+  OK    lookup service: CONDITION_SUCCEEDED, https://pwl-demo-churnf-dqlu24udla-nw.a.run.app
+  INFO  Parquet export: on: gs://pw-ebook-pw-artifacts/online-export/demo/churnf, the last 2 generations kept
+  OK    last sync: g20261107T180021Z: 5000 entities, 0 h ago, feature contract 1.1.0
+

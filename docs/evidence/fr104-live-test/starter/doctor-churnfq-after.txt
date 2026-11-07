@@ -1,0 +1,6 @@
+Online store of churnfq
+  INFO  store: BigQuery pw-ebook.pw_demo.pw_online_churnfq with BI Engine (1 GiB reserved, about $38 a month for the environment)
+  OK    BI Engine: covers pw-ebook.pw_demo.pw_online_churnfq (0 MiB)
+  INFO  refresh window: for minutes after each sync, lookups BI Engine has not reloaded are billed as a full read: about $0.0000 each (spike: up to 10 minutes for 1M rows)
+  OK    last sync: g20261107T180221Z: 5000 entities, 0 h ago, feature contract 1.1.0
+

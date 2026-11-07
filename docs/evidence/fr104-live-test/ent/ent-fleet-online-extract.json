@@ -1,0 +1,39 @@
+{
+ "environment_online_store": {
+  "types": [
+   "bigtable",
+   "cloudsql",
+   "bigquery"
+  ],
+  "cloudsql": {
+   "instance": "pipewright-enterprise:us-central1:pw-ent-features",
+   "tier": "db-custom-1-3840",
+   "availability": "zonal",
+   "monthly_usd": 61.24
+  },
+  "bi_engine": {
+   "gib": 1,
+   "monthly_usd": 37.96
+  }
+ },
+ "usecases": {
+  "churnf": {
+   "type": "cloudsql",
+   "lookup_monthly_usd": 13.8,
+   "last_sync_hours": 0.8,
+   "rows": 5000,
+   "generation": "g20261107T190052Z",
+   "contract": "1.2.0",
+   "stale": false
+  },
+  "churnfq": {
+   "type": "bigquery",
+   "lookup_monthly_usd": null,
+   "last_sync_hours": 0.8,
+   "rows": 5000,
+   "generation": "g20261107T190150Z",
+   "contract": "1.2.0",
+   "stale": false
+  }
+ }
+}
