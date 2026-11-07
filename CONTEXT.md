@@ -1628,6 +1628,24 @@ service at its defaults, 1M entities x 30 features.
    (otherwise the launcher deploys the lookup service for it); BigQuery billing while BI Engine reloads a refreshed
    table.
 
+**Serving patterns and scope (user, 2026-11-07):** Pipewright ships one implementation between the serving endpoint
+and Cloud SQL, the Cloud Run lookup service, and it is tested end to end during this build in a secure setup: private
+IP, VPC, and Private Service Connect for Agent Platform endpoints (with FR-92). The docs also describe the other
+patterns an ML team may choose with `lookup.provider: own`: a backend of their choice on GKE pods, their own service, or
+anything custom. Pipewright neither builds nor tests those; it syncs the schema and grants the team's reader.
+
+**Open source or Enterprise:**
+
+| Part | Where |
+|---|---|
+| `features.online_store.type`, the `bigquery`, `cloudsql` and `http` handlers, `lookup.provider`, the sizing keys and their checks against Google's tiers | core (OSS) |
+| The sync (export, manifest, staging, checks, swap), the Parquet export command, the `_pipewright_sync` record | core (OSS) |
+| The lookup service image (published with the launcher, by digest) and `deploy-model` deploying it | core (OSS) |
+| `doctor`: the store, its size and standing cost; the watch: freshness and sync health; the FR-103 contract version in the manifest | core (OSS) |
+| Terraform for a working setup: the BI Engine reservation, Cloud SQL on a private IP (the small VPC and Private Services Access it needs), IAM database users, a schema per tenant, the sync's schedule | starter (OSS); CMEK optional, off |
+| The same inside the private blueprint: CMEK required, the instance and the lookup service inside the VPC Service Controls perimeter, Private Service Connect from Agent Platform endpoints (FR-92), KServe on private GKE straight to the private IP, high availability on for production, the tenant grants as code | Enterprise |
+| Evidence that what was served was what was synced (the manifest digest against the sync record), Fleet View showing each store's freshness, sync health and standing cost | Enterprise |
+
 **User docs, part of the release (user, 2026-11-07):** the website's `docs/index.html` and `docs/quickstart.html`
 gain the online feature store, and a full guide covers, with real YAML:
 
