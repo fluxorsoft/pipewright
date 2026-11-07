@@ -32,7 +32,7 @@ def check(uc, env, gcp, report) -> None:
         tenants = sum(1 for t in env.tenants.values() if (t or {}).get("features", {}).get("sync_job"))
         report.add(s, Result(INFO, "store", f"Cloud SQL {sql.get('instance')} ({settings['edition']}, "
                              f"{settings['tier']}, {settings['availability']})"
-                             + (f", about ${cost:.0f} a month" if cost else "")
+                             + (f", about ${cost:.0f} a month (London list price)" if cost else "")
                              + (f", shared by {tenants} tenants" if tenants > 1 else "")))
         r = gcp.get(f"https://sqladmin.googleapis.com/v1/projects/{sql.get('instance', '::').split(':')[0]}"
                     f"/instances/{sql.get('instance', '::').split(':')[-1]}")
@@ -75,7 +75,7 @@ def check(uc, env, gcp, report) -> None:
         gib = (store.get("bigquery") or {}).get("bi_engine_gib")
         report.add(s, Result(INFO, "store", f"BigQuery {online['table']} with BI Engine"
                              + (f" ({gib} GiB reserved, about ${gib * 0.052 * sizing.HOURS:.0f} a month for the "
-                                "environment)" if gib else "")))
+                                "environment, London list price)" if gib else "")))
         p, d, t = online["table"].split(".")
         table = gcp.get(f"https://bigquery.googleapis.com/bigquery/v2/projects/{p}/datasets/{d}/tables/{t}")
         res = gcp.get(f"https://bigqueryreservation.googleapis.com/v1/projects/{env.project}/locations/"
