@@ -822,6 +822,10 @@
             "internal_lb"
           ],
           "description": "cluster: reached inside the cluster; internal_lb: also an internal load balancer in the VPC"
+        },
+        "verifier_image": {
+          "type": ["string", "null"],
+          "description": "Pipewright 1.4.1: the image of the init container that checks the approved files before a model server starts (any image with Python 3; default: the serving image)"
         }
       }
     }

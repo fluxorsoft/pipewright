@@ -569,6 +569,81 @@ def approved_files(approval: dict | None) -> dict | None:
                       for f in files["files"]]}
 
 
+def pin_copy(gcp, approved: dict, log=print) -> dict:
+    """Pipewright 1.4.1 (FR-101 item 2): KServe's pods download the model folder at every start, so they are given a
+    copy of exactly the approved generations, next to the model folder (inside the tenant's pipeline root, which the
+    serving identity may read): `<model folder>-approved-v<N>-<digest16>/`. Each object is copied from its approved
+    generation (a rewrite, inside Cloud Storage), then read back and checked by SHA-256. Idempotent: an existing copy
+    whose files match is reused. Returns {"folder", "files": [{file, generation, sha256}]} for the pods' check."""
+    src_bucket, _, src_prefix = approved["folder"].removeprefix("gs://").partition("/")
+    src_prefix = src_prefix.rstrip("/") + "/"
+    digest = hashlib.sha256(json.dumps([[f["file"], f["sha256"]] for f in approved["files"]]).encode()).hexdigest()
+    dest_prefix = f"{src_prefix.rstrip('/')}-approved-v{approved.get('version') or 'x'}-{digest[:16]}/"
+    out = []
+    for f in approved["files"]:
+        dst = dest_prefix + f["file"]
+        meta = gcp.get(f"{GCS}/b/{src_bucket}/o/{quote(dst, safe='')}")
+        if meta.ok and (meta.body or {}).get("metadata", {}).get("pipewright-sha256") == f["sha256"] and \
+                _sha256(gcp, src_bucket, dst, meta.body["generation"]) == f["sha256"]:
+            out.append({"file": f["file"], "generation": str(meta.body["generation"]), "sha256": f["sha256"]})
+            continue
+        body, token = {"metadata": {"pipewright-sha256": f["sha256"], "pipewright-approved-generation":
+                                    str(f["generation"])}}, None
+        while True:
+            params = {"sourceGeneration": str(f["generation"]), **({"rewriteToken": token} if token else {})}
+            r = gcp.post(f"{GCS}/b/{src_bucket}/o/{quote(src_prefix + f['file'], safe='')}/rewriteTo/b/{src_bucket}"
+                         f"/o/{quote(dst, safe='')}", body, **params)
+            if not r.ok:
+                raise ConfigError(f"{f['file']}: the approved generation {f['generation']} could not be copied for "
+                                  f"serving (HTTP {r.status}): is it still there?")
+            if r.body.get("done"):
+                break
+            token = r.body.get("rewriteToken")
+        gen = r.body["resource"]["generation"]
+        if _sha256(gcp, src_bucket, dst, gen) != f["sha256"]:
+            raise ConfigError(f"{f['file']}: the copy for serving does not have the approved SHA-256")
+        out.append({"file": f["file"], "generation": str(gen), "sha256": f["sha256"]})
+    log(f"integrity: serving copy gs://{src_bucket}/{dest_prefix} ({len(out)} approved files, each checked by SHA-256)")
+    return {"folder": f"gs://{src_bucket}/{dest_prefix.rstrip('/')}", "files": out}
+
+
+# The check every KServe predictor pod runs before its server starts (an init container): the live copy of each file
+# must be the generation the deploy recorded, with the approved SHA-256. Standard library only, so it runs in any
+# image with Python 3 (the serving image by default); the pod's own identity reads (Workload Identity).
+POD_CHECK = r'''
+import hashlib, json, os, sys, urllib.parse, urllib.request
+spec = json.loads(os.environ["PIPEWRIGHT_APPROVED_FILES"])
+md = urllib.request.Request("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+                            headers={"Metadata-Flavor": "Google"})
+token = json.loads(urllib.request.urlopen(md, timeout=30).read())["access_token"]
+bucket, _, prefix = spec["folder"].removeprefix("gs://").partition("/")
+bad = []
+for f in spec["files"]:
+    name = urllib.parse.quote(prefix + "/" + f["file"], safe="")
+    url = "https://storage.googleapis.com/storage/v1/b/%s/o/%s" % (bucket, name)
+    auth = {"Authorization": "Bearer " + token}
+    try:
+        meta = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=auth), timeout=60).read())
+    except Exception as e:
+        bad.append("%s: cannot be read (%s)" % (f["file"], str(e)[:80]))
+        continue
+    if str(meta["generation"]) != str(f["generation"]):
+        bad.append("%s: generation %s is not the approved copy %s" % (f["file"], meta["generation"], f["generation"]))
+        continue
+    h = hashlib.sha256()
+    with urllib.request.urlopen(urllib.request.Request(url + "?alt=media&generation=" + str(f["generation"]),
+                                                       headers=auth), timeout=600) as r:
+        for chunk in iter(lambda: r.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != f["sha256"]:
+        bad.append("%s: sha256 %s, not the approved %s" % (f["file"], h.hexdigest()[:16], f["sha256"][:16]))
+if bad:
+    print("pipewright: NOT SERVED: the model files are not the approved ones:\n  " + "\n  ".join(bad), flush=True)
+    sys.exit(1)
+print("pipewright: %d approved files checked by SHA-256" % len(spec["files"]), flush=True)
+'''
+
+
 def inference_gate(gcp, manifest: dict, contract, version: str | None = None) -> dict:
     """Pipewright 1.4.1 (FR-101 item 1): before a scoring run, with policies.integrity.inference warn or refuse, the
     full check of the version it will use (the default, or `version`): its approval exists, and the evaluation

@@ -47,7 +47,7 @@ def settings(uc: ResolvedUseCase, env: Environment) -> dict:
         raise ConfigError(f"tenant {uc.tenant!r} has no serving namespace in {env.name}: ask the platform team to "
                           "turn on online serving for it")
     return {"namespace": namespace, "mirror": cfg.get("mirror"), "service_account": cfg.get("service_account")
-            or "serving", "exposure": cfg.get("exposure") or "cluster"}
+            or "serving", "exposure": cfg.get("exposure") or "cluster", "verifier_image": cfg.get("verifier_image")}
 
 
 def serving_image(image: str, env: Environment, mirror: str | None) -> str:
@@ -76,7 +76,10 @@ def default_version(uc: ResolvedUseCase, env: Environment, gcp) -> dict:
     return r.body
 
 
-def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: dict) -> dict:
+def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: dict,
+                      pinned: dict | None = None) -> dict:
+    """pinned (Pipewright 1.4.1, FR-101 item 2): the approved copy the pods load, and that an init container checks
+    file by file (generation and SHA-256) before the server starts; a changed copy keeps the new pod from starting."""
     from pipewright.ray_clusters.service import pod_resources
 
     serving = uc.model["serving"]
@@ -86,7 +89,7 @@ def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: d
     port = int(((spec.get("ports") or [{}])[0]).get("containerPort") or DEFAULT_ROUTES["port"])
     predict = spec.get("predictRoute") or DEFAULT_ROUTES["predict"]
     health = spec.get("healthRoute") or DEFAULT_ROUTES["health"]
-    env_vars = [{"name": "AIP_STORAGE_URI", "value": version["artifactUri"]},
+    env_vars = [{"name": "AIP_STORAGE_URI", "value": (pinned or {}).get("folder") or version["artifactUri"]},
                 {"name": "AIP_HTTP_PORT", "value": str(port)},
                 {"name": "AIP_PREDICT_ROUTE", "value": predict},
                 {"name": "AIP_HEALTH_ROUTE", "value": health},
@@ -104,6 +107,22 @@ def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: d
         container["command"] = spec["command"]
     if spec.get("args"):
         container["args"] = spec["args"]
+    predictor = {"serviceAccountName": s["service_account"],
+                 "minReplicas": max(int(serving["replicas"]["min"]), 1),   # Standard mode does not scale to zero
+                 "maxReplicas": int(serving["replicas"]["max"]),
+                 "containers": [container]}
+    if pinned:
+        import json
+
+        from pipewright.models.integrity import POD_CHECK
+
+        labels["pipewright.dev/pinned"] = "true"
+        predictor["initContainers"] = [{
+            "name": "pipewright-check", "image": s.get("verifier_image") or container["image"],
+            "command": ["python3", "-c", POD_CHECK],
+            "env": [{"name": "PIPEWRIGHT_APPROVED_FILES",
+                     "value": json.dumps({"folder": pinned["folder"], "files": pinned["files"]}, sort_keys=True)}],
+            "resources": {"requests": {"cpu": "250m", "memory": "256Mi"}, "limits": {"cpu": "1", "memory": "512Mi"}}}]
     return {
         "apiVersion": "serving.kserve.io/v1beta1", "kind": "InferenceService",
         "metadata": {"name": name, "namespace": s["namespace"], "labels": labels, "annotations": {
@@ -112,11 +131,7 @@ def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: d
             "serving.kserve.io/targetUtilizationPercentage": "70",
             "pipewright.dev/model-resource": f"{version['name'].split('@')[0]}@{version['versionId']}",
             "pipewright.dev/predict-route": predict}},
-        "spec": {"predictor": {
-            "serviceAccountName": s["service_account"],
-            "minReplicas": max(int(serving["replicas"]["min"]), 1),   # Standard mode does not scale to zero
-            "maxReplicas": int(serving["replicas"]["max"]),
-            "containers": [container]}},
+        "spec": {"predictor": predictor},
     }
 
 
@@ -289,7 +304,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
                              model=version.get("name"))
     if rules.note:
         check.notes.append(rules.note)
-    body = inference_service(uc, env, version, k.s)
+    body = inference_service(uc, env, version, k.s)       # as it would be unpinned, for the plan below
     current = k.current()
     running = ((current or {}).get("metadata", {}).get("labels") or {}).get("pipewright.dev/version")
     serving = uc.model["serving"]
@@ -313,7 +328,22 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
         raise ConfigError(problems + ["make a passing version the default (`pipewright model approve`), then deploy"],
                           source=f"v{vid} of {uc.model['name']} is not served: the default version does not pass "
                                  f"{uc.name}'s evaluation gates")
-    if running == _label(vid):
+    pinned = None
+    approved = integrity.approved_files(check.approval) if integrity.policy(env)["pin"] else None
+    if approved and not check.problems:
+        # 1.4.1 (FR-101 item 2): the pods load a copy of exactly the approved generations, checked at every start.
+        pinned = integrity.pin_copy(gcp, approved, log)
+        body = inference_service(uc, env, version, k.s, pinned)
+        lock_days = integrity.policy(env)["lock"]["days"]
+        if lock_days > 0:
+            integrity.lock(gcp, env, {"folder": pinned["folder"], "files": pinned["files"]}, log)
+    elif integrity.policy(env)["pin"]:
+        log("integrity: the approval records no model files (approved before Pipewright 1.4.0) or the check found "
+            "problems: the pods load the live model folder")
+    current_pin = ((current or {}).get("metadata", {}).get("annotations") or {}).get("pipewright.dev/approved-copy")
+    if pinned:
+        body["metadata"]["annotations"]["pipewright.dev/approved-copy"] = pinned["folder"]
+    if running == _label(vid) and current_pin == (pinned or {}).get("folder"):
         log(f"v{vid} of {uc.model['name']} is already live on {k.name}")
         log(k.how_to_call() or "")
         return {"version": vid, "status": "live"}
@@ -323,12 +353,13 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     if k.s["exposure"] == "internal_lb":
         k.ensure_load_balancer(port)
     log(f"live: {k.name} serves {uc.model['name']} v{vid} ({', '.join(f'{a}: {u}' for a, u in k.endpoints().items())})")
-    _deployed(uc, env, gcp, vid, k, check)
+    _deployed(uc, env, gcp, vid, k, check, pinned)
     log(k.how_to_call() or "")
     return {"version": vid, "status": "deployed"}
 
 
-def _deployed(uc: ResolvedUseCase, env: Environment, gcp, version: str, k: KServe, check=None) -> None:
+def _deployed(uc: ResolvedUseCase, env: Environment, gcp, version: str, k: KServe, check=None,
+              pinned: dict | None = None) -> None:
     import io
 
     from pipewright.observability import events
@@ -336,7 +367,8 @@ def _deployed(uc: ResolvedUseCase, env: Environment, gcp, version: str, k: KServ
     events.emit(events.event("model.deployed", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
                              version=version, endpoint=f"kserve:{k.s['namespace']}/{k.name}", traffic_percent=100,
                              target="kserve", by=gcp.identity(),
-                             **({"integrity": check.deployed()} if check is not None else {})),
+                             **({"integrity": check.deployed()} if check is not None else {}),
+                             **({"approved_copy": pinned} if pinned else {})),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
 
 
