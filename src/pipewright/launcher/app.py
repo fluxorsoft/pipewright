@@ -100,7 +100,7 @@ def create_app(registry: Registry | None = None) -> Flask:
                     return {"usecase": contract.usecase, "pipeline": pipeline, "status": "refused",
                             "reason": problem}
                 log.warning("integrity (warn) %s %s: %s", contract.usecase, pipeline, problem)
-            elif gate["approved_files"] and "approved_files" in target.parameters:
+            if gate["approved_files"] and "approved_files" in target.parameters:
                 params_extra = {"approved_files": json.dumps(gate["approved_files"], sort_keys=True)}
                 recorded = {**(recorded or {}), "pinned": {"version": gate["version"],
                                                            "files": len(gate["approved_files"]["files"])}}

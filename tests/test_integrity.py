@@ -667,7 +667,8 @@ def test_a_scoring_run_whose_files_changed_is_refused_by_the_full_check(monkeypa
     monkeypatch.setattr(integrity, "verify", lambda *a, **k: integrity.Check(
         problems=["model.pt: changed after the approval (sha256 0123456789abcdef approved)"], approval=APPROVAL))
     gate = integrity.inference_gate(Registry("4"), {"policies": {"integrity": {"inference": "refuse"}}}, contract())
-    assert "model.pt: changed after the approval" in gate["problem"] and gate["approved_files"] is None
+    assert "model.pt: changed after the approval" in gate["problem"]
+    assert gate["approved_files"]["files"][0]["generation"] == "1"      # warn: scores the approved bytes anyway
 
 
 def test_approval_refuses_a_folder_changed_since_registration(monkeypatch):

@@ -701,11 +701,12 @@ def inference_gate(gcp, manifest: dict, contract, version: str | None = None) ->
     except Exception as e:  # noqa: BLE001 - a check that cannot run is a problem, not a pass
         out["problem"] = f"the approval of v{vid} cannot be checked: {str(e).splitlines()[0][:160]}"
         return out
+    if integ.get("pin", "on") == "on":
+        # Pinned even when the check found problems: under warn the run then loads the approved generations (a
+        # swapped file is reported and not used); under refuse it is not submitted at all.
+        out["approved_files"] = approved_files(check.approval)
     if check.problems:
         out["problem"] = "; ".join(check.problems)[:900]
-        return out
-    if integ.get("pin", "on") == "on":
-        out["approved_files"] = approved_files(check.approval)
     return out
 
 
