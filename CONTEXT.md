@@ -1547,7 +1547,13 @@ in BigQuery.
   check), not what the team's service does with it, as for `http`.
 - (b) The sync runs on the launcher's existing scheduler.
 - (c) One Cloud SQL instance per environment, a schema per tenant. Its tier, memory and disk are set in YAML, checked
-  against the tiers Google Cloud supports.
+  against the tiers Google Cloud supports. The use case YAML also names where its features go, `cloudsql.schema` and
+  `cloudsql.table` (user, 2026-11-07): Pipewright creates the schema, the table and the data on the fly at each sync.
+  The default schema is `public`; the docs give the guideline (a named schema per team; `public` is poor practice in a
+  shared instance) and `doctor` warns when `public` is used in an instance other tenants share. Whatever the names,
+  Pipewright refuses to write a schema or table another tenant owns, and the database itself is created by a
+  dedicated admin identity, never a tenant's (spike: whoever creates the database owns `public` and can create in it
+  despite `REVOKE`).
 - (d) A spike measures the request rate one vCPU sustains and whether lookups see errors during the sync's swap
   (plan below), before the build.
 
