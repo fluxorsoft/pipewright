@@ -113,14 +113,15 @@ def in_use(gcp, env, models: dict | None = None, usecases: set | None = None) ->
                     notes.append(f"KServe services in {ns} cannot be listed ({kr.status})")
                     continue
                 for isvc in (kr.body or {}).get("items") or []:
-                    uses.append(_kserve_use(isvc, ns, by_resource, usecases))
+                    uses.append(_kserve_use(isvc, ns, by_resource, usecases, env.kserve.get("mirror")))
             uses = [u for u in uses if u is not None]
         except Exception as e:  # noqa: BLE001 - the cluster may be unreachable from here: said, not hidden
             notes.append(f"KServe cannot be checked from here: {str(e).splitlines()[0][:160]}")
     return uses, notes
 
 
-def _kserve_use(isvc: dict, ns: str, by_resource: dict, usecases: set | None) -> Use | None:
+def _kserve_use(isvc: dict, ns: str, by_resource: dict, usecases: set | None,
+                mirror: str | None = None) -> Use | None:
     meta = isvc.get("metadata") or {}
     ann, labels = meta.get("annotations") or {}, meta.get("labels") or {}
     resource = ann.get("pipewright.dev/model-resource") or ""
@@ -135,7 +136,9 @@ def _kserve_use(isvc: dict, ns: str, by_resource: dict, usecases: set | None) ->
         for e in c.get("env") or []:
             if e.get("name") == "PIPEWRIGHT_APPROVED_FILES":
                 copy = json.loads(e["value"])
-    image = ((pred.get("containers") or [{}])[0]).get("image")
+    from pipewright.models.kserve import mirrored_from
+
+    image = mirrored_from(((pred.get("containers") or [{}])[0]).get("image"), mirror)
     return Use(uc, display or labels.get("pipewright.dev/model", ""), vid, f"kserve:{ns}/{meta.get('name')}",
                "kserve", base, env_vars.get("AIP_STORAGE_URI"), image, 100, copy)
 

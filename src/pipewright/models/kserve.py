@@ -59,6 +59,14 @@ def serving_image(image: str, env: Environment, mirror: str | None) -> str:
     return f"{mirror.rstrip('/')}/{image}"
 
 
+def mirrored_from(image: str | None, mirror: str | None) -> str | None:
+    """The image a pod's mirrored image stands for (the inverse of serving_image): what the approval recorded. The
+    mirror's own digest differs from the source's (a pull and push writes a new manifest; found live in 1.4.1), so the
+    approved image is judged by its source, as it was approved."""
+    prefix = f"{mirror.rstrip('/')}/" if mirror else ""
+    return image[len(prefix):] if image and prefix and image.startswith(prefix) else image
+
+
 def default_version(uc: ResolvedUseCase, env: Environment, gcp) -> dict:
     """The registry's default version of the use case's model (REST, as the caller)."""
     from pipewright.gcp import error_text

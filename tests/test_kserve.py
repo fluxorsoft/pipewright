@@ -232,3 +232,21 @@ def test_a_pinned_inference_service_points_at_the_copy_and_has_the_check():
     assert "initContainers" not in plain["spec"]["predictor"]
     assert {e["name"]: e["value"] for e in plain["spec"]["predictor"]["containers"][0]["env"]}["AIP_STORAGE_URI"] \
         == "gs://art/pr/m"
+
+
+def test_a_mirrored_pod_image_is_judged_by_the_image_it_mirrors():
+    """Found live in 1.4.1: a private cluster pulls from the mirror, whose manifest digest differs from the source's;
+    the watch compares the source image with the approval, not the mirror path (which never equals it)."""
+    from pipewright.models import watch
+
+    mirror = "us-central1-docker.pkg.dev/p/images/mirror"
+    src = "us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest"
+    assert kserve.mirrored_from(f"{mirror}/{src}", mirror + "/") == src
+    assert kserve.mirrored_from(src, mirror) == src
+    assert kserve.mirrored_from("us-central1-docker.pkg.dev/p/images/own:1", mirror) == \
+        "us-central1-docker.pkg.dev/p/images/own:1"
+    assert kserve.mirrored_from(f"{mirror}/{src}", None) == f"{mirror}/{src}"
+    isvc = {"metadata": {"name": "churn", "annotations": {"pipewright.dev/model-resource": "projects/p/models/1@2"},
+                         "labels": {"pipewright.dev/usecase": "churn"}},
+            "spec": {"predictor": {"containers": [{"image": f"{mirror}/{src}", "env": []}]}}}
+    assert watch._kserve_use(isvc, "serving", {}, None, mirror).image == src
