@@ -49,14 +49,22 @@ class Gcp:
         return self._do("PATCH", url, body, **p)
 
 
-def test_start_sync_runs_the_tenants_job_with_the_release_usecase():
+def test_start_sync_hands_the_tenants_job_a_request(monkeypatch):
+    from pipewright.gcp import storage
+
+    written = {}
+    monkeypatch.setattr(storage, "gcs_write", lambda gcp, b, n, text, **k: written.update({(b, n): text}) or 1)
     gcp = Gcp({("POST", ":run"): (200, {"metadata": {"name": "executions/e1"}})})
-    out = ol.start_sync(contract(), MANIFEST, "gs://art/pipewright/environment.json", gcp, "nightly")
+    out = ol.start_sync(contract(), {**MANIFEST, "artifacts_bucket": "art"}, "gs://art/m.json", gcp, "nightly")
     assert out["status"] == "submitted" and out["execution"] == "executions/e1"
+    (bucket, name), text = next(iter(written.items()))
+    assert bucket == "art" and name.startswith("online-sync/churn/churn-x/requests/") and name.endswith("-R1.json")
+    req = json.loads(text)
+    assert req["ml_config"]["online_features"]["type"] == "cloudsql" and req["manifest"]["project"] == "acme-ml-dev"
     method, url, body, _ = gcp.calls[0]
     assert url.endswith("/jobs/pw-sync-churn:run")
     assert body["overrides"]["containerOverrides"][0]["args"] == [
-        "features", "sync", "--manifest", "gs://art/pipewright/environment.json", "--usecase", "churn-x"]
+        "features", "sync", "--request", f"gs://art/{name}", "--usecase", "churn-x"]
 
 
 def test_start_sync_refuses_without_a_synced_store_or_a_job():

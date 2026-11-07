@@ -42,8 +42,21 @@ def start_sync(contract, manifest: dict, manifest_uri: str, gcp, schedule: str =
     if not job:
         return {"usecase": contract.usecase, "pipeline": SYNC_PIPELINE, "status": "refused",
                 "reason": f"tenant {contract.tenant} has no sync job (manifest tenants.<t>.features.sync_job)"}
+    # The job runs as the tenant's runner, which reads only its own prefixes (isolate_tenant_artifacts; found live:
+    # it could not read the manifest or the contracts). As for a pipeline run, the launcher hands it what it needs:
+    # the manifest and the released configuration, in a request under the tenant's online-sync prefix.
+    import time as _time
+
+    from pipewright.gcp.storage import gcs_write
+
+    name = (f"online-sync/{contract.tenant}/{contract.usecase}/requests/"
+            f"{_time.strftime('%Y%m%dT%H%M%SZ', _time.gmtime())}-{contract.release_id}.json")
+    request = {"usecase": contract.usecase, "tenant": contract.tenant, "release": contract.release_id,
+               "manifest": manifest, "ml_config": contract.pipeline("training").static_parameters.get("ml_config")}
+    gcs_write(gcp, manifest["artifacts_bucket"], name, json.dumps(request, default=str))
     body = {"overrides": {"containerOverrides": [{"args": [
-        "features", "sync", "--manifest", manifest_uri, "--usecase", contract.usecase]}]}}
+        "features", "sync", "--request", f"gs://{manifest['artifacts_bucket']}/{name}", "--usecase",
+        contract.usecase]}]}}
     r = gcp.post(f"{RUN}/{job}:run", body)
     if not r.ok:
         raise ConfigError(f"the sync job {job} did not start: HTTP {r.status}")

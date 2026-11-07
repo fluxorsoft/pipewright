@@ -412,6 +412,19 @@ def _online_source(args):
     from pipewright.gcp import Gcp
 
     gcp = Gcp()
+    if getattr(args, "request", None):           # the scheduled sync: what the launcher handed the tenant's job
+        from pipewright.config.environment import environment_from_dict
+        from pipewright.gcp.storage import gcs_read
+
+        bucket, _, name = args.request[len("gs://"):].partition("/")
+        text, _ = gcs_read(gcp, bucket, name)
+        if not text:
+            raise ConfigError(f"no sync request at {args.request}")
+        req = json.loads(text)
+        if req.get("usecase") != args.usecase:
+            raise ConfigError(f"the sync request is for {req.get('usecase')}, not {args.usecase}")
+        env = environment_from_dict(req["manifest"])
+        return gcp, req["ml_config"] or {}, env, req["tenant"], req["usecase"], req.get("release")
     if args.manifest:
         from pipewright.config.environment import environment_from_manifest
         from pipewright.release import service as release
@@ -1357,8 +1370,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp = fsub.add_parser(name, help=text)
         sp.add_argument("--root", default=".")
         sp.add_argument("--env", help="with the MLOps checkout")
-        sp.add_argument("--manifest", help="the environment manifest (gs:// or a file): read the live release, as "
-                                           "the scheduled sync does")
+        sp.add_argument("--manifest", help="the environment manifest (gs:// or a file): read the live release")
+        sp.add_argument("--request", help="gs:// sync request the launcher wrote (the scheduled sync's job)")
         sp.add_argument("--usecase", required=True)
         sp.add_argument("--json", action="store_true")
         sp.set_defaults(func=func)
