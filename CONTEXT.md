@@ -1690,7 +1690,13 @@ pool 8) with Direct VPC egress and internal ingress.
   `doctor` and the docs state the refresh window, its cost at the use case's traffic, and that BI Engine suits low
   traffic with infrequent refreshes.
 
-**Where the Parquet export lives (user, 2026-11-07):** by default in the environment's artifacts bucket, under the
+**The Parquet export is a toggle, off by default (user, 2026-11-07):** `model.serving.online_store.export.enabled:
+true` is how an ML team builds its own lookup: Pipewright then publishes each generation's Parquet files and manifest
+where the team loads from, keeps the last few and grants the team's readers. Off (the default), nothing is published:
+Pipewright's own Cloud SQL sync still moves the rows through a staging extract, which lives under the tenant's prefix
+only for the load and is deleted after the swap (its manifest digest is still recorded in `_pipewright_sync`).
+
+**Where the Parquet export lives, when on (user, 2026-11-07):** by default in the environment's artifacts bucket, under the
 tenant's own prefix, one folder per sync generation:
 `gs://<artifacts_bucket>/online-export/<tenant>/<usecase>/<generation>/part-*.parquet` with `manifest.json` beside the
 files. The use case YAML can set another place, `model.serving.online_store.export.uri: gs://<bucket>/<prefix>`, for
