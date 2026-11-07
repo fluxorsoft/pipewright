@@ -287,6 +287,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         from pipewright.models import watch as iwatch
         from pipewright.observability import events
 
+        live = reg().live()                   # refreshes the manifest too (found live: a policy change was read late)
         m = reg().manifest
         if not m.get("artifacts_bucket") or not m.get("environment"):
             return {"status": "skipped", "reason": "no environment in the manifest"}
@@ -304,8 +305,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         due_in = pol["watch_every_hours"] * 3600 - 300
         if not force and last and (now - datetime.fromisoformat(last)).total_seconds() < due_in:
             return {"status": "not due", "last_run": last}
-        models = {(c.metadata or {}).get("model"): c.usecase for c in reg().live()
-                  if (c.metadata or {}).get("model")}
+        models = {(c.metadata or {}).get("model"): c.usecase for c in live if (c.metadata or {}).get("model")}
         result = iwatch.run(gcp, env, state, models)
         topic = (m.get("observability") or {}).get("events_topic")
         if pol["lock"]["days"] > 0:
