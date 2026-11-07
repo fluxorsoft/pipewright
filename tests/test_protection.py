@@ -200,3 +200,17 @@ def test_a_serving_namespace_that_cannot_be_read_is_counted_and_degrades_the_ren
     monkeypatch.setattr("pipewright.models.approvals.all_events", lambda gcp, env, kind: [])
     found = protection.discover(Gcp(), env)
     assert found["degraded"] == ["KServe services in serving-churn cannot be listed (403)"]
+
+
+def test_the_metadata_read_asks_for_every_field_the_check_compares(monkeypatch):
+    """Found live in 1.4.1 (the positive control): the read asked for five fields, so a custom metadata change on a
+    protected file went unseen."""
+    asked = {}
+
+    class Gcp:
+        def get(self, url, **params):
+            asked.update(params)
+            return SimpleNamespace(ok=True, body={})
+
+    protection._meta(Gcp(), Artifact("art", "pr/m/model.pt", "9", "model_file", ["default"], "churn", "4"))
+    assert set(protection._MUTABLE) <= set(asked["fields"].split(","))

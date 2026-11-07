@@ -183,7 +183,7 @@ def _live_contract(gcp, env, usecase: str) -> Artifact | None:
 
 def _meta(gcp, art: Artifact):
     return gcp.get(f"{GCS}/b/{art.bucket}/o/{quote(art.object, safe='')}", generation=str(art.generation),
-                   fields="generation,metageneration,retention,temporaryHold,eventBasedHold")
+                   fields="generation,metageneration,retention,temporaryHold,eventBasedHold," + ",".join(_MUTABLE))
 
 
 def _until(meta: dict) -> datetime | None:
