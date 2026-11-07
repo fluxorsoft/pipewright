@@ -107,17 +107,25 @@ def in_use(gcp, env, models: dict | None = None, usecases: set | None = None) ->
             from pipewright.kube import KubeClient
 
             kube = KubeClient.from_manifest({"kubernetes": env.kubernetes}, gcp, dns=True)
-            for ns in namespaces.values():
+            for tenant, ns in namespaces.items():
                 kr = kube.get(f"/apis/serving.kserve.io/v1beta1/namespaces/{ns}/inferenceservices")
                 if not kr.ok:
-                    notes.append(f"KServe services in {ns} cannot be listed ({kr.status})")
+                    # Counted, not only noted (found live: a 403 left a clean heartbeat): what serves there is unknown.
+                    uses.append(_unlisted(tenant, ns, f"KServe services in {ns} cannot be listed ({kr.status})"))
                     continue
                 for isvc in (kr.body or {}).get("items") or []:
                     uses.append(_kserve_use(isvc, ns, by_resource, usecases, env.kserve.get("mirror")))
             uses = [u for u in uses if u is not None]
-        except Exception as e:  # noqa: BLE001 - the cluster may be unreachable from here: said, not hidden
-            notes.append(f"KServe cannot be checked from here: {str(e).splitlines()[0][:160]}")
+        except Exception as e:  # noqa: BLE001 - the cluster may be unreachable from here: said and counted
+            uses = [u for u in uses if u is not None]
+            uses.append(_unlisted("*", "*", f"KServe cannot be checked from here: {str(e).splitlines()[0][:160]}"))
     return uses, notes
+
+
+def _unlisted(tenant: str, ns: str, why: str) -> Use:
+    """A namespace whose InferenceServices cannot be read: one cannot_check use, so the heartbeat and the CI gate
+    show it (exit 2) instead of a clean result."""
+    return Use(f"(tenant {tenant})", "", "*", f"kserve:{ns}/*", "kserve", status=CANNOT, problems=[why])
 
 
 def _kserve_use(isvc: dict, ns: str, by_resource: dict, usecases: set | None,
@@ -167,6 +175,8 @@ def check(gcp, env, models: dict | None = None, usecases: set | None = None) -> 
 
     uses, notes = in_use(gcp, env, models, usecases)
     for u in uses:
+        if u.status == CANNOT:
+            continue
         try:
             if u.kind == "kserve" and u.copy:
                 c = integrity.verify(gcp, env, u.usecase, u.version, None, u.image)

@@ -163,3 +163,34 @@ def test_the_watch_records_only_changes():
     assert watch.exit_code([u]) == 0
     u.status = watch.CANNOT
     assert watch.exit_code([u]) == 2
+
+
+def test_a_serving_namespace_that_cannot_be_read_is_counted_and_degrades_the_renewal(monkeypatch):
+    """Found live in 1.4.1: a 403 on a KServe namespace was only a note, so the heartbeat and the renewal looked
+    clean while the copies served there went unchecked."""
+    from types import SimpleNamespace
+
+    from pipewright.models import protection, watch
+    from pipewright.kube import KubeClient, Response
+
+    class Kube:
+        def get(self, path, **params):
+            return Response(403, {"message": "forbidden"})
+
+    monkeypatch.setattr(KubeClient, "from_manifest", classmethod(lambda cls, m, gcp, dns=False: Kube()))
+
+    class Gcp:
+        def get(self, url, **params):
+            return Response(200, {})
+
+    env = SimpleNamespace(name="ent", project="p", region="r", kserve={"namespaces": {"churn": "serving-churn"}},
+                          kubernetes={"endpoint": "https://10.0.0.2"})
+    monkeypatch.setattr(watch, "_api", lambda env: "https://api")
+    uses, _ = watch.in_use(Gcp(), env)
+    assert [(u.status, u.where) for u in uses] == [("cannot_check", "kserve:serving-churn/*")]
+    assert watch.exit_code(uses) == 2
+    monkeypatch.setattr(watch, "in_use", lambda gcp, env, models=None, usecases=None: (uses, []))
+    monkeypatch.setattr("pipewright.models.integrity.policy", lambda env: {"lock": {"rollback_days": 7}})
+    monkeypatch.setattr("pipewright.models.approvals.all_events", lambda gcp, env, kind: [])
+    found = protection.discover(Gcp(), env)
+    assert found["degraded"] == ["KServe services in serving-churn cannot be listed (403)"]

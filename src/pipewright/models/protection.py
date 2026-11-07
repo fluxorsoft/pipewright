@@ -117,6 +117,10 @@ def discover(gcp, env, models: dict | None = None, now: datetime | None = None) 
     uses, use_notes = iwatch.in_use(gcp, env, models)
     notes += use_notes
     defaults = {}
+    unread = [u for u in uses if u.status == iwatch.CANNOT]
+    # A namespace the renewer cannot read: the copies served there may go unprotected, so the run is degraded.
+    degraded += [p for u in unread for p in u.problems]
+    uses = [u for u in uses if u.status != iwatch.CANNOT]
     for u in uses:
         approval = (approvals.events(gcp, env, "model.approved", u.usecase, u.version) or [None])[0]
         reason = "default" if u.kind == "default" else "serving"
