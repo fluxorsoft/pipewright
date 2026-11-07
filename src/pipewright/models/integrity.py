@@ -827,6 +827,19 @@ def lock(gcp, env: Environment, files: dict | None, log=print) -> dict | None:
     locked, refused = 0, None
     for f in files["files"]:
         name = prefix + f["file"]
+        if method == "retention":
+            # 1.4.1: a file already protected longer (renewed, or approved again) keeps its date: retention is never
+            # shortened (Cloud Storage refuses it anyway, which read as a failed lock before).
+            try:
+                cur = gcp.session.get(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}", timeout=60,
+                                      params={"generation": str(f["generation"]), "fields": "retention"})
+                current = cur.json() if cur.status_code == 200 else {}
+                have = ((current or {}).get("retention") or {}).get("retainUntilTime")
+            except Exception:  # noqa: BLE001 - unreadable: patch as before
+                have = None
+            if have and have[:19] >= until[:19]:
+                locked += 1
+                continue
         r = gcp.session.patch(f"{GCS}/b/{bucket}/o/{quote(name, safe='')}",
                               params={"generation": str(f["generation"])}, json=body, timeout=60)
         if r.status_code != 200:

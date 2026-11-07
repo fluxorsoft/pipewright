@@ -154,6 +154,20 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
                       labels, online_store_problem(uc, env, gcp, default), check, rules.release)
 
 
+def _protect_on_activation(env: Environment, creds, check, what: str, log=print) -> None:
+    """1.4.1 (FR-101 item 8): with policies.integrity.lock on, the approved files are protected before the version
+    becomes active (enforced under refuse; said under warn)."""
+    from pipewright.gcp import Gcp
+    from pipewright.models import integrity, protection
+
+    problems = protection.protect_now(Gcp(creds), env, integrity.approved_files(check.approval), log)
+    if problems:
+        integrity.enforce(integrity.Check(problems=problems), env, what, log,
+                          reason="its approved files cannot be protected (policies.integrity.lock)",
+                          remedy="give the deployer storage.objects.setRetention on the model folders, or check the "
+                                 "approved generations still exist")
+
+
 def pending_approval_of(p: DeployPlan) -> bool:
     from pipewright.models.registry import pending_approval
 
@@ -169,6 +183,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
         # Phase 6 (FR-93, FR-94): first, so a version that is not the one approved is reported as that; refuse (or
         # warn) before anything changes on the endpoint.
         integrity.enforce(p.integrity, env, f"v{p.version} of {p.model} is not served", log)
+        _protect_on_activation(env, creds, p.integrity, f"v{p.version} of {p.model} is not served", log)
     if p.gate_problems:
         raise ConfigError(p.gate_problems + ["make a passing version the default (`pipewright model approve`), "
                                              "then deploy"],

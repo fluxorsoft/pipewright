@@ -324,6 +324,13 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
                           source=f"v{vid} of {uc.model['name']} is not served: it is the default and labelled "
                                  "approval=pending: nobody has approved it (approvals.promote_model manual)")
     integrity.enforce(check, env, f"v{vid} of {uc.model['name']} is not served", log)
+    from pipewright.models import protection
+
+    protect = protection.protect_now(gcp, env, integrity.approved_files(check.approval), log)
+    if protect:                          # 1.4.1 (FR-101 item 8): lock on activation
+        integrity.enforce(integrity.Check(problems=protect), env, f"v{vid} of {uc.model['name']} is not served", log,
+                          reason="its approved files cannot be protected (policies.integrity.lock)",
+                          remedy="check the deployer may extend retention and the approved generations still exist")
     if problems:
         raise ConfigError(problems + ["make a passing version the default (`pipewright model approve`), then deploy"],
                           source=f"v{vid} of {uc.model['name']} is not served: the default version does not pass "

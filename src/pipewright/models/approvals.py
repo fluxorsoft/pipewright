@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-KINDS = ("model.approved", "model.registered")
+KINDS = ("model.approved", "model.registered", "model.lock.renewed")
 OVERLAP = timedelta(hours=1)            # events reach the table a little after they are published
 REFRESH_SECONDS = 60                    # within a process, look again at most this often...
 _lock = threading.Lock()
