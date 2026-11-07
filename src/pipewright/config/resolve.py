@@ -93,7 +93,12 @@ def _triggers(eff: dict, resources: dict, tenant: str, pipelines: dict, problems
         problems.append("triggers.schedules: schedule names must be unique")
     for s in triggers["schedules"]:
         s.setdefault("pipeline", "training")
-        if s["pipeline"] not in pipelines:
+        if s["pipeline"] == "online_sync":       # FR-104: the launcher runs the tenant's sync job, not a pipeline
+            store = (((eff.get("model") or {}).get("serving") or {}).get("online_store") or {}).get("type")
+            if store not in ("bigquery", "cloudsql"):
+                problems.append(f"triggers.schedules[{s['name']}]: pipeline online_sync needs "
+                                "model.serving.online_store.type bigquery or cloudsql")
+        elif s["pipeline"] not in pipelines:
             problems.append(f"triggers.schedules[{s['name']}].pipeline {s['pipeline']!r} is not in pipelines")
         if not _CRON.match(s["cron"].strip()):
             problems.append(f"triggers.schedules[{s['name']}]: cron {s['cron']!r} must have 5 fields")

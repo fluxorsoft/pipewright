@@ -1,0 +1,152 @@
+"""The launcher's part of the online stores (FR-104).
+
+- A schedule with `pipeline: online_sync` runs the tenant's sync job (a Cloud Run job the platform created, running
+  as the tenant's runner) with `pipewright features sync --manifest ... --usecase ...`. The launcher starts it; it
+  never reads feature data itself.
+- `POST /online/lookup-service {"usecase"}` (deploy-model calls it) creates or updates the use case's Cloud Run lookup
+  service from the live release's configuration only: its name has the tenant's prefix, it runs as the tenant's
+  lookup identity, ingress internal, egress into the environment's network, the instance's server CA pinned, and
+  the tenant's runner (the endpoint's identity) may invoke it. Spike (d): Cloud Run cannot limit a runner to its
+  own services by name, so the launcher creates them.
+
+Both act from the release contract and the manifest, never from settings in the request.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+
+from pipewright.errors import ConfigError
+
+RUN = "https://run.googleapis.com/v2"
+SQLADMIN = "https://sqladmin.googleapis.com/v1"
+SYNC_PIPELINE = "online_sync"
+
+
+def online_of(contract) -> dict:
+    ml = contract.pipeline("training").static_parameters.get("ml_config") or {}
+    return ml.get("online_features") or {}
+
+
+def _tenant_features(manifest: dict, tenant: str) -> dict:
+    return (((manifest.get("tenants") or {}).get(tenant) or {}).get("features")) or {}
+
+
+def start_sync(contract, manifest: dict, manifest_uri: str, gcp, schedule: str = "") -> dict:
+    online = online_of(contract)
+    if online.get("type") not in ("bigquery", "cloudsql"):
+        return {"usecase": contract.usecase, "pipeline": SYNC_PIPELINE, "status": "refused",
+                "reason": "the release's online store is not one Pipewright syncs (bigquery, cloudsql)"}
+    job = _tenant_features(manifest, contract.tenant).get("sync_job")
+    if not job:
+        return {"usecase": contract.usecase, "pipeline": SYNC_PIPELINE, "status": "refused",
+                "reason": f"tenant {contract.tenant} has no sync job (manifest tenants.<t>.features.sync_job)"}
+    body = {"overrides": {"containerOverrides": [{"args": [
+        "features", "sync", "--manifest", manifest_uri, "--usecase", contract.usecase]}]}}
+    r = gcp.post(f"{RUN}/{job}:run", body)
+    if not r.ok:
+        raise ConfigError(f"the sync job {job} did not start: HTTP {r.status}")
+    execution = ((r.body.get("metadata") or {}).get("name")) or r.body.get("name")
+    return {"usecase": contract.usecase, "pipeline": SYNC_PIPELINE, "status": "submitted", "execution": execution,
+            "schedule": schedule}
+
+
+def server_ca(gcp, instance: str) -> str | None:
+    project, _region, name = instance.split(":")
+    r = gcp.get(f"{SQLADMIN}/projects/{project}/instances/{name}")
+    return (r.body.get("serverCaCert") or {}).get("cert") if r.ok else None
+
+
+def service_spec(contract, manifest: dict, online: dict, ca: str | None) -> dict:
+    """The Cloud Run v2 service for a use case's lookup."""
+    store = ((manifest.get("features") or {}).get("online_store")) or {}
+    lk = store.get("lookup") or {}
+    sql = store.get("cloudsql") or {}
+    tf = _tenant_features(manifest, contract.tenant)
+    name = online["service"]
+    prefix = f"pwl-{contract.tenant}-".lower()
+    if not name.startswith(prefix[:49]):
+        raise ConfigError(f"lookup service {name}: not under the tenant's prefix {prefix}")
+    if not tf.get("lookup_service_account"):
+        raise ConfigError(f"tenant {contract.tenant} has no lookup identity "
+                          "(manifest tenants.<t>.features.lookup_service_account)")
+    size = online.get("lookup") or {}
+    config = {"host": sql.get("private_ip"), "database": online.get("database", "features"),
+              "schema": online["schema"], "table": online["table"], "key": online["key"],
+              "features": online["features"], "pool_size": size.get("pool_size", 8),
+              "timeout_ms": size.get("timeout_ms", 1000), "server_ca": ca}
+    image = lk.get("image") or (manifest.get("launcher") or {}).get("image")
+    if not image:
+        raise ConfigError("the environment names no lookup image (manifest features.online_store.lookup.image)")
+    template = {
+        "serviceAccount": tf["lookup_service_account"],
+        "maxInstanceRequestConcurrency": size.get("concurrency", 80),
+        "scaling": {"maxInstanceCount": size.get("max_instances", 5)},
+        "executionEnvironment": "EXECUTION_ENVIRONMENT_GEN2",
+        "labels": {"pipewright-usecase": contract.usecase[:63], "pipewright-tenant": contract.tenant[:63],
+                   "pipewright-release": contract.release_id.lower()[:63]},
+        "containers": [{
+            "image": image, "command": ["python", "-m", "pipewright.online.server"],
+            "env": [{"name": "PIPEWRIGHT_LOOKUP", "value": json.dumps(config, separators=(",", ":"))}],
+            "resources": {"limits": {"cpu": str(size.get("cpu", 1)), "memory": size.get("memory", "512Mi")},
+                          "startupCpuBoost": bool(size.get("cpu_boost", True)),
+                          "cpuIdle": size.get("billing", "request") == "request"},
+            "startupProbe": {"httpGet": {"path": "/healthz"}, "periodSeconds": 3, "failureThreshold": 20},
+            "ports": [{"containerPort": 8080}]}]}
+    if lk.get("network"):
+        template["vpcAccess"] = {"networkInterfaces": [{"network": lk["network"],
+                                                        **({"subnetwork": lk["subnetwork"]}
+                                                           if lk.get("subnetwork") else {})}],
+                                 "egress": "PRIVATE_RANGES_ONLY"}
+    return {"ingress": lk.get("ingress", "INGRESS_TRAFFIC_INTERNAL_ONLY"),
+            "scaling": {"minInstanceCount": size.get("min_instances", 0)},     # service level (Google's advice)
+            "labels": {"pipewright-usecase": contract.usecase[:63], "pipewright-tenant": contract.tenant[:63]},
+            "template": template}
+
+
+def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, sleep=time.sleep) -> dict:
+    online = online_of(contract)
+    if online.get("type") != "cloudsql" or online.get("provider", "pipewright") != "pipewright":
+        raise ConfigError(f"{contract.usecase}'s release has no Pipewright lookup service (online_store cloudsql "
+                          "with lookup.provider pipewright)")
+    project, region = manifest["project"], manifest["region"]
+    spec = service_spec(contract, manifest, online, server_ca(gcp, online["instance"]))
+    base = f"{RUN}/projects/{project}/locations/{region}/services"
+    name = online["service"]
+    current = gcp.get(f"{base}/{name}")
+    if current.status == 404:
+        r = gcp.post(base, spec, serviceId=name)
+        action = "created"
+    elif current.ok:
+        r = gcp.patch(f"{base}/{name}", spec)
+        action = "updated"
+    else:
+        raise ConfigError(f"cannot read the lookup service {name}: HTTP {current.status}")
+    if not r.ok:
+        msg = (r.body.get("error") or {}).get("message", "") if isinstance(r.body, dict) else ""
+        raise ConfigError(f"the lookup service {name} was not {action}: HTTP {r.status} {msg[:200]}")
+    deadline = time.time() + wait
+    svc = {}
+    while time.time() < deadline:
+        got = gcp.get(f"{base}/{name}")
+        svc = got.body if got.ok else {}
+        if svc.get("reconciling") is False and svc.get("terminalCondition", {}).get("state") == "CONDITION_SUCCEEDED":
+            break
+        if svc.get("terminalCondition", {}).get("state") == "CONDITION_FAILED":
+            raise ConfigError(f"the lookup service {name} failed to start: "
+                              f"{svc['terminalCondition'].get('message', '')[:300]}")
+        sleep(5)
+    else:
+        raise ConfigError(f"the lookup service {name} was not ready in {int(wait)} s")
+    invoker = f"serviceAccount:{contract.runner_service_account}"
+    pol = gcp.post(f"{base}/{name}:getIamPolicy", {})
+    policy = pol.body if pol.ok else {}
+    bindings = [b for b in policy.get("bindings", []) if b.get("role") != "roles/run.invoker"]
+    bindings.append({"role": "roles/run.invoker", "members": [invoker]})
+    set_ = gcp.post(f"{base}/{name}:setIamPolicy", {"policy": {**policy, "bindings": bindings}})
+    if not set_.ok:
+        raise ConfigError(f"the lookup service {name}: the endpoint's identity could not be allowed to call it "
+                          f"(HTTP {set_.status})")
+    return {"usecase": contract.usecase, "service": name, "status": action, "url": svc.get("uri"),
+            "min_instances": spec["scaling"]["minInstanceCount"], "invoker": contract.runner_service_account}

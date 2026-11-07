@@ -21,6 +21,9 @@ Routes:
                      for each run that ended failed or cancelled (Pipewright 1.2.0)
   POST /ray/clusters {"action": "create" | "delete", "usecase", "run_id", "step"}: a Ray step's cluster, from the use
                      case's runner identity (also as kind ray.cluster on /pubsub/run, with the runner's "id_token")
+  POST /online/lookup-service {"usecase", "release"?}: create or update the use case's Cloud SQL lookup service from
+                     its live release (FR-104; deploy-model calls it). A schedule with pipeline online_sync runs the
+                     tenant's sync job instead of a pipeline
   GET  /health   live use cases and their releases (Cloud Run reserves paths ending in "z", e.g. /healthz)
 """
 
@@ -51,6 +54,7 @@ from pipewright.launcher.routing import (
     target_for,
 )
 from pipewright.observability import events
+from pipewright.online import launcher as online_launcher
 from pipewright.ray_clusters.service import RayClusters, RayRequestError
 from pipewright.release.contract import ReleaseContract
 from pipewright.retraining import identity
@@ -480,6 +484,16 @@ def create_app(registry: Registry | None = None) -> Flask:
         if contract is None:
             reason = reg().errors.get(usecase, "no live release")
             return jsonify(status="error", reason=f"{usecase}: {reason}"), 404
+        sched = (contract.triggers.get("schedules") or {}).get(body.get("schedule") or "") or {}
+        sync = online_launcher.SYNC_PIPELINE
+        if sync in (sched.get("pipeline"), body.get("pipeline")):
+            try:                                # FR-104: the tenant's sync job, not a pipeline run
+                return jsonify(online_launcher.start_sync(contract, reg().manifest,
+                                                          os.environ.get("MANIFEST_URI", ""), Gcp(),
+                                                          body.get("schedule") or "")), 200
+            except Exception as e:  # noqa: BLE001
+                log.exception("online sync of %s not started", usecase)
+                return jsonify(status="error", reason=str(e)[:300]), 500
         try:
             r = resolve_run(contract, body, manifest=reg().manifest)
         except BadRequest as e:
@@ -545,6 +559,19 @@ def create_app(registry: Registry | None = None) -> Flask:
             log.warning("dropping run request for %s: %s", body.get("usecase"), reason)
             return jsonify(status="dropped", reason=reason), 200
         return response, (503 if code == 404 else code)
+
+    @app.post("/online/lookup-service")
+    def lookup_service():
+        """FR-104: create or update a use case's Cloud SQL lookup service from its live release (deploy-model)."""
+        body = request.get_json(silent=True) or {}
+        contract = reg().get(body.get("usecase") or "", release=body.get("release"))
+        if contract is None:
+            return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 404
+        try:
+            return jsonify(online_launcher.ensure_lookup_service(contract, reg().manifest, Gcp())), 200
+        except Exception as e:  # noqa: BLE001
+            log.exception("lookup service of %s", contract.usecase)
+            return jsonify(status="error", reason=str(e)[:400]), 500
 
     @app.get("/health")
     def health():

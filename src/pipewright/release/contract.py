@@ -165,6 +165,7 @@ class ReleaseContract:
         wanted = {s.get("pipeline", "training") for s in self.triggers.get("schedules", {}).values()}
         if self.triggers.get("landing_prefix") is not None:
             wanted.add(self.triggers.get("landing_pipeline", "training"))
+        wanted.discard("online_sync")         # FR-104: the launcher runs the tenant's sync job, not a pipeline
         for w in sorted(wanted - set(self.pipeline_names)):
             problems.append(f"a trigger starts pipeline {w!r}, which this release does not have")
         if "@sha256:" not in self.component_image:
