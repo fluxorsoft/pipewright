@@ -324,7 +324,8 @@ def create_app(registry: Registry | None = None) -> Flask:
                                      reason=pol["reason"], open_ended=not pol["until"]), topic, gcp,
                         region=env.region)
         for change in result["changes"]:
-            events.emit(events.event("model.integrity", change["usecase"], env.name, None, None, None, **change),
+            events.emit(events.event("model.integrity", change.get("usecase"), env.name, None, None, None,
+                                     **{k: v for k, v in change.items() if k != "usecase"}),
                         topic, gcp, region=env.region)
         events.emit(events.event("model.integrity.check", None, env.name, None, None, None, **result["heartbeat"],
                                  every_hours=pol["watch_every_hours"]), topic, gcp, region=env.region)

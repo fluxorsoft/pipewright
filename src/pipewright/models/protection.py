@@ -136,7 +136,7 @@ def discover(gcp, env, models: dict | None = None, now: datetime | None = None) 
     candidates = 0
     for uc, current in defaults.items():
         found_candidates, unclear = rollback_candidates(uc, current, timeline, pol["lock"]["rollback_days"], now)
-        if unclear:
+        if unclear and found_candidates:     # found live: with nothing to protect more, it is a note, not degraded
             degraded.append(f"{uc}: the event that made v{current} the default is missing, so every version made "
                             "default in the rollback window is protected")
         for version, _ in found_candidates:

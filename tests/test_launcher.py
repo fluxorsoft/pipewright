@@ -228,3 +228,30 @@ def test_a_scoring_run_with_an_unapproved_default_is_refused_when_the_policy_say
     monkeypatch.setattr(integrity, "inference_check", lambda gcp, manifest, contract: ("warn", "v4 unapproved"))
     r = client.post("/run", json={"usecase": V3.usecase, "pipeline": "inference", "source_uri": "gs://x/z.csv"})
     assert r.json["status"] == "submitted" and len(submitted) == 1
+
+
+# 1.4.1 (FR-101): the watch records a change once, with a heartbeat each run (found live: usecase passed twice).
+def test_the_integrity_watch_records_changes_and_a_heartbeat(monkeypatch):
+    import pipewright.gcp as g
+    from pipewright.launcher.app import create_app
+    from pipewright.models import watch
+
+    emitted, files = [], {}
+    monkeypatch.setattr("pipewright.observability.events.emit", lambda event, *a, **k: emitted.append(event))
+    monkeypatch.setattr(g, "gcs_read", lambda gcp, b, n: files.get(n, (None, 0)))
+    monkeypatch.setattr(g, "gcs_write", lambda gcp, b, n, t, content_type=None, if_generation_match=None:
+                        files.__setitem__(n, (t, 1)) or 1)
+    change = {"usecase": "churn", "version": "4", "where": "default", "status": "changed", "previous": "unchanged",
+              "severity": "incident", "problems": ["model.pt: changed after the approval"]}
+    monkeypatch.setattr(watch, "run", lambda gcp, env, state, models=None: {
+        "changes": [change], "heartbeat": {"checked": 1, "changed": 1, "notes": []}, "uses": []})
+    registry = FakeRegistry([V3])
+    registry.manifest.update(project="p", region="r", artifacts_bucket="art", artifact_registry={},
+                             policies={"integrity": {"watch": "on"}})
+    registry.gcp = object()
+    r = create_app(registry).test_client().post("/integrity/tick", json={})
+    assert r.status_code == 200 and r.json["status"] == "checked"
+    kinds = [e["event_type"] for e in emitted]
+    assert kinds == ["model.integrity", "model.integrity.check"]
+    assert emitted[0]["usecase"] == "churn" and emitted[0]["data"]["status"] == "changed"
+    assert "integrity-dev.json" in "".join(files)
