@@ -171,7 +171,8 @@ live: `docs/evidence/fr101-retention-permissions/`), and `update` also allows re
 So the renewer is its own identity, never the launcher, with a custom role of exactly `get`, `setRetention` and
 `update` on the model folders, contracts and manifest; only Terraform may act as it (`doctor` lists who can). Its work
 is watched by another identity: the launcher's watch records each protected file's hold and metageneration and
-reports a released hold, or a change no `model.lock.renewed` explains, as an incident; Cloud Storage DATA_WRITE audit
+reports a released hold, a shortened retention, or a metadata change no `model.lock.renewed` explains, as an
+incident (a retention date moved later is a lock, whoever made it: approve, deploy-model, promote or the renewer); Cloud Storage DATA_WRITE audit
 logs record every write. This is detection, not prevention: keep legal holds in a bucket or folder outside the
 renewer's scope. The renewer's schedule exists only with the watch on and DATA_WRITE logs, their exclusion and the
 alerts in place, and ships paused (`renewer_schedule`) until you have tested the alerts in that environment.

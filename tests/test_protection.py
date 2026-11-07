@@ -141,10 +141,16 @@ def test_the_launcher_reports_a_released_hold_and_an_unexplained_metadata_change
     meta.update(metageneration="6")                                          # the renewer extended it, recorded
     renewals.append({"bucket": "art", "object": "pr/m/model.pt", "generation": "9", "at": "2099-01-01 00:00:00"})
     assert protection.observe(None, None, state) == []
-    meta.update(metageneration="7")                                          # changed, with no renewal recorded
+    meta.update(metageneration="7", metadata={"x": "1"})                     # changed, with no renewal recorded
     renewals.clear()
     got = protection.observe(None, None, state)
     assert [c["status"] for c in got] == ["metadata_changed"] and got[0]["severity"] == "incident"
+    # Found live in 1.4.1: deploy-model's lock on activation only moves the retention date later: not reported.
+    meta.update(metageneration="8", retention={"retainUntilTime": "2026-12-01T00:00:00Z"})
+    assert protection.observe(None, None, state) == []
+    meta.update(metageneration="9", retention={"retainUntilTime": "2026-11-08T00:00:00Z"})
+    got = protection.observe(None, None, state)
+    assert "its retention was shortened" in got[0]["problems"][-1]
     meta.update(temporaryHold=False)
     assert [c["status"] for c in protection.observe(None, None, state)] == ["hold_released"]
 

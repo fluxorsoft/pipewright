@@ -63,7 +63,8 @@ manifest and Terraform when you want them; `doctor` lists what is off.
   cut off by the request timeout and the scheduler's retry) records nothing twice; a KServe namespace the watch or the
   renewer cannot read counts as `cannot_check` (exit 2) and makes the renewal degraded, instead of a note;
   `deploy-model` on KServe updates the pods' check when it rewrote a changed copy (it said "already live", and no new
-  pod could start).
+  pod could start); the cross-identity check reports a shortened retention or a metadata change, not a retention
+  date moved later (deploy-model's lock on activation was reported as an incident).
 
 ## [1.4.0] - 2026-11-06
 

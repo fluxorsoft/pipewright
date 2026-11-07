@@ -20,6 +20,8 @@ Names, generations, dates and counts only; never a file's contents.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -321,6 +323,27 @@ def protect_now(gcp, env, approved: dict | None, log=print) -> list[str]:
 
 # -- the cross-identity check (the launcher, read-only, watches the renewer's work) ---------------------------------
 
+# The object fields a metadata update can change, other than its retention and holds (checked on their own).
+_MUTABLE = ("metadata", "contentType", "contentEncoding", "contentDisposition", "contentLanguage", "cacheControl",
+            "customTime", "storageClass")
+
+
+def _fields(meta: dict) -> str:
+    return hashlib.sha256(json.dumps({k: meta.get(k) for k in _MUTABLE}, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _what_changed(was: dict, now: dict) -> list[str]:
+    """Why a metageneration change is reported; [] when only the retention date moved later (a lock: approve,
+    deploy-model and promote extend it, and so does the renewer). Earlier states recorded no fields: reported."""
+    out = []
+    if "fields" not in was or was["fields"] != now["fields"]:
+        out.append(f"metageneration {was['metageneration']} -> {now['metageneration']}: its metadata changed, "
+                   "with no model.lock.renewed recorded")
+    if (was.get("retain_until") or "") > (now.get("retain_until") or ""):
+        out.append(f"its retention was shortened: {was.get('retain_until')} -> {now.get('retain_until') or 'none'}")
+    return out
+
+
 def observe(gcp, env, state: dict, models: dict | None = None) -> list[dict]:
     """Run by the launcher's watch, not the renewer: each protected artifact's temporary hold and metageneration,
     compared with the last run. A hold that disappeared, or a metadata change no model.lock.renewed explains, is
@@ -344,7 +367,8 @@ def observe(gcp, env, state: dict, models: dict | None = None) -> list[dict]:
         key = f"{art.bucket}/{art.object}#{art.generation}"
         meta = r.body or {}
         now[key] = {"metageneration": str(meta.get("metageneration")), "hold": bool(meta.get("temporaryHold")),
-                    "event_hold": bool(meta.get("eventBasedHold"))}
+                    "event_hold": bool(meta.get("eventBasedHold")), "fields": _fields(meta),
+                    "retain_until": ((meta.get("retention") or {}).get("retainUntilTime") or "")}
         was = previous.get(key)
         if not was:
             continue
@@ -354,9 +378,10 @@ def observe(gcp, env, state: dict, models: dict | None = None) -> list[dict]:
             changes.append({**base, "status": "hold_released", "previous": "held",
                             "problems": ["a hold on a protected file was released"]})
         elif was["metageneration"] != now[key]["metageneration"] and renewed.get(key, "") <= since:
-            changes.append({**base, "status": "metadata_changed", "previous": was["metageneration"],
-                            "problems": [f"metageneration {was['metageneration']} -> {now[key]['metageneration']} "
-                                         "with no model.lock.renewed recorded"]})
+            problems = _what_changed(was, now[key])
+            if problems:     # found live in 1.4.1: a lock on activation (only a later date) is not reported
+                changes.append({**base, "status": "metadata_changed", "previous": was["metageneration"],
+                                "problems": problems})
     from datetime import datetime, timezone
 
     state["protected"] = now
