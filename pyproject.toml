@@ -38,6 +38,7 @@ gcp = [
 ]
 
 launcher = ["flask>=3", "gunicorn>=22"]
+online = ["pg8000>=1.31,<2"]   # Cloud SQL online store (FR-104): the sync and the lookup service, in the launcher image
 mcp = [
     "mcp>=1.9,<2",
 ]

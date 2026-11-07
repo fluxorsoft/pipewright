@@ -17,9 +17,9 @@ RUN --mount=type=secret,id=pip_ca,required=false set -e; \
     if [ -s /run/secrets/pip_ca ]; then export PIP_CERT=/run/secrets/pip_ca; fi; \
     wheels=$(ls /tmp/dist/pipewright_mlops-*-py3-none-any.whl); \
     [ "$(echo "$wheels" | wc -l)" = "1" ] || { echo "expected exactly one pipewright_mlops wheel in dist/: $wheels"; exit 1; }; \
-    pip install "${wheels}[gcp,launcher]"; \
+    pip install "${wheels}[gcp,launcher,online]"; \
     rm -rf /tmp/dist; \
-    python -c "import flask, gunicorn, yaml; from google.cloud import aiplatform; import pipewright.launcher.routing"
+    python -c "import flask, gunicorn, yaml, pg8000; from google.cloud import aiplatform; import pipewright.launcher.routing, pipewright.online.server"
 
 ARG VERSION=unknown
 LABEL dev.pipewright.component="launcher" dev.pipewright.version="${VERSION}" \
