@@ -1537,6 +1537,14 @@ in BigQuery.
 
 - (a) Pipewright ships the Cloud Run lookup service for `cloudsql` on Agent Platform endpoints (pooled, IAM login,
   image published by Pipewright and pinned by digest). Its CPU, memory and instances are set in YAML by the ML team.
+  It is a toggle, Pipewright's service by default: `model.serving.features.lookup.provider: pipewright | own`. With
+  `own`, Pipewright still exports and syncs the features into the tenant's Cloud SQL schema (the same manifest, checks
+  and swap), grants read on that schema to the identity the team names (`lookup.reader`, a service account of the
+  tenant), and deploys nothing in between: the ML team decides what sits between the serving endpoint and Cloud SQL
+  and how the features reach the model. The sizing keys below then do not apply (`validate` says so if they are set).
+  Pipewright's guarantee stops at the table: it proves what it loaded (each sync writes a `_pipewright_sync` row with
+  the manifest's digest, the feature contract version, the row count and the as-of time, which the team's code can
+  check), not what the team's service does with it, as for `http`.
 - (b) The sync runs on the launcher's existing scheduler.
 - (c) One Cloud SQL instance per environment, a schema per tenant. Its tier, memory and disk are set in YAML, checked
   against the tiers Google Cloud supports.
@@ -1551,7 +1559,7 @@ values. Nothing changes for anyone who does not choose `cloudsql`.
 *The lookup service: the ML team's use case YAML,* `model.serving.features.lookup`, overridable per environment in
 `environments/<env>.yaml`, within limits the platform sets in the manifest (`features.online_store.lookup.limits`:
 `max_cpu`, `max_memory`, `max_instances`, `max_min_instances`), as Ray limits work today. `deploy-model` deploys or
-updates it.
+updates it when `provider: pipewright` (the default); with `provider: own` only `reader` is read.
 
 | Key | Default | Allowed (Cloud Run services) |
 |---|---|---|
