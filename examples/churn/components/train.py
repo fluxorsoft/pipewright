@@ -74,6 +74,8 @@ def train_model(
 
     # Agent Platform prebuilt PyTorch serving runs <artifact_uri>/model.mar with TorchServe.
     handler = os.path.join(os.path.dirname(os.path.abspath(__file__)), "torchserve_handler.py")
+    # The lookup client for the stores of Pipewright 1.4.2 (FR-104: bigquery, cloudsql, http), beside the handler.
+    extra.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "online_lookup.py"))
     with tempfile.TemporaryDirectory() as export_dir, tempfile.TemporaryDirectory() as scratch:
         # The archiver stages and deletes $TMPDIR/<model-name>: a private TMPDIR keeps it away from model.path.
         subprocess.run(

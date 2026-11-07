@@ -36,6 +36,11 @@ import urllib.request
 import torch
 from ts.torch_handler.base_handler import BaseHandler
 
+try:        # packaged beside the handler (train.py) for the stores of FR-104: bigquery, cloudsql, http
+    import online_lookup
+except ImportError:          # a model packaged before it reads the Bigtable store only
+    online_lookup = None
+
 _TOKEN_URL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 
 
@@ -162,6 +167,9 @@ class TabularChurnHandler(BaseHandler):
                 item = item["instances"]
             entities = item if isinstance(item, list) else [item]
             self._layout.append((len(entities), not isinstance(item, list)))
+            if self._online.get("type", "bigtable") != "bigtable":
+                rows.extend(self._batch_rows(entities, len(rows)))
+                continue
             for e in entities:
                 try:
                     rows.append(online_row(e, self._online, self._features, token,
@@ -170,9 +178,38 @@ class TabularChurnHandler(BaseHandler):
                     self._errors[len(rows)] = str(err)
                     rows.append([0.0] * len(self._features))
         print(json.dumps({"severity": "INFO", "message": "online features",
-                          "views": [v["view"] for v in self._online["views"]], "entities": len(rows),
+                          "store": self._online.get("type", "bigtable"), "entities": len(rows),
                           "not_served": len(self._errors)}), flush=True)
         return torch.tensor(rows, dtype=torch.float32)
+
+    def _batch_rows(self, entities, offset, fetch_many=None):
+        """FR-104: every entity of a request in one lookup (BigQuery, Cloud SQL through Pipewright's lookup service,
+        or the team's http store), then each row filled as training did."""
+        fetch_many = fetch_many or online_lookup.fetch_many
+        key, rows, ids = self._online["key"], [], []
+        for e in entities:
+            entity = e.get(key) if isinstance(e, dict) else e
+            ids.append(None if entity is None or isinstance(entity, (list, dict)) else str(entity))
+        try:
+            found = fetch_many(self._online, [i for i in ids if i is not None]) if any(ids) else {}
+            problem = None
+        except Exception as err:  # noqa: BLE001 - the store's error, without IDs or values
+            found, problem = {}, str(err)
+        for n, entity in enumerate(ids):
+            try:
+                if entity is None:
+                    raise ValueError(f"an instance is an entity ID or {{\"{key}\": ID}} with online features")
+                if problem:
+                    raise ValueError(problem)
+                values = found.get(entity)
+                if values is None:
+                    raise ValueError("the online store has no entity with this ID")
+                rows.append(fill_row(values, self._features, getattr(self, "_medians", None),
+                                     where="the online store, for this entity,"))
+            except ValueError as err:
+                self._errors[offset + n] = str(err)
+                rows.append([0.0] * len(self._features))
+        return rows
 
     def _preprocess_rows(self, data):
         # For each item: (number of rows, whether it was a single instance).
