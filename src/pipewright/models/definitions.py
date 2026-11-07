@@ -31,7 +31,7 @@ KINDS = ("view", "materialized_view", "table", "scheduled_query")
 _TYPES = {"VIEW": "view", "MATERIALIZED_VIEW": "materialized_view"}
 # CREATE [OR REPLACE] [TEMP] TABLE [IF NOT EXISTS] <name> [(columns)] [PARTITION/CLUSTER/OPTIONS ...] AS <query>
 _CTAS = re.compile(r"(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-                   r"`?[\w.\-:]+`?.*?\bAS\s*(?=\(|SELECT\b|WITH\b)")
+                   r"`?[\w.\-:]+`?.*?\bAS\s*(?:(?:--[^\n]*(?:\n|$)|/\*.*?\*/)\s*)*(?=\(|SELECT\b|WITH\b)")
 _LEADING_COMMENTS = re.compile(r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)+", re.S)
 
 
@@ -47,7 +47,7 @@ def normalise_sql(sql: str | None, project: str | None = None) -> str | None:
     if not sql:
         return None
     s = _LEADING_COMMENTS.sub("", sql)
-    s = _CTAS.sub("", s, count=1)
+    s = _LEADING_COMMENTS.sub("", _CTAS.sub("", s, count=1))   # a file's comment lands after AS (found live)
     s = " ".join(s.split()).rstrip(";").strip()
     if project:
         s = s.replace(f"`{project}.", "`{project}.").replace(f"`{project}`.", "`{project}`.")
@@ -67,8 +67,12 @@ def schema_of(fields: list[dict] | None, prefix: str = "") -> list[str]:
     return out
 
 
-def parse_ref(ref: str) -> tuple[str, str, str]:
+def parse_ref(ref: str, project: str | None = None) -> tuple[str, str, str]:
+    """project.dataset.table, or dataset.table in `project` (found live: data.features_from tables are usually
+    `bq://${resources.bigquery_dataset}.<table>`, the environment's own project)."""
     p = ref.removeprefix("bq://").strip("`").split(".")
+    if len(p) == 2 and project:
+        p = [project, *p]
     if len(p) != 3:
         raise ConfigError(f"{ref}: expected project.dataset.table")
     return p[0], p[1], p[2]
@@ -81,13 +85,13 @@ def source_name(src: dict) -> str:
     where the project and dataset may differ)."""
     if src.get("feature_group"):
         return str(src["feature_group"])
-    return parse_ref(str(src.get("table") or ""))[2]
+    return str(src.get("table") or "").removeprefix("bq://").strip("`").split(".")[-1]
 
 
 def resolve(gcp, src: dict, project: str, region: str) -> str:
     """The BigQuery object behind a features_from source: its table, or a feature group's BigQuery source."""
     if not src.get("feature_group"):
-        return ".".join(parse_ref(str(src["table"])))
+        return ".".join(parse_ref(str(src["table"]), project))
     url = REGISTRY.format(region=src.get("region") or region, project=src.get("project") or project,
                           group=src["feature_group"])
     r = gcp.get(url)
@@ -126,7 +130,7 @@ def built_sql(gcp, ref: str, location: str | None, kms_key: str | None = None) -
 
     p, d, t = parse_ref(ref)
     region = (location or "US").lower()
-    sql = (f"SELECT job_id, CAST(creation_time AS STRING) AS at, query FROM `{p}`.`region-{region}`."
+    sql = (f"SELECT job_id, CAST(creation_time AS STRING) AS created, query FROM `{p}`.`region-{region}`."
            "INFORMATION_SCHEMA.JOBS_BY_PROJECT WHERE state = 'DONE' AND error_result IS NULL "
            "AND destination_table.dataset_id = @d AND destination_table.table_id = @t "
            "AND statement_type IN ('CREATE_TABLE_AS_SELECT', 'INSERT', 'MERGE', 'SELECT') "
@@ -137,7 +141,7 @@ def built_sql(gcp, ref: str, location: str | None, kms_key: str | None = None) -
     if not found:
         return {}
     return {"sql_sha256": sha256(normalise_sql(found[0]["query"], p)), "job": found[0]["job_id"],
-            "at": found[0]["at"]}
+            "at": found[0]["created"]}
 
 
 def scheduled_sql(gcp, name: str, project: str) -> str | None:
@@ -193,8 +197,8 @@ def classify(old: dict | None, new: dict) -> tuple[str | None, list[str]]:
         if a.get("kind") != b.get("kind"):
             up("minor", f"{name}: now a {b.get('kind')} (was a {a.get('kind')})")
         if a.get("sql_sha256") != b.get("sql_sha256"):
-            up("minor", f"{name}: its SQL changed (sha256 {str(a.get('sql_sha256'))[:12]} -> "
-                        f"{str(b.get('sql_sha256'))[:12]})")
+            up("minor", f"{name}: its SQL changed (sha256 {str(a.get('sql_sha256') or 'none')[:12]} -> "
+                        f"{str(b.get('sql_sha256') or 'none')[:12]})")
         if (a.get("features") or {}) != (b.get("features") or {}):
             up("patch", f"{name}: feature descriptions or types changed")
     return level, what

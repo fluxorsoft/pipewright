@@ -344,3 +344,23 @@ def test_a_use_case_without_a_contract_resolves_without_the_section():
     with_it = resolve_ml({"data": {"features_from": timed}, "feature_contract": {
         "version": "1.0.0", "sources": [{"name": "spend", "kind": "view"}]}}, "churn", True, set(), [])
     assert with_it["feature_contract"]["version"] == "1.0.0"
+
+
+def test_a_source_table_without_a_project_is_in_the_environments_project():
+    """Found live: features_from tables are usually bq://${resources.bigquery_dataset}.<table>."""
+    gcp = FakeGcp({"p-test.feat.spend": view()})
+    src = {"table": "bq://feat.spend", "features": ["avg_spend_90d"]}
+    assert d.source_name(src) == "spend"
+    assert d.resolve(gcp, src, "p-test", "r") == "p-test.feat.spend"
+    sec = d.build(gcp, {"sources": [src]}, "p-test", "r", None, None)["section"]
+    assert sec["sources"][0]["kind"] == "view"
+
+
+
+def test_a_table_built_from_a_commented_sql_file_matches_the_file():
+    """Found live: built from the declared file, the job's statement is CREATE ... AS -- comment ... SELECT."""
+    body = "-- Support activity per customer\nSELECT customer_id, n\nFROM `p-test.ds.events`\n"
+    job = "CREATE OR REPLACE TABLE `p-test.ds.support` AS " + body
+    assert d.normalise_sql(job, "p-test") == d.normalise_sql(body, "p-test")
+    assert d.normalise_sql(job, "p-test") == "SELECT customer_id, n FROM `{project}.ds.events`"
+    assert d.normalise_sql(body.replace("p-test", "{project}"), "p-test") == d.normalise_sql(job, "p-test")

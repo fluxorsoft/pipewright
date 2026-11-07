@@ -440,6 +440,9 @@ def cmd_features_contract(args) -> int:
             print(f"DIFFERS {p}")
         print(f"{uc.name}: feature contract {existing.get('version')} "
               + ("does NOT match the live sources" if problems else f"matches the live sources in {env.name}"))
+        unreadable = [p for p in problems if "cannot be read" in p]
+        if problems and len(unreadable) == len(problems):
+            return 2                         # cannot check, not shown to differ
         return 1 if problems else 0
     out = definitions.build(gcp, features_from, env.project, env.region, existing, folder)
     section = out["section"]
