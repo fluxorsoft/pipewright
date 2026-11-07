@@ -86,7 +86,8 @@ def check(uc, env, gcp, report) -> None:
                                  "would be billed as a full table read", "the platform team sets the reservation"))
         if table.ok:
             nbytes = int(table.body.get("numBytes") or 0)
-            per = nbytes / 2**40 * BQ_PER_TIB
+            # BigQuery bills at least 10 MiB a query (found live: a 0.4 MiB table's unaccelerated lookups billed 10 MiB)
+            per = max(nbytes, 10 * 2**20) / 2**40 * BQ_PER_TIB
             preferred = [f"{x.get('projectId')}.{x.get('datasetId')}.{x.get('tableId')}"
                          for x in ((res.body or {}).get("preferredTables") or [])] if res.ok else []
             if res.ok and size and nbytes > size:
@@ -98,8 +99,8 @@ def check(uc, env, gcp, report) -> None:
             elif res.ok and size:
                 report.add(s, Result(OK, "BI Engine", f"covers {online['table']} ({nbytes / 2**20:.0f} MiB)"))
             report.add(s, Result(INFO, "refresh window", f"for minutes after each sync, lookups BI Engine has not "
-                                 f"reloaded are billed as a full read: about ${per:.4f} each (spike: up to 10 "
-                                 "minutes for 1M rows)"))
+                                 f"reloaded are billed as a full read (at least 10 MiB): about ${per:.5f} each (spike: up "
+                                 "to 10 minutes for 1M rows)"))
         else:
             report.add(s, Result(WARN, "served table", f"{online['table']}: not synced yet",
                                  "run `pipewright features sync` or wait for the online_sync schedule"))

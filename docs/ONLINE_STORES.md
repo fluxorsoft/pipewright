@@ -99,6 +99,8 @@ What to know before you choose it:
 - **The refresh window.** After each sync replaces the table, BI Engine reloads it. In our test, lookups ran
   unaccelerated for 8 to 10 minutes after a refresh of 1M rows (about half at first), and each was billed as a full
   table read: roughly $15 per refresh at 50 lookups a second. Refresh rarely and away from peak traffic.
+- **Every unaccelerated lookup bills at least 10 MiB**, BigQuery's minimum per query, however small the table (found
+  live: a 0.4 MiB table's lookups billed 10 MiB each with BI Engine off).
 - **No cap can guard it.** BigQuery checks `maximumBytesBilled` against its estimate before BI Engine is asked, so a
   capped lookup is refused even when BI Engine would serve it for nothing. Pipewright detects instead: the launcher
   counts billed lookups by the serving identity and raises `online.billed`, which `pipewright alerts sync` turns into an

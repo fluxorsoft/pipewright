@@ -70,7 +70,7 @@ def test_bigquery_without_a_reservation_fails_and_states_the_refresh_cost(monkey
     got = run(online, Gcp({"tables/pw_online_x": (200, {"numBytes": str(245 * 2**20)}),
                            "biReservation": (200, {})}), env(), None, monkeypatch)
     text = " | ".join(f"{s} {c}: {d}" for s, c, d in got)
-    assert "FAIL BI Engine: no reservation" in text and "about $0.0015 each" in text
+    assert "FAIL BI Engine: no reservation" in text and "about $0.00146 each" in text
     got = run(online, Gcp({"tables/pw_online_x": (200, {"numBytes": str(2 * 2**30)}),
                            "biReservation": (200, {"size": str(2**30)})}), env(), None, monkeypatch)
     assert any(s == "FAIL" and "the reservation 1.00 GiB" in d for s, c, d in got)
