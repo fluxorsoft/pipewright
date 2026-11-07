@@ -1571,7 +1571,9 @@ updates it when `provider: pipewright` (the default); with `provider: own` only 
 |---|---|---|
 | `cpu` | `1` | `1`, `2`, `4`, `6`, `8`. Fractional CPU (0.08 to under 1) is refused here: Cloud Run then forces concurrency 1, which defeats the connection pool |
 | `memory` | `512Mi` | `512Mi` to `32Gi` (second-generation runtime), and per CPU: 1 vCPU up to 4 GiB, 2 up to 8 GiB, 4 from 2 to 16 GiB, 6 from 4 to 24 GiB, 8 from 4 to 32 GiB |
-| `min_instances` | `0` | `0` and up; `1` keeps one instance warm (no cold start) |
+| `min_instances` | `0` (the platform's default for the environment applies first, below) | `0` and up, up to `max_instances`; set at service level (Google's recommendation, takes effect without a new revision). `1` keeps one instance warm; best effort, Google may restart it, so `2` keeps a warm spare where cold starts must be rare |
+| `cpu_boost` | `true` | `true`, `false`: Startup CPU boost, double CPU (1 vCPU becomes 2) for startup and 10 s after; shortens a cold start, does not prevent it |
+| `billing` | `request` | `request` (idle minimum instances billed at the lower idle rate), `instance` ("CPU always allocated": the full rate for the instance's whole life, no per-request charge; cheaper only for steady high traffic) |
 | `max_instances` | `5` | `1` and up, and `pool_size x max_instances` must fit the database's connection limit (below) |
 | `concurrency` | `80` | `1` to `1000` |
 | `pool_size` | `8` | `1` to `50` connections per instance (the spike's fix for exhausted connection slots) |
@@ -1607,6 +1609,27 @@ month):
 | An instance per tenant instead (not chosen) | the above times the number of tenants |
 | Lookup service, `min_instances: 0` | per use: $0.0000336 per vCPU-second and $0.0000035 per GiB-second while serving, plus requests |
 | Lookup service, one warm instance (1 vCPU, 512 MiB) | about $14 idle ($0.0000035 per vCPU-second and per GiB-second) |
+| Lookup service, two warm instances | about $28 idle |
+| Lookup service, `billing: instance`, per instance (1 vCPU, 512 MiB) | about $60 for a whole month ($0.0000216 per vCPU-second, $0.0000024 per GiB-second) |
+| Startup CPU boost | about $0.0005 per cold start (one extra vCPU for about 15 s); nothing while instances are warm |
+
+**Cold starts (user, 2026-11-07):** Cloud Run's minimum instances keep instances warm, and startup CPU boost shortens
+the starts that still happen. In the spike, the tail above 200 lookups a second came from new instances starting (the
+spike's container installed its driver at start; Pipewright's image is prebuilt, so starts are shorter).
+
+- *Open source (core):* the keys above with their checks; the launcher applies `min_instances`, `cpu_boost` and `billing`
+  when it creates or updates the service; `doctor` shows the warm instances' standing cost and says that minimum
+  instances are best effort.
+- *The platform's default per environment:* the manifest carries `features.online_store.lookup.defaults`
+  (`min_instances`, `cpu_boost`, `billing`) and, in `limits`, a floor `min_min_instances`, so production can require a
+  warm instance. A use case may go above the floor, never below it (`validate` names the floor).
+- *Starter (OSS):* passes the defaults through, all as Cloud Run's own: `min_instances: 0`, `cpu_boost: true`,
+  `billing: request`, no floor.
+- *Enterprise (Terraform, with Pipewright's guideline):* the platform file sets them per environment. Guideline:
+  test and development `min_instances: 0` with boost (pay nothing idle); production `min_instances: 1` with boost and a
+  floor of 1 (about $14 a month a service); `2` for use cases where a cold start must be rare (about $28);
+  `billing: instance` only for steady high traffic. Fleet View shows each lookup service's warm instances and their
+  standing cost.
 
 **Governance and security per item:**
 
