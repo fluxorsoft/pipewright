@@ -20,6 +20,17 @@ def test_the_list_marks_a_default_nobody_approved():
     assert "not approved" not in registry.render(uc, approved)
 
 
+def test_a_former_default_is_not_shown_as_the_champion():
+    """Found re-running the book on 1.4.2: the register step labels a new default `champion`, and the label stays
+    when a newer version takes over; the list shows the champion only as the default."""
+    uc = SimpleNamespace(model={"name": "lapse-risk"}, environment="test")
+    rows = [registry.Version("2", True, [], "run r2", "x", {"status": "champion", "approval": "approved"}),
+            registry.Version("1", False, [], "run r1", "y", {"status": "champion"}),
+            registry.Version("3", False, [], "run r3", "z", {"status": "candidate"})]
+    text = registry.render(uc, rows)
+    assert "v2    DEFAULT" in text and "champion" not in text and "v3    candidate" in text
+
+
 def test_deploy_model_refuses_a_default_nobody_approved(monkeypatch):
     plan = deploy.DeployPlan("demand-forecast", "1", "e", "n1-standard-2", {"min": 1, "max": 1}, False, [], [],
                              {"approval": "pending"}, None)

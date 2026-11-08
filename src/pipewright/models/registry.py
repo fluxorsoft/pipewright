@@ -117,6 +117,8 @@ def render(uc: ResolvedUseCase, rows: list[Version]) -> str:
     lines = [f"{uc.model['name']} ({uc.environment})"]
     for v in rows:
         status = "DEFAULT" if v.default else v.labels.get("status", "")
+        if status == "champion":          # a former default keeps the label its register step gave it (found
+            status = ""                   # re-running the book on 1.4.2): the champion is the default, shown above
         gate = f"  [gates {v.gates}]" if v.gates else ""
         unapproved = "  (not approved: `pipewright model approve`)" if v.default and unapproved_default(v) else ""
         lines.append(f"  v{v.version_id:<4} {status:<10} {v.created}  {v.description}{gate}{unapproved}")
