@@ -59,12 +59,21 @@ def test_unsupervised_evaluation_uses_ml_evaluate():
     class Jobs:
         def run(self, sql, what):
             calls.append(sql)
-            return [{"n": 200}] if "COUNTIF" in sql else [{"davies_bouldin_index": 1.234567891,
-                                                          "mean_squared_distance": 2.5}]
+            if "COUNTIF" in sql:
+                return [{"n": 200}]
+            if "centroid_id" in sql:
+                return [{"segment": "1", "n": 990}, {"segment": "2", "n": 10}]
+            return [{"davies_bouldin_index": 1.234567891, "mean_squared_distance": 2.5}]
 
     got = rt.evaluate_unsupervised(Jobs(), ML, "p.d.m", "p.d.rows")
     assert got == {"metrics": {"davies_bouldin_index": 1.234568, "mean_squared_distance": 2.5}, "rows": 200,
-                   "slices": {}}
+                   "slices": {}, "segments": {"1": 990, "2": 10}}
+    # FR-108 (1.4.2): with min_segment_share among the metrics, the smallest segment's share of ALL the run's rows
+    with_share = {**ML, "evaluation": {**ML["evaluation"],
+                                       "metrics": [*ML["evaluation"]["metrics"], "min_segment_share"]}}
+    got = rt.evaluate_unsupervised(Jobs(), with_share, "p.d.m", "p.d.rows")
+    assert got["metrics"]["min_segment_share"] == 0.01
+    assert "ML.PREDICT(MODEL `p.d.m`, (SELECT * EXCEPT (_pw_test) FROM `p.d.rows`))" in calls[-1]
     assert "ML.EVALUATE(MODEL `p.d.m`, (SELECT * EXCEPT (_pw_test) FROM `p.d.rows` WHERE _pw_test))" in calls[0]
     pca = {**ML, "data": {**ML["data"], "label": {"task": "decomposition"}},
            "evaluation": {"metrics": ["total_explained_variance_ratio"]}}

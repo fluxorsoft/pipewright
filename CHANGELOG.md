@@ -48,6 +48,19 @@ and [docs/SERVING.md](docs/SERVING.md).
   `allow_preview`, `settle_seconds`). Changes to a pool run one at a time under a lock and are announced
   (`serving.pool.change`). `doctor` shows the endpoint, the pool and the gateway.
 - **GKE guideline** ([examples/gke-lookup/](examples/gke-lookup/)): Pipewright's lookup service on GKE pods for KServe.
+- **A segment size measure for k-means** (FR-108): `min_segment_share`, the smallest segment's share of the run's
+  rows, and each segment's size in the evaluation record. Measured by default for clustering; it gates only when a
+  use case sets a gate on it. Found re-running the book: Davies-Bouldin passed a model with segments of 5 and 3
+  customers.
+
+### Fixed (found re-running the book on 1.4.2)
+
+- A replay that reproduces the champion exactly is not registered (the churn example's register step): since rows
+  are sorted, a replay ties its own model, and the champion rule passed the tie.
+- BigQuery ML: with `evaluation.champion` off, the champion is no longer measured (a champion whose model was gone
+  still failed every run, though the error advised turning it off).
+- `model list` no longer shows a former default as `champion`; `run` names the pipeline when `--pipeline` is left
+  out.
 
 ## [1.4.1] - 2026-11-07
 

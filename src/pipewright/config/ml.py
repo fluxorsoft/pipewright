@@ -24,7 +24,8 @@ TASK_METRICS = {
                    "log_loss"},
     "regression": {"rmse", "mae", "mape", "r2", "median_absolute_error"},
     # BigQuery ML only (bqml): no label; ML.EVALUATE's measures (Pipewright 1.1)
-    "clustering": {"davies_bouldin_index", "mean_squared_distance"},
+    # min_segment_share (Pipewright 1.4.2, FR-108): the smallest segment's share of the rows, on all rows
+    "clustering": {"davies_bouldin_index", "mean_squared_distance", "min_segment_share"},
     "decomposition": {"total_explained_variance_ratio"},
     # BigQuery ML only (bqml.forecast): the forecast against the held-out latest period, as regression measures it
     "forecast": {"rmse", "mae", "mape", "r2", "median_absolute_error"},
@@ -34,7 +35,7 @@ UNSUPERVISED = ("clustering", "decomposition")
 TASK_DEFAULTS = {
     "multiclass": ("f1_macro", ["accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "log_loss"]),
     "regression": ("rmse", ["rmse", "mae", "r2"]),
-    "clustering": ("davies_bouldin_index", ["davies_bouldin_index", "mean_squared_distance"]),
+    "clustering": ("davies_bouldin_index", ["davies_bouldin_index", "mean_squared_distance", "min_segment_share"]),
     "decomposition": ("total_explained_variance_ratio", ["total_explained_variance_ratio"]),
     "forecast": ("mae", ["mae", "rmse", "mape"]),
 }

@@ -497,7 +497,29 @@ def evaluate_unsupervised(jobs: Jobs, ml_config: dict, model: str, rows_table: s
     rows = (f", (SELECT * EXCEPT (_pw_test) FROM `{rows_table}` WHERE _pw_test)" if task == "clustering" else "")
     found = (jobs.run(render("evaluate_unsupervised.sql", model=model, rows=rows), "ML.EVALUATE") or [{}])[0]
     n = int(jobs.run(f"SELECT COUNTIF(_pw_test) AS n FROM `{rows_table}`", "test rows")[0]["n"])
-    return {"metrics": shape_metrics(found, names), "rows": n, "slices": {}}
+    out = {"metrics": shape_metrics(found, names), "rows": n, "slices": {}}
+    if task == "clustering":
+        sizes = segment_sizes(jobs, model, rows_table)
+        out["segments"] = sizes
+        if "min_segment_share" in names:
+            out["metrics"]["min_segment_share"] = min_segment_share(sizes)
+    return out
+
+
+def segment_sizes(jobs: Jobs, model: str, rows_table: str) -> dict:
+    """{segment: rows} of a k-means model over all of the run's rows (FR-108). Davies-Bouldin alone does not refuse
+    lopsided segments: a segment of three extreme customers is tight and far from the rest, so it can score well
+    (found re-running the book's Chapter 8 on 1.4.2). Counts only, never a value."""
+    got = jobs.run(f"SELECT CAST(centroid_id AS STRING) AS segment, COUNT(*) AS n FROM ML.PREDICT(MODEL `{model}`, "
+                   f"(SELECT * EXCEPT (_pw_test) FROM `{rows_table}`)) GROUP BY segment ORDER BY segment",
+                   "segment sizes")
+    return {str(r["segment"]): int(r["n"]) for r in got or []}
+
+
+def min_segment_share(sizes: dict) -> float | None:
+    """The smallest segment's share of all rows, or None without segments."""
+    total = sum(sizes.values())
+    return round(min(sizes.values()) / total, 6) if sizes and total else None
 
 
 def evaluate_rows(jobs: Jobs, ml_config: dict, predictions: str) -> dict:

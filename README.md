@@ -491,7 +491,9 @@ More model types (new in 1.1), with the same gates, approvals, scoring and evide
 - **Segments and components:** `model_type: kmeans` (`data.label.task: clustering`) or `pca`
   (`decomposition`) need no label. They are measured with `ML.EVALUATE` (davies_bouldin_index and
   mean_squared_distance; total_explained_variance_ratio) and gated on those; scoring writes each row's cluster or
-  components.
+  components. Since 1.4.2 k-means also records each segment's size and `min_segment_share`, the smallest segment's
+  share of the run's rows: Davies-Bouldin alone can pass lopsided segments (a few extreme customers form a tight,
+  distant segment), so gate on both, for example `{ metric: min_segment_share, min: 0.02 }`.
 - **Forecasts:** `data.label.task: forecast` with a `bqml.forecast` section (horizon, `id_columns` for one series
   per store or product, confidence level). `arima_plus` holds out the latest period, forecasts it and measures the
   forecast against what happened (mae, rmse, mape), then refits on the whole series before registration; scoring
