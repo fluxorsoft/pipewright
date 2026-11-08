@@ -75,6 +75,10 @@ and [docs/SERVING.md](docs/SERVING.md).
   `model.serving.features: request`, `deploy-model` refuses a version that carries an online lookup. The serving
   handler would read each caller's feature values as entity IDs and answer an error for every one; 1.2.0 checked only
   the opposite case.
+- **A deployment that cannot read the store is not "already live"** (FR-115): with online features the endpoint
+  runs as the tenant's runner. A deployment of the same version made without it (under `features: request`) answered
+  every lookup with HTTP 403, and `deploy-model` said there was nothing to do; it now deploys the version again, as
+  the runner, and drains the old deployment.
 
 ### Fixed (found re-running the book on 1.4.2)
 

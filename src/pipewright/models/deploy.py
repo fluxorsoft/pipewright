@@ -153,7 +153,12 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     default = ai.Model(model_name=f"{models[0].resource_name}@default")
     endpoints = list_endpoints(ai, endpoint_name(uc))
     deployed = endpoints[0].list_models() if endpoints else []
-    current = [d for d in deployed if d.model == default.resource_name and d.model_version_id == default.version_id]
+    # FR-115 (Pipewright 1.4.2): with online features the endpoint must run as the tenant's runner, which reads the
+    # store. A deployment of the same version made without it (under features request) is not "already live": it
+    # answered every lookup with HTTP 403 (found re-running the book's Chapter 19), so it is deployed again.
+    runner = uc.resources.get("runner_service_account") if uc.ml.get("online_features") else None
+    current = [d for d in deployed if d.model == default.resource_name and d.model_version_id == default.version_id
+               and (not runner or (getattr(d, "service_account", "") or "") == runner)]
     serving = uc.model["serving"]
     from pipewright.gcp import Gcp
     from pipewright.models import gates
