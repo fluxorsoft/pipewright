@@ -93,3 +93,18 @@ def test_iam_user_and_tokens():
     calls = []
     t = server.Tokens(lambda: calls.append(1) or "tok")
     assert t.get() == t.get() == "tok" and len(calls) == 1
+
+
+def test_tokens_follow_their_expiry_not_a_fixed_reuse():
+    """Found live (1.4.2): the metadata server's token may have minutes left; reusing it for 25 minutes sent expired
+    tokens (the endpoint answered 401). Refresh five minutes before it expires."""
+    from pipewright.online.server import Tokens
+
+    now = {"t": 1000.0}
+    issued = iter([{"access_token": "A", "expires_in": 420}, {"access_token": "B", "expires_in": 3599}])
+    tok = Tokens(fetch=lambda: next(issued), clock=lambda: now["t"])
+    assert tok.get() == "A"
+    now["t"] += 119
+    assert tok.get() == "A"                     # 2 minutes in, 5 minutes left: still good
+    now["t"] += 2
+    assert tok.get() == "B"                     # within five minutes of expiry: a new one

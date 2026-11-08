@@ -42,16 +42,25 @@ def _md(path: str) -> bytes:
 
 
 class Tokens:
-    """The identity's access token, refreshed before it expires; it is the database password (IAM login)."""
+    """The identity's access token, refreshed five minutes before it expires; it is the database password (IAM login)
+    and the gateway's credential. Found live (1.4.2): the metadata server hands out its current token, which may have
+    far less than an hour left, so a fixed 25-minute reuse sent expired tokens (the endpoint answered 401)."""
 
-    def __init__(self, fetch=None):
-        self._fetch = fetch or (lambda: json.loads(_md("/token"))["access_token"])
-        self._lock, self._token, self._at = threading.Lock(), None, 0.0
+    MARGIN = 300
+
+    def __init__(self, fetch=None, clock=time.time):
+        self._fetch = fetch or (lambda: json.loads(_md("/token")))
+        self._clock = clock
+        self._lock, self._token, self._until = threading.Lock(), None, 0.0
 
     def get(self) -> str:
         with self._lock:
-            if not self._token or time.time() - self._at > 1500:
-                self._token, self._at = self._fetch(), time.time()
+            if not self._token or self._clock() >= self._until:
+                got = self._fetch()
+                if isinstance(got, str):              # a fetcher that returns the token alone (tests, callers)
+                    got = {"access_token": got, "expires_in": 1800}
+                self._token = got["access_token"]
+                self._until = self._clock() + max(int(got.get("expires_in", 0)) - self.MARGIN, 0)
             return self._token
 
 

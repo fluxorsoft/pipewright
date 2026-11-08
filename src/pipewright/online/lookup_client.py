@@ -32,14 +32,16 @@ def _metadata(path):
 
 
 def access_token():
-    """An access token for Google APIs, reused for 25 minutes."""
+    """An access token for Google APIs, reused until five minutes before it expires. The metadata server hands out
+    its current token, which may have far less than an hour left (found live in 1.4.2: a fixed 25-minute reuse sent
+    expired tokens)."""
     with _lock:
         hit = _cache.get("access")
-        if hit and time.time() - hit[1] < 1500:
+        if hit and time.time() < hit[1]:
             return hit[0]
-        token = json.loads(_metadata("/token"))["access_token"]
-        _cache["access"] = (token, time.time())
-        return token
+        got = json.loads(_metadata("/token"))
+        _cache["access"] = (got["access_token"], time.time() + max(int(got.get("expires_in", 0)) - 300, 0))
+        return got["access_token"]
 
 
 def id_token(audience):
