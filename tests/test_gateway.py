@@ -40,7 +40,7 @@ def test_gateway_needs_callers_and_its_keys_need_the_mode(repo):
 
 
 def test_the_custom_solution_puts_the_gateway_in_front_of_the_teams_store(repo):
-    url = "https://team-store.internal.example/lookup"
+    url = "https://team-store.internal.example"
     o = store_repo(repo, {"type": "http", "http": {"url": url},
                           "lookup": {"mode": "gateway", "callers": [CALLER], "max_instances": 3}})().ml[
         "online_features"]
@@ -198,7 +198,7 @@ def test_the_http_source_calls_the_teams_store_with_an_id_token():
         return io.BytesIO(json.dumps({"features": {"c-1": {"tenure": 3}}}).encode())
 
     tokens = gw.IdTokens(fetch=lambda aud: f"ID-{aud}")
-    src = gw.HttpSource({"url": "https://team.example/lookup", "audience": "aud-1"}, tokens, open_)
+    src = gw.HttpSource({"url": "https://team.example", "audience": "aud-1"}, tokens, open_)
     assert src.fetch(["c-1"]) == {"c-1": {"tenure": 3}}
     assert seen == [("https://team.example/lookup", "Bearer ID-aud-1", {"entity_ids": ["c-1"]})]
 

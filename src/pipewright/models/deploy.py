@@ -310,7 +310,11 @@ def pool_deploy_request(model_version: str, display_name: str, pool_resource: st
     body = scale_to_zero_request(model_version, display_name, "unused", 1, share, previous, None, identity)
     dm = body["deployedModel"]
     dm.pop("dedicatedResources")
-    dm["sharedResources"], dm["serviceAccount"] = pool_resource, identity
+    dm["sharedResources"] = pool_resource
+    if identity:
+        dm["serviceAccount"] = identity
+    else:
+        dm.pop("serviceAccount", None)
     return body
 
 

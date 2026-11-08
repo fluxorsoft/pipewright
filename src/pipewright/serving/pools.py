@@ -68,8 +68,13 @@ def resource(env, name: str) -> str:
 
 
 def service_account(env, pool: dict) -> str | None:
-    return pool.get("service_account") or ((env.tenants or {}).get(pool.get("tenant")) or {}).get(
-        "runner_service_account")
+    """The identity its models run as. A Terraform pool has none (the provider cannot set it yet): its models run
+    as Agent Platform's own identity, and must not name another (Agent Platform refuses a mismatch)."""
+    if pool.get("service_account"):
+        return pool["service_account"]
+    if pool.get("managed_by") == "terraform":
+        return None
+    return ((env.tenants or {}).get(pool.get("tenant")) or {}).get("runner_service_account")
 
 
 def pool_problems(env, name: str, pool: dict) -> tuple[list[str], list[str]]:
@@ -111,7 +116,7 @@ def pool_problems(env, name: str, pool: dict) -> tuple[list[str], list[str]]:
     if pool.get("managed_by") == "terraform" and (env.security or {}).get("kms_key"):
         problems.append(f"{where}.managed_by terraform: {env.name} requires CMEK, and the Terraform resource cannot "
                         "set a pool's encryption key or service account yet; use managed_by ci")
-    if not service_account(env, pool):
+    if pool.get("managed_by") == "ci" and not service_account(env, pool):
         problems.append(f"{where}: no identity (service_account, or the tenant's runner in the manifest)")
     warnings.append(f"{where}: {prices.pool_cost(pool)}")
     return problems, warnings
@@ -177,7 +182,8 @@ def create_body(env, name: str, pool: dict) -> dict:
     if pool.get("cpu_target"):
         spec["autoscalingMetricSpecs"] = [{"metricName": "aiplatform.googleapis.com/prediction/online/cpu/utilization",
                                            "target": int(pool["cpu_target"])}]
-    body = {"dedicatedResources": spec, "serviceAccount": service_account(env, pool)}
+    body = {"dedicatedResources": spec, **({"serviceAccount": service_account(env, pool)}
+                                           if service_account(env, pool) else {})}
     if (env.security or {}).get("kms_key"):
         body["encryptionSpec"] = {"kmsKeyName": env.security["kms_key"]}
     return {"deploymentResourcePoolId": name, "deploymentResourcePool": body}

@@ -117,7 +117,7 @@ sits in front of it:
 ```yaml
 online_store:
   type: http
-  http: { url: "https://features.internal.example.com/lookup", audience: "https://features.internal.example.com" }
+  http: { url: "https://features.internal.example.com", audience: "https://features.internal.example.com" }
   lookup:
     mode: gateway
     callers: [serviceAccount:checkout-app@acme-prod.iam.gserviceaccount.com]

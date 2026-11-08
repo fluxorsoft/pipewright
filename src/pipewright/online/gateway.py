@@ -64,7 +64,8 @@ class HttpSource:
     """The team's own lookup service (type http): POST /lookup {"entity_ids"} -> {"features": {id: {...}}}."""
 
     def __init__(self, cfg: dict, tokens: IdTokens | None = None, opener=None):
-        self.url, self.audience = cfg["url"], cfg.get("audience") or cfg["url"]
+        # The `http` contract's URL is the service; the lookup is POST <url>/lookup (as the serving handler calls it).
+        self.url, self.audience = cfg["url"].rstrip("/") + "/lookup", cfg.get("audience") or cfg["url"]
         self.timeout = int(cfg.get("timeout_ms", 1000)) / 1000
         self.tokens, self._open = tokens or IdTokens(), opener or urllib.request.urlopen
 
