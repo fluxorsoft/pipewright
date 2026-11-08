@@ -1,0 +1,24 @@
+# The serving example (Pipewright 1.4.2): the feature tables example served online, with every serving and online
+# store key shown, and each toggle on or off. `pipewright new-usecase --from serving` copies these paths from the
+# churn example, then this folder's files.
+code_from: churn
+code:
+  - training_pipeline.py
+  - inference_pipeline.py
+  - components/
+  - schemas/raw_customers.json
+  - schemas/model_metrics.json
+  - schemas/predictions.json
+  - schemas/model_monitoring.json
+
+# The sample values these files use, which `pipewright new-usecase` replaces with the new use case's own
+# (--name, --tenant, --owner, --table-prefix, --model-name), in the files under templated only.
+sample:
+  usecase: my-churn-serving
+  tenant: my-tenant
+  owner: my-team
+  table_prefix: my_churn_serving_
+  model_name: my-churn-serving-classifier
+templated:
+  - config/data.yaml
+  - usecase.yaml

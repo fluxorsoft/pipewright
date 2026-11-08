@@ -8,6 +8,7 @@ Each folder is a complete use case. `pipewright new-usecase --name <name> --tena
 | [churn](churn/) | The reference: a PyTorch model trained, evaluated, registered, scored and monitored, with every setting a use case can make. Keys it leaves out are shown as `# default` lines with the value Pipewright fills in. |
 | [minimal](minimal/) | Only what is required. Start here when you know what you want. |
 | [features](features/) | Features read from feature tables, each as it was at the row's cut-off time. |
+| [serving](serving/) | Served online (1.4.2): every serving and online store key with its default, and each case on and off (the lookup gateway, your own store, co-hosting). |
 | [bqml](bqml/) | A model trained and scored in BigQuery ML: no pipeline code. |
 | [ray](ray/) | The churn model's tuning trials run in parallel on a Ray cluster that lives for one step. |
 

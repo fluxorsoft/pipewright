@@ -1,0 +1,81 @@
+# my-churn-serving: created from the Pipewright serving example (pipewright new-usecase --from serving).
+# The feature tables example served online (Pipewright 1.4.2): callers send entity IDs, and the features come from an
+# online store. Every serving and online store key is shown: set keys are the choices this example makes, and
+# `# default` lines are what Pipewright fills in when a key is left out. Lines marked TOGGLE turn a feature on or off;
+# README.md shows each case. Everything here is off by default: leave model.serving out and nothing is served.
+apiVersion: pipewright/v1
+kind: UseCase
+metadata:
+  name: my-churn-serving
+  owner: my-team
+
+spec:
+  tenant: my-tenant                      # given to you by the platform team
+  include: [config/*.yaml]               # config/data.yaml: the contract, label, split and the feature tables
+
+  pipelines:
+    training:  { file: training_pipeline.py,  function: churn_training_pipeline }
+    inference: { file: inference_pipeline.py, function: churn_inference_pipeline }
+  components: { dir: components/, requirements: components/requirements.txt }
+
+  model:
+    name: my-churn-serving-classifier
+    serving:
+      enabled: true                      # TOGGLE: false (the default) serves nothing online
+      features: online                   # TOGGLE: request (the default): callers send the feature values
+      # default model.serving.target: vertex             # kserve on private GKE
+      # default model.serving.machine: n1-standard-2     # not with a pool: the pool sets the machines
+      # default model.serving.canary_percent: 10         # deploy-model --canary
+      # default model.serving.pool: null                 # TOGGLE: a shared pool for co-hosting (see README)
+      online_store:                      # without it: the tenant's Bigtable online store (1.1)
+        type: cloudsql                   # bigtable (the default) | bigquery | cloudsql | http
+        cloudsql:
+          schema: my_team                # default public; a schema per team in a shared instance
+          # default model.serving.online_store.cloudsql.table: pw_online_<use case>
+        lookup:
+          mode: gateway                  # TOGGLE: lookup (the default): the endpoint calls the lookup service
+          callers:                       # with mode gateway: who may call it (required)
+            - serviceAccount:my-app@my-project.iam.gserviceaccount.com
+          # default model.serving.online_store.lookup.retries: 3          # gateway only; 0 turns retries off
+          # default model.serving.online_store.lookup.provider: pipewright  # own: you run what reads the table
+          # default model.serving.online_store.lookup.cpu: 1
+          # default model.serving.online_store.lookup.memory: 512Mi
+          # default model.serving.online_store.lookup.min_instances: 0     # or the environment's default
+          # default model.serving.online_store.lookup.max_instances: 5
+          # default model.serving.online_store.lookup.concurrency: 80
+          # default model.serving.online_store.lookup.pool_size: 8         # database connections per instance
+          # default model.serving.online_store.lookup.timeout_ms: 1000
+          # default model.serving.online_store.lookup.cpu_boost: true
+          # default model.serving.online_store.lookup.billing: request
+        # default model.serving.online_store.sync.mode: full              # changed: only rows that changed
+        # default model.serving.online_store.export.enabled: false        # TOGGLE: Parquet for your own store
+
+  triggers:
+    api: true                            # `pipewright run --source-uri bq://<dataset>.my_churn_serving_entities`
+    schedules:                           # keeps the online store fresh (pipewright features sync, by the launcher)
+      - { name: online, cron: "0 * * * *", timezone: Europe/London, pipeline: online_sync }
+
+  parameters:                            # the pipelines' own parameters
+    bq_dataset: ${resources.bigquery_dataset}
+    model_display_name: ${model.name}
+    raw_table: my_churn_serving_raw_customers
+    metrics_table: my_churn_serving_model_metrics
+
+  evaluation:
+    gates:
+      - { metric: auc, min: 0.7 }        # a model below this is not registered
+
+  inference:
+    output_table: my_churn_serving_predictions
+
+  monitoring:                            # drift of the features as read at scoring time, against training
+    drift: { enabled: true }
+    output_table: my_churn_serving_model_monitoring
+
+  outputs:                               # tables the pipelines write, created by `pipewright tables sync`
+    bigquery:
+      tables:
+        my_churn_serving_raw_customers: { schema: schemas/raw_customers.json, partition: { field: ingested_at, type: DAY } }
+        my_churn_serving_model_metrics: { schema: schemas/model_metrics.json, partition: { field: evaluated_at, type: DAY } }
+        my_churn_serving_predictions:   { schema: schemas/predictions.json,   partition: { field: scored_at, type: DAY } }
+        my_churn_serving_model_monitoring: { schema: schemas/model_monitoring.json, partition: { field: monitored_at, type: DAY } }

@@ -99,3 +99,31 @@ def test_the_churn_readme_shows_how_to_read_its_features_from_feature_tables():
     from_tables = {f for s in block["features_from"]["sources"] for f in s["features"]}
     assert from_tables | entity | {data["label"]["column"]} == contract      # every churn column has a source
     assert block["split"] == {"strategy": "time", "time_column": "snapshot_date"}
+
+
+# ------------------------------------------------- 1.4.2: the serving example shows every serving default --
+
+def test_the_serving_example_shows_true_defaults():
+    import re
+
+    from pipewright.config import resolve
+    from pipewright.online import config as online_config
+    from pipewright.online import sizing
+
+    expected = {"model.serving.target": resolve._SERVING_DEFAULTS["target"],
+                "model.serving.machine": resolve._SERVING_DEFAULTS["machine"],
+                "model.serving.canary_percent": 10, "model.serving.pool": None,
+                "model.serving.online_store.lookup.retries": online_config.GATEWAY_RETRIES,
+                "model.serving.online_store.lookup.provider": "pipewright",
+                "model.serving.online_store.sync.mode": "full", "model.serving.online_store.export.enabled": False,
+                **{f"model.serving.online_store.lookup.{k}": v for k, v in sizing.LOOKUP_DEFAULTS.items()}}
+    shown = {}
+    text = (nu.examples_dir() / "serving" / "usecase.yaml").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        m = re.match(r"\s*# default ([a-z_.]+): (.+?)(\s{2,}#.*)?$", line)
+        if m and "<" not in m.group(2):
+            shown[m.group(1)] = yaml.safe_load(m.group(2))
+    assert set(expected) <= set(shown), f"not shown: {set(expected) - set(shown)}"
+    wrong = {k: (v, expected[k]) for k, v in shown.items() if k in expected and v != expected[k]}
+    assert not wrong, wrong
+    assert "TOGGLE" in text and "mode: gateway" in text
