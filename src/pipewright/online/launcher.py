@@ -182,8 +182,10 @@ def allow_gateway(gcp, region: str, endpoint: str, identity: str) -> None:
     bindings = [*others, {"role": role, "members": sorted({*mine.get("members", []), member})}]
     r = gcp.post(f"{api}:setIamPolicy", {"policy": {**policy, "bindings": bindings}})
     if not r.ok:
-        raise ConfigError(f"the gateway's identity could not be allowed to call {endpoint.rsplit('/', 1)[-1]} "
-                          f"(HTTP {r.status})")
+        raise ConfigError(f"the gateway's identity {identity} may not call endpoint {endpoint.rsplit('/', 1)[-1]} "
+                          f"and the launcher could not allow it (HTTP {r.status}). An endpoint the platform's "
+                          "Terraform creates gets the grant there (serving.endpoints); otherwise grant it "
+                          "roles/aiplatform.user on that endpoint")
 
 
 def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, sleep=time.sleep) -> dict:
