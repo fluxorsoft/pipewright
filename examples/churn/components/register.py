@@ -78,6 +78,19 @@ def register_model(
     aiplatform.init(project=project, location=region)
     with open(report.path) as f:
         evaluation = json.load(f)
+    # A replay is a check, not a new model. Since rows are sorted before training (Pipewright 1.2.0) a replay with
+    # the same release reproduces its run exactly, so it ties the champion it was trained as, and a tie passes the
+    # champion rule: registering it would add a copy of a model that already exists (found re-running the book).
+    champ = evaluation.get("champion") or {}
+    key = ml_config["evaluation"]["primary_metric"]
+    new, old = (evaluation.get("metrics") or {}).get(key), champ.get(key)
+    if source_uri.startswith("snapshot://") and new is not None and old is not None and new == old:
+        logging.info("replay of %s reproduced the champion exactly (%s %.4f, champion version %s): a replay is a "
+                     "check, so nothing is registered", source_uri.removeprefix("snapshot://"), key, new,
+                     champ.get("_version", "?"))
+        with open(card.path, "w") as f:
+            f.write(f"Replay of {source_uri}: reproduced the champion exactly; not registered.\n")
+        return
 
     text = model_card(ml_config, evaluation, run_id, source_uri)
     with open(card.path, "w") as f:

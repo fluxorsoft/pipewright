@@ -127,3 +127,11 @@ def test_the_serving_example_shows_true_defaults():
     wrong = {k: (v, expected[k]) for k, v in shown.items() if k in expected and v != expected[k]}
     assert not wrong, wrong
     assert "TOGGLE" in text and "mode: gateway" in text
+
+
+def test_a_replay_that_reproduces_the_champion_is_not_registered():
+    """Found re-running the book's Chapter 5 on 1.4.2: an exact replay ties its own model and passed the champion
+    rule, registering a copy. The register step leaves it out and says why."""
+    text = (nu.examples_dir() / "churn" / "components" / "register.py").read_text(encoding="utf-8")
+    assert 'source_uri.startswith("snapshot://") and new is not None and old is not None and new == old' in text
+    assert "nothing is registered" in text
