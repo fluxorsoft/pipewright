@@ -371,6 +371,27 @@ what Google Cloud supports, and alerts when a sync is stale or BI Engine lets lo
 Parquet export (`export.enabled`) is for teams that build their own store. The guide, with costs, performance and the
 pattern for your own sync: [docs/ONLINE_STORES.md](docs/ONLINE_STORES.md).
 
+## Private endpoints, co-hosting and the lookup gateway (1.4.2)
+
+An Agent Platform endpoint cannot reach into your network, so a model on it cannot read Cloud SQL or a store you run
+there. The lookup gateway turns the call around: callers send entity IDs to Pipewright's lookup service inside the
+network, which reads the features and calls the endpoint as its own identity, logging who called and retrying a busy
+endpoint. It works in front of Cloud SQL and in front of your own lookup service (the Pipewright custom solution):
+
+```yaml
+model:
+  serving:
+    features: online
+    online_store:
+      type: cloudsql                     # or http, your own store inside the network
+      lookup: { mode: gateway, callers: [serviceAccount:checkout-app@acme-prod.iam.gserviceaccount.com] }
+```
+
+The platform can also create endpoints in Terraform, public or private (Private Service Connect: inside the network
+only), and declare shared pools for teams that want several models on the same machines (`model.serving.pool`;
+Google's prebuilt TensorFlow or PyTorch image only). All of it is off by default. The guide, with the live
+measurements and costs: [docs/SERVING.md](docs/SERVING.md).
+
 ## Reproducible runs and label windows
 
 Two optional keys in `config/data.yaml`, both off unless set (new in 1.1):

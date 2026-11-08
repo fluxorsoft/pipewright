@@ -5,8 +5,10 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
-Phase 9: choosing the online feature store (FR-104). Everything is off until a use case sets
-`model.serving.online_store`; Bigtable stays the default. The guide is [docs/ONLINE_STORES.md](docs/ONLINE_STORES.md).
+Phase 9: choosing the online feature store (FR-104); endpoints in Terraform and private endpoints (FR-92); model
+co-hosting on shared pools (FR-105); the lookup gateway (FR-106). Everything is off until it is set: a use case that
+sets none of it deploys and serves exactly as in 1.4.1. The guides are [docs/ONLINE_STORES.md](docs/ONLINE_STORES.md)
+and [docs/SERVING.md](docs/SERVING.md).
 
 ### Added
 
@@ -25,6 +27,27 @@ Phase 9: choosing the online feature store (FR-104). Everything is off until a u
   store's standing cost; `online.stale` and `online.fresh` from the launcher's tick; `pipewright features sync` and
   `pipewright features online-setup`.
 - The churn example's serving handler reads any store through `online_lookup.py`, one lookup per request.
+- **The lookup gateway** (`lookup.mode: gateway`, FR-106): `POST /predict` on the use case's lookup service. Callers
+  send entity IDs inside the network; the gateway reads the features and calls the endpoint as its own identity,
+  because an Agent Platform endpoint cannot reach into the network (found in a live spike). Logs each caller's
+  identity, retries a busy endpoint (`lookup.retries`, default 3), keeps the canary split on the endpoint.
+  `lookup.callers` names who may call it.
+- **The Pipewright custom solution**: the gateway also in front of a team's own lookup service (`type: http` with
+  `lookup.mode: gateway`), for stores a team runs inside the network.
+- **Endpoints in Terraform, public or private** (FR-92): the starter's `serving.yaml` and Enterprise's `spec.serving`
+  create a use case's endpoint; a private one uses Private Service Connect with Google's automation, a service
+  connection policy and a private DNS zone. The manifest's `serving.endpoints` tells Pipewright: `deploy-model`
+  deploys onto it and never creates one for a use case listed there. `model predict`, "How to call it" and the
+  BigQuery ML parity check know a private endpoint answers only inside the network.
+- **Model co-hosting on shared pools** (FR-105), only when a use case sets `model.serving.pool`: pools declared by
+  the platform (`serving.pools` in the manifest), created and resized in place by `pipewright serving pools plan |
+  apply | list` with the environment's CMEK and the tenant's identity (`managed_by: ci`, the default) or by the
+  starter's Terraform (`managed_by: terraform`). Checks: Google's prebuilt TensorFlow or PyTorch (Preview) image
+  only, the pool's image, no container variables (settings in `serving.json`), one endpoint type per pool, the
+  pool's tenant; `policies.serving.pools` (`min_replicas` 2 and no Preview in production by default,
+  `allow_preview`, `settle_seconds`). Changes to a pool run one at a time under a lock and are announced
+  (`serving.pool.change`). `doctor` shows the endpoint, the pool and the gateway.
+- **GKE guideline** ([examples/gke-lookup/](examples/gke-lookup/)): Pipewright's lookup service on GKE pods for KServe.
 
 ## [1.4.1] - 2026-11-07
 
