@@ -420,7 +420,9 @@ def promote_model(gcp: Gcp, src_env: Environment, dst_env: Environment, uc_dst: 
     from pipewright.models import online
 
     # FR-76: the destination's own online lookup, never the source's (serving.json in the files names the source's).
-    spec = online.container_spec(chosen.get("containerSpec"), uc_dst.ml.get("online_features"))
+    # On a shared pool (1.4.2, FR-105) never in a container variable: a pool's variables are its first model's.
+    on_pool = bool((uc_dst.ml.get("serving") or {}).get("pool"))
+    spec = online.container_spec(chosen.get("containerSpec"), None if on_pool else uc_dst.ml.get("online_features"))
     body = {"model": {
         "displayName": name, "artifactUri": dest_uri, "containerSpec": spec,
         "versionAliases": [f"promoted-{src_env.name}-v{version}"[:128]],

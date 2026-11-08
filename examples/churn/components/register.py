@@ -106,9 +106,11 @@ def register_model(
         serving_container_image_uri=SERVING_IMAGE,
         # The environment's online lookup on the container, which the handler prefers over serving.json, so a
         # promoted copy can be given the destination's (Pipewright 1.2.0, FR-76).
+        # On a shared pool (Pipewright 1.4.2, FR-105) none: the pool's variables are the first model's, so a pool
+        # model's settings stay in serving.json with its files (deploy-model refuses a pool model that sets any).
         serving_container_environment_variables=(
             {"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
-            if online else None),
+            if online and not (ml_config.get("serving") or {}).get("pool") else None),
         parent_model=existing[0].resource_name if existing else None,
         is_default_version=make_default,
         version_aliases=[alias],

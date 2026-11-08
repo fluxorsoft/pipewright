@@ -148,8 +148,13 @@ class TabularChurnHandler(BaseHandler):
             self._medians = serving["medians"]
         # The environment's own lookup on the serving container wins over the one packaged at training (FR-76): a
         # promoted model's files name the store of the environment it was trained in.
-        if os.environ.get("PIPEWRIGHT_ONLINE_FEATURES"):
+        # On a shared pool (Pipewright 1.4.2, FR-105) the container's variables are the pool's, so a pool model
+        # reads its settings from its own files only.
+        if os.environ.get("PIPEWRIGHT_ONLINE_FEATURES") and not serving.get("pool"):
             self._online = json.loads(os.environ["PIPEWRIGHT_ONLINE_FEATURES"])
+        # Behind the lookup gateway (FR-106) the gateway reads the features and sends rows in the model's order.
+        if (self._online or {}).get("mode") == "gateway":
+            self._online = None
 
     def preprocess(self, data):
         if getattr(self, "_online", None):

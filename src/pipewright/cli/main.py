@@ -361,6 +361,12 @@ def cmd_model_predict(args) -> int:
         endpoints = (found.body or {}).get("endpoints") or [] if found.ok else []
         if not endpoints:
             raise ConfigError(f"{endpoint_name(uc)} does not exist: run `pipewright deploy-model`")
+        from pipewright.serving import endpoints as tf_endpoints
+
+        if tf_endpoints.is_private(env, uc.name):     # FR-92: its DNS name, inside the network only
+            print(json.dumps(tf_endpoints.predict_private(
+                gcp, tf_endpoints.predict_url(env, uc.name, endpoints[0]["name"]), instances, env, uc.name), indent=2))
+            return 0
         r = gcp.post(f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoints[0]['name']}:predict",
                      {"instances": instances})
         if not r.ok:
@@ -368,6 +374,64 @@ def cmd_model_predict(args) -> int:
         result = r.body
     print(json.dumps(result, indent=2))
     return 0
+
+
+def cmd_serving_pools(args) -> int:
+    """`pipewright serving pools plan | apply | list` (FR-105): only pools the platform declared, managed_by ci."""
+    import json
+
+    from pipewright.config import load_environment
+    from pipewright.gcp import Gcp
+    from pipewright.serving import pools, prices
+
+    env = load_environment(Path(args.root), args.env)
+    declared = pools.declared(env)
+    if args.pool and args.pool not in declared:
+        raise ConfigError(f"{env.name} has no pool {args.pool!r} (manifest serving.pools: "
+                          f"{', '.join(sorted(declared)) or 'none'})")
+    if not declared:
+        print(f"{env.name} declares no serving pools (manifest serving.pools): every use case deploys on its own "
+              "machines")
+        return 0
+    gcp = Gcp()
+    if args.pools_action == "apply":
+        steps = pools.apply(gcp, env, only=args.pool)
+        if args.json:
+            print(json.dumps(steps, indent=2))
+        return 0
+    rows = []
+    for name, pool in sorted(declared.items()):
+        if args.pool not in (None, name):
+            continue
+        problems, warnings = pools.pool_problems(env, name, pool)
+        row = {"pool": name, "tenant": pool.get("tenant"), "machine": pool["machine"],
+               "replicas": f"{pool['min_replicas']}-{pool['max_replicas']}", "network": pool["network"],
+               "managed_by": pool["managed_by"], "cost": prices.pool_cost(pool), "problems": problems,
+               "notes": [w for w in warnings if "a month" not in w]}
+        if args.pools_action == "plan":
+            step = next((s for s in pools.plan(gcp, env) if s["pool"] == name), {})
+            row["action"], row["detail"] = step.get("action"), step.get("detail")
+        else:
+            row["models"] = pools.deployed_models(gcp, env, name)
+        rows.append(row)
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 1 if any(r["problems"] for r in rows) else 0
+    for r in rows:
+        head = f"{r['pool']} ({r['tenant']}): {r['machine']}, {r['replicas']} machines, {r['network']} endpoints, " \
+               f"managed by {r['managed_by']}"
+        print(head)
+        print(f"  cost      {r['cost']}")
+        if "action" in r:
+            print(f"  apply     {r['action']}" + (f": {r['detail']}" if r.get("detail") else ""))
+        if "models" in r:
+            names = sorted({m.get('usecase') or m['endpoint'] for m in r["models"]})
+            print(f"  models    {len(r['models'])}" + (f" ({', '.join(names)})" if names else ""))
+        for n in r["notes"]:
+            print(f"  note      {n}")
+        for p in r["problems"]:
+            print(f"  PROBLEM   {p}")
+    return 1 if any(r["problems"] for r in rows) else 0
 
 
 def cmd_model_list(args) -> int:
@@ -1380,6 +1444,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--manifest", required=True)
     sp.add_argument("--dry-run", action="store_true", help="print the statements; run nothing")
     sp.set_defaults(func=cmd_features_online_setup)
+
+    sp = sub.add_parser("serving", help="shared serving pools for model co-hosting (FR-105, 1.4.2)")
+    ssub = sp.add_subparsers(dest="serving_command", required=True)
+    sp = ssub.add_parser("pools", help="the environment's pools (manifest serving.pools)")
+    psub = sp.add_subparsers(dest="pools_command", required=True)
+    for name, text in (("plan", "what apply would do, with each pool's cost; changes nothing"),
+                       ("apply", "create missing pools and resize changed ones in place (CI/CD); never deletes"),
+                       ("list", "each pool and the use cases on it")):
+        sp = psub.add_parser(name, help=text)
+        sp.add_argument("--root", default=".")
+        sp.add_argument("--env", required=True)
+        sp.add_argument("--pool", help="only this pool")
+        sp.add_argument("--json", action="store_true")
+        sp.set_defaults(func=cmd_serving_pools, pools_action=name)
 
     sp = sub.add_parser("report", help="read-only reports from the records Pipewright keeps")
     rsub = sp.add_subparsers(dest="report_command", required=True)

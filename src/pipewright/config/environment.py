@@ -38,6 +38,7 @@ class Environment:
     schedules: dict = field(default_factory=dict)   # backend (cloud_scheduler | kubernetes), namespace, image
     kserve: dict = field(default_factory=dict)      # private-gke serving: namespaces by tenant, mirror, exposure
     ai: dict = field(default_factory=dict)          # AI build assistance: local_tools allowed | forbidden (1.3.0)
+    serving: dict = field(default_factory=dict)     # 1.4.2: Terraform endpoints (FR-92) and shared pools (FR-105)
     manifest_ignored: tuple = ()                  # manifest keys this version does not know (R-05): ignored
     promotion_from: str | None = None
     promotion_release: str = "warn"               # promotion.release: warn | refuse (Pipewright 1.2.0, FR-80)
@@ -104,6 +105,7 @@ def environment_from_dict(manifest: dict, source: str = "manifest", ignored=()) 
         features=manifest.get("features") or {}, kubernetes=manifest.get("kubernetes") or {},
         ai=manifest.get("ai") or {},
         schedules=manifest.get("schedules") or {}, kserve=manifest.get("kserve") or {},
+        serving=manifest.get("serving") or {},
         manifest_ignored=tuple(ignored),
         manifest_source=source, source=source,
     )
@@ -157,6 +159,7 @@ def load_environment(root: Path, name: str) -> Environment:
         features=manifest.get("features") or {}, ai=manifest.get("ai") or {},
         kubernetes=manifest.get("kubernetes") or {},
         schedules=manifest.get("schedules") or {}, kserve=manifest.get("kserve") or {},
+        serving=manifest.get("serving") or {},
         manifest_ignored=tuple(ignored),
         promotion_from=spec.get("promotion", {}).get("from"),
         promotion_release=spec.get("promotion", {}).get("release") or "warn",

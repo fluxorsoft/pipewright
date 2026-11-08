@@ -367,6 +367,48 @@
             }
           }
         },
+        "serving": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "description": "Pipewright 1.4.2: rules for shared serving pools in this environment",
+          "properties": {
+            "pools": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "allow_preview": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "PyTorch co-hosting (a Google Preview): allowed by default outside production (an environment whose name has prod), refused in production unless true"
+                },
+                "min_replicas": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "description": "the fewest machines a pool may have (default 2 in production, 1 elsewhere)"
+                },
+                "settle_seconds": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "description": "after a change to a pool, how long Pipewright waits for its machines to finish restarting before announcing it settled and letting the next change run (default 360)"
+                }
+              }
+            }
+          }
+        },
         "integrity": {
           "type": "object",
           "additionalProperties": false,
@@ -816,6 +858,173 @@
           ],
           "minimum": 1,
           "description": "kubernetes: the user ID the CronJobs run as (the image's non-root user; default 10001, the launcher image's)"
+        }
+      }
+    },
+    "serving": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "description": "Pipewright 1.4.2: endpoints the platform's Terraform creates (FR-92) and shared deployment resource pools for model co-hosting (FR-105). Without it every use case deploys on its own endpoint and machines, as before",
+      "properties": {
+        "endpoints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "use case -> its endpoint, created by Terraform (public or private); deploy-model deploys onto it and never creates one for a use case listed here",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the endpoint's display name (<use case>-endpoint)"
+              },
+              "resource": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "projects/<number>/locations/<region>/endpoints/<id>"
+              },
+              "private": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "a Private Service Connect endpoint: reachable inside the network only"
+              },
+              "dns": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "a private endpoint's DNS name (<id>-<region>-<number>.prediction.p.vertexai.goog)"
+              },
+              "network": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the network a private endpoint is reached from"
+              }
+            }
+          }
+        },
+        "pools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "pool name -> a shared deployment resource pool; a use case joins one with model.serving.pool",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant",
+              "machine",
+              "image"
+            ],
+            "properties": {
+              "tenant": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the tenant whose use cases share it (pools are per tenant)"
+              },
+              "machine": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the machine type, for example n1-standard-4"
+              },
+              "accelerator": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "min_replicas": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "machines always running (a pool does not scale to zero); production keeps 2"
+              },
+              "max_replicas": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "the most machines under load"
+              },
+              "cpu_target": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "autoscaling CPU target in percent (Google's default 60)"
+              },
+              "image": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the one serving image every model on the pool uses: Google's prebuilt TensorFlow or PyTorch (Preview) image"
+              },
+              "network": {
+                "enum": [
+                  "standard",
+                  "psc",
+                  null
+                ],
+                "description": "the kind of endpoint it serves: a pool serves one kind"
+              },
+              "managed_by": {
+                "enum": [
+                  "ci",
+                  "terraform",
+                  null
+                ],
+                "description": "ci (the default): pipewright serving pools apply, through the API with the environment's CMEK and the tenant's identity; terraform: the platform's Terraform"
+              },
+              "service_account": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the identity its models run as (default: the tenant's runner)"
+              },
+              "resource": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the pool's resource name, when Terraform created it"
+              }
+            }
+          }
         }
       }
     },

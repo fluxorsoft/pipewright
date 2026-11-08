@@ -456,7 +456,52 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
         _check_tables(uc, env, gcp, report)
     _check_ml(uc, env, gcp, report)
     _check_synthetic(uc, env, gcp, report)
+    _check_serving_1_4_2(uc, env, gcp, report)
     _check_permissions(uc, env, gcp, report, as_agent=as_agent)
+
+
+def _check_serving_1_4_2(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    """1.4.2, only when used: the Terraform endpoint (FR-92), the pool (FR-105) and the gateway (FR-106)."""
+    from pipewright.serving import endpoints, pools, prices
+
+    s = "Serving (endpoint, pool, gateway)"
+    serving = uc.model["serving"]
+    if not serving.get("enabled"):
+        return
+    entry = endpoints.declared(env, uc.name)
+    if entry:
+        kind = "private, inside the network only" if entry.get("private") else "public"
+        report.add(s, Result(OK, "endpoint", f"{entry.get('name')} ({kind}), created by the platform's Terraform"
+                             + (f"; {prices.private_endpoint_cost()}" if entry.get("private") else "")))
+    name = serving.get("pool")
+    if name:
+        pool = pools.declared(env).get(name) or {}
+        try:
+            found = pools.get(gcp, env, name)
+        except Exception as e:  # noqa: BLE001 - reported, not raised
+            report.add(s, Result(WARN, f"pool {name}", str(e)[:200]))
+            found = {}
+        if found is None:
+            report.add(s, Result(FAIL, f"pool {name}", "does not exist yet",
+                                 f"pipewright serving pools apply --env {env.name}" if pool.get("managed_by") == "ci"
+                                 else "ask the platform team (Terraform creates it)"))
+        else:
+            models = pools.deployed_models(gcp, env, name)
+            share = len(models) or 1
+            report.add(s, Result(OK, f"pool {name}", f"{pool.get('machine')}, {pool.get('min_replicas')} to "
+                                 f"{pool.get('max_replicas')} machines, {len(models)} models on it; "
+                                 f"{prices.pool_cost(pool)}, about 1/{share} of it for each model"))
+    online = (uc.ml or {}).get("online_features") or {}
+    if online.get("mode") == "gateway":
+        g = online.get("gateway") or {}
+        r = gcp.get(f"https://run.googleapis.com/v2/projects/{env.project}/locations/{env.region}/services/"
+                    f"{online.get('service')}")
+        url = (r.body or {}).get("uri") if r.ok else None
+        source = "your own lookup service" if online.get("type") == "http" else "Cloud SQL"
+        report.add(s, Result(OK if url else WARN, "lookup gateway",
+                             f"{online.get('service')} reads {source} and calls the endpoint; "
+                             + (f"{url}/predict" if url else "not deployed yet (deploy-model makes it)")
+                             + f"; {len(g.get('callers') or [])} callers, {g.get('retries', 3)} retries"))
 
 
 def _check_synthetic(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:

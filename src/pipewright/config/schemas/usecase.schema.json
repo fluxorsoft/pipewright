@@ -904,6 +904,7 @@
         },
         "scale_to_zero": { "type": "boolean", "description": "with replicas.min 0: an idle endpoint runs no replica, and the first request after a quiet spell waits for one to start (Pipewright 1.2.0; Agent Platform preview)" },
         "fill_missing": { "type": "boolean", "description": "the endpoint fills an empty feature with its training median, as batch scoring does (Pipewright 1.2.0, default true); false: it answers an error naming the feature" },
+        "pool": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$", "description": "model co-hosting (Pipewright 1.4.2, FR-105): deploy onto this shared pool of the environment (manifest serving.pools) instead of the use case's own machines. Only when the team wants co-hosting; leave it out to deploy as before" },
         "online_store": {
           "type": "object",
           "additionalProperties": false,
@@ -975,8 +976,29 @@
             "lookup": {
               "type": "object",
               "additionalProperties": false,
-              "description": "between the endpoint and Cloud SQL: Pipewright's Cloud Run lookup service (the default) and its size, or the team's own",
+              "description": "between the endpoint and Cloud SQL: Pipewright's Cloud Run lookup service (the default) and its size, or the team's own. With mode gateway (1.4.2) also for type http: Pipewright's gateway in front of the team's own lookup service inside the network",
               "properties": {
+                "mode": {
+                  "enum": [
+                    "lookup",
+                    "gateway"
+                  ],
+                  "description": "lookup (the default): the endpoint calls the lookup service for features. gateway (Pipewright 1.4.2, FR-106): callers send entity IDs to the lookup service inside the network, which reads the features and calls the endpoint itself; for endpoints that cannot reach the network"
+                },
+                "retries": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5,
+                  "description": "gateway: how many times a prediction is tried again on 503, 429 or a dropped connection (default 3, so 4 tries, 0.25 to 2 s apart); 0 turns retries off"
+                },
+                "callers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^(serviceAccount|group|user):[^\\s@]+@[^\\s@]+$"
+                  },
+                  "description": "gateway: who may call it (run.invoker on the lookup service), as serviceAccount:, group: or user: members"
+                },
                 "provider": {
                   "enum": [
                     "pipewright",

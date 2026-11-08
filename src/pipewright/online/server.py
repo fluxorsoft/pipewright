@@ -12,6 +12,10 @@ Logs carry counts and timings, never an ID or a value.
 
 Configuration: PIPEWRIGHT_LOOKUP, JSON with host, database, schema, table, key, features, pool_size, timeout_ms and
 server_ca (PEM). PORT as Cloud Run sets it.
+
+Pipewright 1.4.2 (FR-106): with `gateway` in the configuration the service also answers `POST /predict` (the lookup
+gateway, online/gateway.py). With `source: http` its features come from the team's own lookup service (`url`,
+`audience`) instead of Cloud SQL: the Pipewright custom solution.
 """
 
 from __future__ import annotations
@@ -108,7 +112,7 @@ class Lookup:
                             for n, v in zip(names, r[1:], strict=True)} for r in rows}
 
 
-def handler_for(lookup: Lookup):
+def handler_for(lookup, gateway=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"        # keep-alive: callers reuse the connection (spike lesson)
 
@@ -125,8 +129,10 @@ def handler_for(lookup: Lookup):
 
         def do_POST(self):
             t = time.perf_counter()
+            if self.path == "/predict" and gateway is not None:
+                return self._predict(t)
             if self.path != "/lookup":
-                return self._send(404, {"error": "POST /lookup"})
+                return self._send(404, {"error": "POST /lookup" + (" or POST /predict" if gateway else "")})
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
                 ids = body.get("entity_ids")
@@ -148,16 +154,60 @@ def handler_for(lookup: Lookup):
         def log_message(self, *args):
             pass
 
+        def _predict(self, t):
+            from pipewright.online.gateway import caller_of
+
+            caller = caller_of(self.headers.get("Authorization"))
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                ids = body.get("entity_ids")
+                if not isinstance(ids, list) or not all(isinstance(i, (str, int)) for i in ids) or not ids:
+                    return self._send(400, {"error": "entity_ids: a list of IDs"})
+                if len(ids) > MAX_IDS:
+                    return self._send(400, {"error": f"entity_ids: at most {MAX_IDS} at once"})
+                out, fields = gateway.predict([str(i) for i in ids])
+            except ValueError:
+                return self._send(400, {"error": "the body is JSON with entity_ids"})
+            except Exception as e:  # noqa: BLE001 - the error class and HTTP status only, never a value
+                status = getattr(e, "code", None)
+                print(json.dumps({"severity": "ERROR", "message": "predict failed", "caller": caller,
+                                  "usecase": gateway.usecase, "error": type(e).__name__, "status": status}),
+                      flush=True)
+                return self._send(503 if status in (None, 429, 503) else 502,
+                                  {"error": "the prediction failed ("
+                                            + type(e).__name__ + (f" {status}" if status else "") + ")"})
+            print(json.dumps({"severity": "INFO", "message": "predict", "caller": caller, "usecase": gateway.usecase,
+                              **fields, "ms": round((time.perf_counter() - t) * 1000, 1)}), flush=True)
+            self._send(200, out)
+
     return Handler
+
+
+def build(cfg: dict):
+    """(lookup, gateway or None) for a configuration."""
+    if cfg.get("source") == "http":
+        from pipewright.online.gateway import HttpSource
+
+        lookup = HttpSource(cfg)
+    else:
+        lookup = Lookup(cfg)
+    gateway = None
+    if cfg.get("gateway"):
+        from pipewright.online.gateway import Gateway
+
+        gateway = Gateway(cfg, lookup, tokens=lookup.tokens if isinstance(lookup, Lookup) else Tokens())
+    return lookup, gateway
 
 
 def main():
     cfg = json.loads(os.environ["PIPEWRIGHT_LOOKUP"])
-    lookup = Lookup(cfg)
-    server = ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), handler_for(lookup))
+    lookup, gateway = build(cfg)
+    server = ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), handler_for(lookup, gateway))
     server.daemon_threads = True
-    print(json.dumps({"severity": "INFO", "message": "lookup service ready", "table": f"{cfg['schema']}.{cfg['table']}",
-                      "features": len(cfg["features"]), "pool_size": cfg.get("pool_size", 8)}), flush=True)
+    where = cfg["url"] if cfg.get("source") == "http" else f"{cfg['schema']}.{cfg['table']}"
+    print(json.dumps({"severity": "INFO", "message": "lookup service ready", "source": cfg.get("source", "cloudsql"),
+                      "table": where, "features": len(cfg["features"]), "gateway": bool(gateway),
+                      "pool_size": cfg.get("pool_size", 8)}), flush=True)
     server.serve_forever()
 
 

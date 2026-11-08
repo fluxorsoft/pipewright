@@ -71,7 +71,7 @@ def server_ca(gcp, instance: str) -> str | None:
     return (r.body.get("serverCaCert") or {}).get("cert") if r.ok else None
 
 
-def service_spec(contract, manifest: dict, online: dict, ca: str | None) -> dict:
+def service_spec(contract, manifest: dict, online: dict, ca: str | None, gateway: dict | None = None) -> dict:
     """The Cloud Run v2 service for a use case's lookup."""
     store = ((manifest.get("features") or {}).get("online_store")) or {}
     lk = store.get("lookup") or {}
@@ -85,10 +85,16 @@ def service_spec(contract, manifest: dict, online: dict, ca: str | None) -> dict
         raise ConfigError(f"tenant {contract.tenant} has no lookup identity "
                           "(manifest tenants.<t>.features.lookup_service_account)")
     size = online.get("lookup") or {}
-    config = {"host": sql.get("private_ip"), "database": online.get("database", "features"),
-              "schema": online["schema"], "table": online["table"], "key": online["key"],
-              "features": online["features"], "pool_size": size.get("pool_size", 8),
-              "timeout_ms": size.get("timeout_ms", 1000), "server_ca": ca}
+    if online.get("type") == "http":           # the Pipewright custom solution: the team's store behind the gateway
+        config = {"source": "http", "url": online["url"], "audience": online.get("audience") or online["url"],
+                  "timeout_ms": online.get("timeout_ms", 1000), "key": online["key"], "features": online["features"]}
+    else:
+        config = {"host": sql.get("private_ip"), "database": online.get("database", "features"),
+                  "schema": online["schema"], "table": online["table"], "key": online["key"],
+                  "features": online["features"], "pool_size": size.get("pool_size", 8),
+                  "timeout_ms": size.get("timeout_ms", 1000), "server_ca": ca}
+    if gateway:
+        config["gateway"], config["usecase"] = gateway, contract.usecase
     image = lk.get("image") or (manifest.get("launcher") or {}).get("image")
     if not image:
         raise ConfigError("the environment names no lookup image (manifest features.online_store.lookup.image)")
@@ -120,17 +126,80 @@ def service_spec(contract, manifest: dict, online: dict, ca: str | None) -> dict
             "template": template}
 
 
+def has_service(online: dict) -> bool:
+    """A Pipewright lookup service: Cloud SQL with provider pipewright, or (1.4.2) any store behind the gateway."""
+    if online.get("mode") == "gateway":
+        return online.get("type") in ("cloudsql", "http")
+    return online.get("type") == "cloudsql" and online.get("provider", "pipewright") == "pipewright"
+
+
+AIP = "https://{region}-aiplatform.googleapis.com/v1"
+
+
+def gateway_target(contract, manifest: dict, online: dict, gcp) -> dict:
+    """FR-106: the endpoint the gateway calls, from the manifest (a Terraform endpoint) or found by its name, and
+    where to call it: the private endpoint's DNS name inside the network, or the regional API."""
+    region = manifest["region"]
+    entry = ((manifest.get("serving") or {}).get("endpoints") or {}).get(contract.usecase) or {}
+    resource = entry.get("resource")
+    if not resource:
+        name = entry.get("name") or f"{contract.usecase}-endpoint"
+        r = gcp.get(f"{AIP.format(region=region)}/projects/{manifest['project']}/locations/{region}/endpoints",
+                    filter=f'display_name="{name}"')
+        found = ((r.body or {}).get("endpoints") or []) if r.ok else []
+        if not found:
+            raise ConfigError(f"the gateway of {contract.usecase} calls {name}, which does not exist yet: "
+                              "deploy-model creates it first")
+        resource = found[0]["name"]
+    private = bool(entry.get("private"))
+    path = f"/v1/{resource}:predict"
+    if private:
+        parts = resource.split("/")
+        host = entry.get("dns") or f"{parts[-1]}-{region}-{parts[1]}.prediction.p.vertexai.goog"
+        url = f"https://{host}{path}"
+    else:
+        url = f"https://{region}-aiplatform.googleapis.com{path}"
+    g = online.get("gateway") or {}
+    return {"endpoint": resource, "predict_url": url, "private": private, "retries": int(g.get("retries", 3))}
+
+
+def allow_gateway(gcp, region: str, endpoint: str, identity: str) -> None:
+    """The gateway's identity may predict on that one endpoint (resource IAM on the endpoint)."""
+    api = f"{AIP.format(region=region)}/{endpoint}"
+    pol = gcp.post(f"{api}:getIamPolicy", {})
+    if not pol.ok:
+        raise ConfigError(f"cannot read the IAM policy of {endpoint.rsplit('/', 1)[-1]} (HTTP {pol.status}): the "
+                          "launcher needs aiplatform.endpoints.getIamPolicy and setIamPolicy")
+    policy = pol.body or {}
+    member, role = f"serviceAccount:{identity}", "roles/aiplatform.user"
+    bindings = policy.get("bindings") or []
+    if any(b.get("role") == role and member in (b.get("members") or []) for b in bindings):
+        return
+    others = [b for b in bindings if b.get("role") != role]
+    mine = next((b for b in bindings if b.get("role") == role), {"role": role, "members": []})
+    bindings = [*others, {"role": role, "members": sorted({*mine.get("members", []), member})}]
+    r = gcp.post(f"{api}:setIamPolicy", {"policy": {**policy, "bindings": bindings}})
+    if not r.ok:
+        raise ConfigError(f"the gateway's identity could not be allowed to call {endpoint.rsplit('/', 1)[-1]} "
+                          f"(HTTP {r.status})")
+
+
 def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, sleep=time.sleep) -> dict:
     online = online_of(contract)
-    if online.get("type") != "cloudsql" or online.get("provider", "pipewright") != "pipewright":
+    if not has_service(online):
         raise ConfigError(f"{contract.usecase}'s release has no Pipewright lookup service (online_store cloudsql "
-                          "with lookup.provider pipewright)")
+                          "with lookup.provider pipewright, or lookup.mode gateway)")
     project, region = manifest["project"], manifest["region"]
-    ca = server_ca(gcp, online["instance"])
-    if not ca:      # fail closed (found live: without it the service would encrypt but not verify the database)
-        raise ConfigError(f"cannot read the server CA of {online['instance']}: the launcher needs "
-                          "cloudsql.instances.get (roles/cloudsql.viewer)")
-    spec = service_spec(contract, manifest, online, ca)
+    ca = None
+    if online.get("type") == "cloudsql":
+        ca = server_ca(gcp, online["instance"])
+        if not ca:      # fail closed (found live: without it the service would encrypt but not verify the database)
+            raise ConfigError(f"cannot read the server CA of {online['instance']}: the launcher needs "
+                              "cloudsql.instances.get (roles/cloudsql.viewer)")
+    gateway = gateway_target(contract, manifest, online, gcp) if online.get("mode") == "gateway" else None
+    spec = service_spec(contract, manifest, online, ca, gateway)
+    if gateway:
+        allow_gateway(gcp, region, gateway["endpoint"], spec["template"]["serviceAccount"])
     base = f"{RUN}/projects/{project}/locations/{region}/services"
     name = online["service"]
     current = gcp.get(f"{base}/{name}")
@@ -163,13 +232,20 @@ def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, slee
     policy = pol.body if pol.ok else {}
     mine = ("roles/run.invoker", "roles/run.viewer")      # call it, and read its URL (the lookup client)
     bindings = [b for b in policy.get("bindings", []) if b.get("role") not in mine]
-    bindings += [{"role": role, "members": [invoker]} for role in mine]
+    if gateway:     # FR-106: the callers the use case names call the gateway; the endpoint never calls it
+        callers = sorted(set((online.get("gateway") or {}).get("callers") or []))
+        bindings += [{"role": "roles/run.invoker", "members": callers}] if callers else []
+    else:
+        bindings += [{"role": role, "members": [invoker]} for role in mine]
     set_ = gcp.post(f"{base}/{name}:setIamPolicy", {"policy": {**policy, "bindings": bindings}})
     if not set_.ok:
         raise ConfigError(f"the lookup service {name}: the endpoint's identity could not be allowed to call it "
                           f"(HTTP {set_.status})")
     return {"usecase": contract.usecase, "service": name, "status": action, "url": svc.get("uri"),
-            "min_instances": spec["scaling"]["minInstanceCount"], "invoker": contract.runner_service_account}
+            "min_instances": spec["scaling"]["minInstanceCount"],
+            **({"gateway": {"endpoint": gateway["endpoint"].rsplit("/", 1)[-1], "private": gateway["private"],
+                            "callers": len((online.get("gateway") or {}).get("callers") or [])}}
+               if gateway else {"invoker": contract.runner_service_account})}
 
 
 def request_from_cli(uc, env, log=print, gcp=None, wait: float = 900, sleep=time.sleep) -> dict | None:
@@ -177,7 +253,7 @@ def request_from_cli(uc, env, log=print, gcp=None, wait: float = 900, sleep=time
     updates its lookup service from the live release. Directly, or over the run requests topic in a private
     environment (then deploy-model waits until the service is ready)."""
     online = (getattr(uc, "ml", None) or {}).get("online_features") or {}
-    if online.get("type") != "cloudsql" or online.get("provider", "pipewright") != "pipewright":
+    if not has_service(online):
         return None
     from pipewright.runs import launch
 

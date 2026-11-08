@@ -122,7 +122,13 @@ def resolve(spec: dict, ml: dict, env, tenant: str, usecase: str, problems: list
                                                f"{where}.lookup", share)
             out["lookup"] = {k: lookup[k] for k in sizing.LOOKUP_DEFAULTS}
             out.update(service=service_name(tenant, usecase), project=env.project, region=env.region)
+            gateway = _gateway(lookup, env, usecase, f"{where}.lookup", problems)
+            if gateway:
+                out.update(mode="gateway", gateway=gateway)
         elif provider == "own":
+            if lookup.get("mode", "lookup") == "gateway":
+                problems.append(f"{where}.lookup.mode gateway: the gateway is Pipewright's lookup service "
+                                "(provider pipewright)")
             sized = [k for k in (spec.get("lookup") or {}) if k in sizing.LOOKUP_DEFAULTS]
             if sized:
                 problems.append(f"{where}.lookup: {', '.join(sized)} size Pipewright's lookup service; with "
@@ -139,6 +145,53 @@ def resolve(spec: dict, ml: dict, env, tenant: str, usecase: str, problems: list
             problems.append(f"{where}.http.url: the team's lookup, an https:// URL answering POST /lookup")
         out.update(url=h.get("url"), audience=h.get("audience") or h.get("url"),
                    timeout_ms=h.get("timeout_ms", 1000))
+        mine = spec.get("lookup") or {}
+        if mine.get("mode") == "gateway":
+            # The Pipewright custom solution (1.4.2): the team's own lookup service inside the network, which an
+            # endpoint cannot reach, behind Pipewright's gateway. The gateway is a Pipewright lookup service whose
+            # features come from the team's POST /lookup instead of Cloud SQL.
+            lookup = {**sizing.LOOKUP_DEFAULTS, **(((store.get("lookup") or {}).get("defaults")) or {}), **mine}
+            sized = {k: lookup[k] for k in sizing.LOOKUP_DEFAULTS if k != "pool_size"}
+            problems += sizing.lookup_problems(lookup, (store.get("lookup") or {}).get("limits"), f"{where}.lookup")
+            gateway = _gateway(lookup, env, usecase, f"{where}.lookup", problems)
+            if gateway:
+                out.update(mode="gateway", gateway=gateway, provider="pipewright", lookup=sized,
+                           service=service_name(tenant, usecase), project=env.project, region=env.region)
+        elif mine:
+            problems.append(f"{where}.lookup: with type http only mode gateway and the gateway's size; the team's "
+                            "store answers lookups itself")
+    if kind not in ("cloudsql", "http") and ((spec.get("lookup") or {}).get("mode") or "lookup") != "lookup":
+        problems.append(f"{where}.lookup.mode gateway: with Cloud SQL (type cloudsql) or the team's own store (type "
+                        "http); BigQuery and Bigtable are Google APIs, which endpoints reach directly")
     if kind in ("bigquery", "cloudsql"):
         out["sync"] = {"mode": (spec.get("sync") or {}).get("mode", "full")}
     return out
+
+
+GATEWAY_RETRIES = 3
+GATEWAY_KEYS = ("mode", "retries", "callers")
+
+
+def _gateway(lookup: dict, env, usecase: str, where: str, problems: list[str]) -> dict | None:
+    """FR-106 (1.4.2): `lookup.mode: gateway`. Callers send entity IDs to the lookup service inside the network; it
+    reads Cloud SQL and calls the endpoint as its own identity (an endpoint cannot reach into the network, spike
+    2026-11-08). Off by default: without it nothing changes."""
+    mode = lookup.get("mode", "lookup")
+    if mode not in ("lookup", "gateway"):
+        problems.append(f"{where}.mode {mode!r}: lookup or gateway")
+        return None
+    if mode != "gateway":
+        for k in ("retries", "callers"):
+            if k in lookup:
+                problems.append(f"{where}.{k}: only with mode gateway")
+        return None
+    callers = list(lookup.get("callers") or [])
+    if not callers:
+        problems.append(f"{where}.callers: with mode gateway, name who may call it (serviceAccount:, group: or "
+                        "user: members get run.invoker on the lookup service)")
+    from pipewright.serving import endpoints
+
+    return {"retries": int(lookup.get("retries", GATEWAY_RETRIES)), "callers": callers,
+            "endpoint": endpoints.declared(env, usecase) or {"name": f"{usecase}-endpoint"},
+            "private": endpoints.is_private(env, usecase)}
+

@@ -68,6 +68,8 @@ def train_model(
                "fill_missing": (ml_config.get("serving") or {}).get("fill_missing", True)}
     if ml_config.get("online_features"):
         serving["online_features"] = ml_config["online_features"]
+    if (ml_config.get("serving") or {}).get("pool"):      # Pipewright 1.4.2 (FR-105): read from the files only
+        serving["pool"] = ml_config["serving"]["pool"]
     with open(os.path.join(model.path, "serving.json"), "w") as f:
         json.dump(serving, f, indent=2, default=str)
     extra.append(os.path.join(model.path, "serving.json"))

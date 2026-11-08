@@ -35,10 +35,29 @@ class DeployPlan:
     store_problem: str | None = None    # online features: the model would read another environment's store (FR-76)
     integrity: object = None            # phase 6: is the default version the one approved (models/integrity.Check)
     rules_release: str | None = None    # the release whose gates were checked (FR-96)
+    pool: str | None = None             # 1.4.2 (FR-105): the shared pool it deploys onto, when the use case asks
+    pool_problems: list = None          # its image or container variables do not fit the pool
 
 
 def endpoint_name(uc: ResolvedUseCase) -> str:
     return f"{uc.name}-endpoint"
+
+
+def _endpoint_for(ai, uc: ResolvedUseCase, env: Environment, create: bool):
+    """The use case's endpoint. One the platform's Terraform owns (FR-92) is never created here: a missing one is
+    refused, so a public endpoint never stands in for a private one."""
+    from pipewright.serving import endpoints as tf_endpoints
+
+    found = ai.Endpoint.list(filter=f'display_name="{endpoint_name(uc)}"')
+    if found:
+        return found[0]
+    if tf_endpoints.declared(env, uc.name):
+        raise ConfigError(tf_endpoints.missing_message(env, uc.name))
+    if not create:
+        return None
+    return ai.Endpoint.create(display_name=endpoint_name(uc),
+                              labels={"pipewright-usecase": uc.name, "pipewright-tenant": uc.tenant},
+                              encryption_spec_key_name=env.security.get("kms_key"))
 
 
 def check_approval(uc: ResolvedUseCase, identity: str | None, approved: bool, key: str = "deploy_model") -> None:
@@ -148,10 +167,26 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     problems = gates.verify(gcp, record, rules.evaluation, earlier)
     if rules.note:
         check.notes.append(rules.note)
+    pool_name, pool_problems = serving.get("pool"), None
+    if pool_name:                         # FR-105: only when the use case asked for co-hosting
+        from pipewright.serving import pools
+
+        pool = pools.declared(env).get(pool_name) or {}
+        pool_problems = pools.model_problems(pool_name, pool, getattr(spec, "image_uri", None) or None,
+                                             model_env_vars(default))
+        if pool and pools.get(gcp, env, pool_name) is None:
+            pool_problems.append(f"pool {pool_name} does not exist yet in {env.name}: "
+                                 f"pipewright serving pools apply --env {env.name}" if pool.get("managed_by") == "ci"
+                                 else f"pool {pool_name} does not exist yet: the platform's Terraform creates it")
+    store_problem = online_store_problem(uc, env, gcp, default)
+    if store_problem and pool_name:
+        store_problem += (". On a pool the model reads its store from its own files (container variables are the "
+                          "pool's), so a promoted model names the store it was trained with: use lookup.mode gateway "
+                          "(the model then needs no store) or dedicated machines")
     return DeployPlan(uc.model["name"], default.version_id, endpoint_name(uc), serving["machine"],
                       serving["replicas"], bool(current),
                       [f"{d.id} (v{d.model_version_id})" for d in deployed if d not in current], problems,
-                      labels, online_store_problem(uc, env, gcp, default), check, rules.release)
+                      labels, store_problem, check, rules.release, pool_name, pool_problems)
 
 
 def _protect_on_activation(env: Environment, creds, check, what: str, log=print) -> None:
@@ -191,6 +226,8 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                                  f"{uc.name}'s evaluation gates")
     if p.store_problem:
         raise ConfigError(p.store_problem, source=f"v{p.version} of {p.model} is not served")
+    if p.pool_problems:
+        raise ConfigError(p.pool_problems, source=f"v{p.version} of {p.model} is not served on pool {p.pool}")
     from pipewright.models.registry import pending_approval
 
     if pending_approval(p.labels):
@@ -200,6 +237,9 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
                                  "approval=pending: nobody has approved it (approvals.promote_model manual)")
     from pipewright.online import launcher as online_launcher
 
+    if ((getattr(uc, "ml", None) or {}).get("online_features") or {}).get("mode") == "gateway":
+        # FR-106: the gateway calls the endpoint, so the endpoint exists before the lookup service is made.
+        _endpoint_for(ai, uc, env, create=True)
     # FR-104: the use case's Cloud SQL lookup service, created or brought up to date before the model (also when the
     # model is already served, so a changed size or setting is applied by running deploy-model again).
     online_launcher.request_from_cli(uc, env, log)
@@ -208,14 +248,12 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
         return
     registered = ai.Model.list(filter=f'display_name="{p.model}"')[0]
     model = ai.Model(model_name=f"{registered.resource_name}@default")
-    endpoints = ai.Endpoint.list(filter=f'display_name="{p.endpoint}"')
-    if endpoints:
+    existing = _endpoint_for(ai, uc, env, create=False)
+    if existing:
         from pipewright.gcp import Gcp
 
-        refuse_if_busy(Gcp(creds), env, endpoints[0], p.endpoint)
-    endpoint = endpoints[0] if endpoints else ai.Endpoint.create(
-        display_name=p.endpoint, labels={"pipewright-usecase": uc.name, "pipewright-tenant": uc.tenant},
-        encryption_spec_key_name=env.security.get("kms_key"))
+        refuse_if_busy(Gcp(creds), env, existing, p.endpoint)
+    endpoint = existing or _endpoint_for(ai, uc, env, create=True)
     previous = endpoint.list_models()
     share = int(uc.model["serving"].get("canary_percent") or 10) if canary and previous else 100
     log(f"deploying {p.model} v{p.version} to {p.endpoint} on {p.machine} with {share}% of traffic "
@@ -224,6 +262,17 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     identity = uc.resources["runner_service_account"] if uc.ml.get("online_features") else None
     serving = uc.model["serving"]
     accelerator = serving.get("accelerator")             # FR-61 (Pipewright 1.2.0): within the environment's policy
+    if p.pool:
+        _deploy_on_pool(uc, env, creds, p, endpoint, model, previous, share, log)
+        if share < 100:
+            log(f"canary: v{p.version} serves {share}%, {', '.join(f'v{d.model_version_id}' for d in previous)} the "
+                "rest. Watch it, then `pipewright deploy-model --promote` (or --undeploy-canary).")
+            _deployed(uc, env, creds, p.version, share, p.integrity)
+            return
+        _undeploy_on_pool(uc, env, creds, p.pool, endpoint, previous, log)
+        log(f"live: {p.endpoint} serves {p.model} v{p.version} on pool {p.pool}")
+        _deployed(uc, env, creds, p.version, 100, p.integrity)
+        return
     if serving.get("scale_to_zero") and int(p.replicas["min"]) == 0:
         # FR-62 (Pipewright 1.2.0): an idle endpoint runs no replica; Agent Platform offers it in v1beta1 only.
         log("scale to zero: an idle endpoint runs no replica; the first request after a quiet spell waits for one")
@@ -254,6 +303,53 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     _deployed(uc, env, creds, p.version, 100, p.integrity)
 
 
+def pool_deploy_request(model_version: str, display_name: str, pool_resource: str, identity: str, share: int,
+                        previous: dict) -> dict:
+    """The deployModel body onto a shared pool (FR-105): sharedResources and the pool's identity (Agent Platform
+    refuses a deployed model whose service account is not the pool's, found live)."""
+    body = scale_to_zero_request(model_version, display_name, "unused", 1, share, previous, None, identity)
+    dm = body["deployedModel"]
+    dm.pop("dedicatedResources")
+    dm["sharedResources"], dm["serviceAccount"] = pool_resource, identity
+    return body
+
+
+def _deploy_on_pool(uc, env, creds, p: DeployPlan, endpoint, model, previous: list, share: int, log=print) -> None:
+    from pipewright.gcp import Gcp, error_text
+    from pipewright.serving import pools
+
+    gcp = Gcp(creds)
+    pool = pools.declared(env)[p.pool]
+    log(f"deploying {p.model} v{p.version} to {p.endpoint} on pool {p.pool} with {share}% of traffic")
+    traffic = {d.id: int((endpoint.traffic_split or {}).get(d.id, 0)) for d in previous}
+    body = pool_deploy_request(model.versioned_resource_name, f"{p.model}-v{p.version}",
+                               pools.resource(env, p.pool), pools.service_account(env, pool), share, traffic)
+
+    def run():
+        r = gcp.post(f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint.resource_name}:deployModel", body)
+        if not r.ok:
+            raise ConfigError(f"deploying onto pool {p.pool} failed: {error_text(r)}")
+        pools.wait(gcp, env, r.body, f"deploying {p.model} v{p.version} onto pool {p.pool}")
+
+    pools.change(gcp, env, p.pool, f"deploy {uc.name} v{p.version}", run, log=log)
+
+
+def _undeploy_on_pool(uc, env, creds, pool_name: str, endpoint, old: list, log=print) -> None:
+    """Removing versions from a pool is a pool change too: one at a time, announced, settled."""
+    if not old:
+        return
+    from pipewright.gcp import Gcp
+    from pipewright.serving import pools
+
+    def run():
+        for d in old:
+            log(f"undeploying previous {d.id} (v{d.model_version_id})")
+            endpoint.undeploy(deployed_model_id=d.id)
+
+    pools.change(Gcp(creds), env, pool_name,
+                 f"undeploy {uc.name} " + ", ".join(f"v{d.model_version_id}" for d in old), run, log=log)
+
+
 def _bqml_parity(uc: ResolvedUseCase, env: Environment, creds, p: DeployPlan, endpoint, previous: list,
                  log=print) -> None:
     """The new BigQuery ML deployment scores as ML.PREDICT does, or it is removed and traffic goes back."""
@@ -269,6 +365,14 @@ def _bqml_parity(uc: ResolvedUseCase, env: Environment, creds, p: DeployPlan, en
     if result.get("ok"):
         log(f"parity: {result['rows']} test rows score as ML.PREDICT does (largest difference "
             f"{result['max_difference']:.2e})")
+        return
+    from pipewright.serving import endpoints as tf_endpoints
+
+    if result.get("error") and tf_endpoints.is_private(env, uc.name):
+        # FR-92: never roll back because a private endpoint could not be reached from where the CLI runs.
+        log(f"parity: not checked ({tf_endpoints.unreachable_note(env, uc.name)}); the version stays deployed "
+            f"with {'its canary share' if previous else 'all traffic'}. Compare it from inside the network with "
+            f"`pipewright model predict --env {env.name} --usecase {uc.name}` before promoting it")
         return
     if previous:
         endpoint.update(traffic_split={previous[0].id: 100, **{o.id: 0 for o in previous[1:]}, new.id: 0})
@@ -314,8 +418,11 @@ def promote(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     endpoint, deployed, newest, traffic = _canary_state(uc, env, creds)
     log(f"promoting v{newest.model_version_id} (was {traffic.get(newest.id, 0)}%) to 100%")
     endpoint.update(traffic_split={newest.id: 100})
-    for d in deployed:
-        if d.id != newest.id:
+    old = [d for d in deployed if d.id != newest.id]
+    if uc.model["serving"].get("pool"):        # FR-105: removing a version restarts the pool's machines
+        _undeploy_on_pool(uc, env, creds, uc.model["serving"]["pool"], endpoint, old, log)
+    else:
+        for d in old:
             log(f"undeploying {d.id} (v{d.model_version_id})")
             endpoint.undeploy(deployed_model_id=d.id)
     log(f"live: {endpoint_name(uc)} serves {uc.model['name']} v{newest.model_version_id}")
@@ -327,7 +434,10 @@ def undeploy_canary(uc: ResolvedUseCase, env: Environment, creds, log=print) -> 
     endpoint, deployed, newest, _ = _canary_state(uc, env, creds)
     rest = [d for d in deployed if d.id != newest.id]
     endpoint.update(traffic_split={**{d.id: 0 for d in rest[1:]}, rest[0].id: 100, newest.id: 0})
-    endpoint.undeploy(deployed_model_id=newest.id)
+    if uc.model["serving"].get("pool"):        # FR-105: a pool change, one at a time and announced
+        _undeploy_on_pool(uc, env, creds, uc.model["serving"]["pool"], endpoint, [newest], log)
+    else:
+        endpoint.undeploy(deployed_model_id=newest.id)
     log(f"removed canary v{newest.model_version_id}; v{rest[0].model_version_id} serves all traffic")
 
 
@@ -380,7 +490,35 @@ def sample_request(uc: ResolvedUseCase) -> list[str]:
 
 def how_to_call(uc: ResolvedUseCase, env: Environment, endpoint_resource: str) -> str:
     """Pipewright 1.2.0 (FR-60): the endpoint's ID, its predict URL, the role a caller needs and a sample request."""
-    url = f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint_resource}:predict"
+    import json
+
+    from pipewright.serving import endpoints as tf_endpoints
+
+    online = uc.ml.get("online_features") or {}
+    if online.get("mode") == "gateway":        # FR-106: callers call the gateway, never the endpoint
+        callers = ", ".join((online.get("gateway") or {}).get("callers") or []) or "the callers the use case names"
+        return "\n".join([
+            "How to call it (through the lookup gateway, from inside the network):",
+            f"  service       {online.get('service')} (Cloud Run, internal), its URL in `pipewright doctor`",
+            "  predict URL   <service URL>/predict",
+            f"  caller needs  run.invoker on {online.get('service')} (granted to {callers}), an ID token for it",
+            "  request       POST, Authorization: Bearer <ID token>, a JSON body like:",
+            f"    {json.dumps({'entity_ids': ['<entity id>']})}",
+            "  answer        {\"predictions\": {id: ...}, \"not_found\": [...], \"deployed_model\", \"model_version\"}",
+            f"  endpoint      {endpoint_resource.rsplit('/', 1)[-1]} (called by the gateway only)",
+        ])
+    url = tf_endpoints.predict_url(env, uc.name, endpoint_resource)
+    if tf_endpoints.is_private(env, uc.name):
+        return "\n".join([
+            "How to call it (a private endpoint: from inside the network only):",
+            f"  endpoint ID   {endpoint_resource.rsplit('/', 1)[-1]}",
+            f"  predict URL   {url}",
+            "  certificate   signed by Google for *.prediction.p.vertexai.goog: fetch it once and trust it "
+            "(openssl s_client), and call the DNS name, not the IP",
+            "  caller needs  aiplatform.endpoints.predict (roles/aiplatform.user), from a project on the allowlist",
+            "  request       POST, Authorization: Bearer <access token>, a JSON body like:",
+            *sample_request(uc),
+        ])
     return "\n".join([
         "How to call it:",
         f"  endpoint ID   {endpoint_resource.rsplit('/', 1)[-1]}",

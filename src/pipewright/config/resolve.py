@@ -321,6 +321,22 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     problems += accelerators.problems(steps, model["serving"], env.policies, env.name)
     extra_warnings += accelerators.warnings(model["serving"])
+    if model["serving"].get("pool"):          # FR-105 (1.4.2): only when the team asks for co-hosting
+        from pipewright.serving import pools
+
+        joined = pools.resolve(model["serving"]["pool"], eff["model"].get("serving") or {}, env, tenant,
+                               meta["name"], problems, extra_warnings)
+        if joined:
+            # The register step reads it: a pool model carries its settings in serving.json, never in container
+            # variables (the pool's are the first model's, found live).
+            ml["serving"] = {**(ml.get("serving") or {}), "pool": joined["name"]}
+    if model["serving"]["enabled"]:
+        from pipewright.serving import endpoints, prices
+
+        if endpoints.is_private(env, meta["name"]):
+            extra_warnings.append(f"model.serving: {meta['name']}'s endpoint is private in {env.name} (created by "
+                                  f"the platform's Terraform): {prices.private_endpoint_cost()}; callers must be "
+                                  "inside the network")
     # Two 1.2.0 fixes on the container path live in the team's own components, copied from the churn example before
     # 1.2.0 (found live): validate says when the setting they serve is on but no component carries the fix.
     if not bqml_spec and components_dir.is_dir():
