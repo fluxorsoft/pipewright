@@ -44,6 +44,8 @@ spec:
     # default model.serving.fill_missing: true       # an empty feature gets its training median, as in batch scoring
     # default model.serving.scale_to_zero: false     # true with replicas.min 0: no replica while idle (preview)
     # default model.serving.accelerator: null        # e.g. { type: NVIDIA_L4, count: 1 }, within the platform's list
+    # default model.serving.pool: null               # 1.4.2: a shared pool of the environment, only for co-hosting
+    #                                                # (Google's TF or PyTorch serving image; it sets the machines)
 
   approvals:
     promote_model: manual                # a passing model is a candidate until `pipewright model approve`

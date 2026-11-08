@@ -1,0 +1,68 @@
+# Pipewright's lookup service on GKE pods (Pipewright 1.4.2 guideline): a Deployment and an internal Service that read
+# a use case's Cloud SQL online table with IAM database login, through Workload Identity. Replace every <...>.
+# See README.md for the steps before `kubectl apply -f lookup.yaml` (the reader identity, its grants, the config).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pw-lookup
+  namespace: <namespace>
+  annotations:
+    # The Google service account the pods act as: the use case's `lookup.reader` (Pipewright grants it SELECT).
+    iam.gke.io/gcp-service-account: <reader>@<project>.iam.gserviceaccount.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pw-lookup-<usecase>
+  namespace: <namespace>
+  labels: { app: pw-lookup, pipewright-usecase: <usecase> }
+spec:
+  replicas: 2                       # two pods: a restart never leaves the callers without one
+  selector:
+    matchLabels: { app: pw-lookup, pipewright-usecase: <usecase> }
+  template:
+    metadata:
+      labels: { app: pw-lookup, pipewright-usecase: <usecase> }
+    spec:
+      serviceAccountName: pw-lookup
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: lookup
+          # The launcher image Pipewright publishes, pinned by digest (the same code Cloud Run runs).
+          image: <region>-docker.pkg.dev/<project>/<repository>/pipewright-launcher@sha256:<digest>
+          command: ["python", "-m", "pipewright.online.server"]
+          env:
+            - name: PIPEWRIGHT_LOOKUP
+              valueFrom: { configMapKeyRef: { name: pw-lookup-<usecase>, key: lookup.json } }
+          ports: [{ containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 20 }
+          resources:
+            requests: { cpu: "500m", memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true,
+                             capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pw-lookup-<usecase>
+  namespace: <namespace>
+spec:
+  type: ClusterIP                   # callers in the cluster (KServe): http://pw-lookup-<usecase>.<namespace>/lookup
+  selector: { app: pw-lookup, pipewright-usecase: <usecase> }
+  ports: [{ port: 80, targetPort: 8080 }]
+---
+# Only the pods that need features may call it (the cluster's network policies must be on).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pw-lookup-<usecase>
+  namespace: <namespace>
+spec:
+  podSelector: { matchLabels: { app: pw-lookup, pipewright-usecase: <usecase> } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { pipewright-usecase: <usecase> } }
+      ports: [{ port: 8080 }]
