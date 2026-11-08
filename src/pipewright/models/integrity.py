@@ -440,9 +440,15 @@ def enforce(check: Check, env: Environment, what: str, log=print,
         # 1.4.2: a changed file is put back first; re-approving it would bless the change (found writing the
         # book's Chapter 21, where the hint offered only re-approval or warn).
         changed = any("changed after the approval" in p or "missing" in p for p in check.problems)
-        remedy = ("restore the approved files (`pipewright model restore-files`, a dry run first, then --confirm), or "
-                  "re-approve the version after review (`pipewright model approve`)" if changed
-                  else "re-approve the version after review (`pipewright model approve`)")
+        features = any(p.startswith("feature source") for p in check.problems)
+        if features:        # a definition is the data team's: re-approving cannot make it the trained one
+            remedy = ("restore the feature definition with the data team, or update the contract (`pipewright "
+                      "features contract`), release and retrain")
+        elif changed:
+            remedy = ("restore the approved files (`pipewright model restore-files`, a dry run first, then "
+                      "--confirm), or re-approve the version after review (`pipewright model approve`)")
+        else:
+            remedy = "re-approve the version after review (`pipewright model approve`)"
     for note in check.notes:
         log(f"integrity: {note}")
     if not check.problems:
