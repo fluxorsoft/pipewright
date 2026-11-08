@@ -1,0 +1,133 @@
+{
+ "egress_from_std_endpoint": {
+  "probe": [
+   {
+    "ms": 216.8,
+    "outcome": "http 404",
+    "name": "lookup_service_internal"
+   },
+   {
+    "outcome": "timeout: timed out",
+    "ms": 5004.8,
+    "name": "cloudsql_private_ip"
+   },
+   {
+    "ms": 5004.7,
+    "name": "psc_google_apis_ip",
+    "outcome": "timeout: timed out"
+   },
+   {
+    "ms": 37.3,
+    "name": "google_api_public",
+    "outcome": "http 400"
+   },
+   {
+    "outcome": "http 200",
+    "ms": 206.1,
+    "name": "internet"
+   }
+  ],
+  "model": "v1"
+ },
+ "egress_from_psc_endpoint": {
+  "model": "v1",
+  "probe": [
+   {
+    "ms": 265.8,
+    "name": "lookup_service_internal",
+    "outcome": "http 404"
+   },
+   {
+    "ms": 5004.9,
+    "name": "cloudsql_private_ip",
+    "outcome": "timeout: timed out"
+   },
+   {
+    "ms": 5003.4,
+    "name": "psc_google_apis_ip",
+    "outcome": "timeout: timed out"
+   },
+   {
+    "ms": 33,
+    "name": "google_api_public",
+    "outcome": "http 400"
+   },
+   {
+    "ms": 125.7,
+    "name": "internet",
+    "outcome": "http 200"
+   }
+  ]
+ },
+ "egress_from_vpc_control": [
+  {
+   "name": "lookup_service_internal",
+   "outcome": "http 404",
+   "ms": 29.3
+  },
+  {
+   "name": "cloudsql_private_ip",
+   "outcome": "connected",
+   "ms": 2.6
+  },
+  {
+   "name": "psc_google_apis_ip",
+   "outcome": "connected",
+   "ms": 0.6
+  },
+  {
+   "name": "google_api_public",
+   "outcome": "http 400",
+   "ms": 28.9
+  },
+  {
+   "name": "internet",
+   "outcome": "URLError: <urlopen error [Errno 101] Network is unreachable>",
+   "ms": 10047.8
+  }
+ ],
+ "caller_seen_by_gateway": "fs92-caller@pipewright-enterprise.iam.gserviceaccount.com",
+ "latency_ms": {
+  "gateway_lookup_only": {
+   "n": 100,
+   "p50": 22.8,
+   "p95": 30.9,
+   "max": 66.5
+  },
+  "direct_std_with_features": {
+   "n": 100,
+   "p50": 69.5,
+   "p95": 90.8,
+   "max": 214.1
+  },
+  "direct_psc_with_features": {
+   "n": 100,
+   "p50": 15.4,
+   "p95": 26.4,
+   "max": 88.7
+  },
+  "gateway_to_std": {
+   "n": 100,
+   "p50": 92.8,
+   "p95": 114.7,
+   "max": 143.9
+  },
+  "gateway_to_psc": {
+   "n": 100,
+   "p50": 39.0,
+   "p95": 51.8,
+   "max": 158.3
+  }
+ },
+ "errors": {
+  "gateway_lookup_only": 0,
+  "direct_std_with_features": 0,
+  "direct_psc_with_features": 0,
+  "gateway_to_std": 0,
+  "gateway_to_psc": 0
+ },
+ "canary_gateway_to_psc": {
+  "2428463294722342912/v1": 92,
+  "485160055511973888/v1": 8
+ }
+}

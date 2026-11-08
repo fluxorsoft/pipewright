@@ -1865,6 +1865,19 @@ after; results in `docs/evidence/fr92-105-106-spike/`): endpoint egress into the
 standard and with a private endpoint; gateway latency against the direct paths; canary through the gateway; a shared
 pool behind a private endpoint; resizing a pool without a rebuild; how pools are billed.
 
+**Spike results (2026-11-08, `docs/evidence/fr92-105-106-spike/`; for the user's review before conclusions):**
+endpoints (standard and PSC) cannot reach the VPC (internal Cloud Run 404, Cloud SQL private IP and the PSC address
+for Google APIs time out) but can reach public Google APIs and the internet; the gateway works with both endpoint types
+(0 errors in 500 calls) and sees the caller's identity; p50 / p95 from the VPC: gateway to a PSC endpoint 39.0 / 51.8
+ms, gateway to a standard endpoint 92.8 / 114.7 ms, lookup alone 22.8 / 30.9 ms; canary 90/10 through the gateway gave
+92/8. Pools: created with CMEK and a service account through the API; each deployed model must name the pool's service
+account; two PSC endpoints share a pool, but a standard endpoint added to a pool serving a PSC endpoint failed twice
+(INTERNAL); one model server per replica loads every model: files per model, container environment variables the
+pool's (the first model's); resized in place by PATCH (min and max, 90 to 155 s); every pool change rolls all replicas
+and gave the untouched models about a minute of 503s (min 1: 557 of 9,980 calls failed over three changes; min 2: 419
+of 6,782), and the gateway retrying 503s brought one change to 1 failure in 4,629 calls. Billing of a pool not yet
+confirmed (no billing export).
+
 **Rules:** additive and off by default; costs shown before a toggle is switched on; names, digests and counts in every
 message and record, never a feature value. Numbered FR-105 (co-hosting) and FR-106 (the gateway), phase 9 with FR-92
 and FR-104.
