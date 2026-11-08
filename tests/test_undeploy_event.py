@@ -53,3 +53,25 @@ def test_a_model_trained_online_is_refused_where_callers_send_features():
     assert online.check(None, {}, {"online_features": lookup}, "test")              # from serving.json too
     assert online.check(None, {}, None, "test") is None                              # a request-mode model
     assert online.check(None, {}, {"online_features": {**lookup, "mode": "gateway"}}, "test") is None
+
+
+def test_lineage_reads_how_approved_files_are_protected_now():
+    """FR-116: protection the renewer or a deploy added after the approval shows in lineage."""
+    from datetime import datetime, timedelta, timezone
+
+    from pipewright.models import protection
+
+    later = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    metas = {"m/model.pt": {"retention": {"retainUntilTime": later}}, "m/serving.json": {"temporaryHold": True}}
+
+    class Gcp:
+        def get(self, url, **_):
+            name = url.split("/o/")[1].replace("%2F", "/")
+            return SimpleNamespace(ok=True, body=metas.get(name, {}))
+
+    files = {"folder": "gs://b/m", "files": [{"file": "model.pt", "generation": 1},
+                                             {"file": "serving.json", "generation": 2},
+                                             {"file": "card.md", "generation": 3}]}
+    got = protection.current(Gcp(), files)
+    assert got["files"] == 3 and got["protected"] == 2 and got["holds"] == 1 and got["until"] == later[:16].replace("T", " ")
+    assert protection.current(Gcp(), None) is None

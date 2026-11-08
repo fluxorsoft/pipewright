@@ -191,6 +191,26 @@ def _until(meta: dict) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
+def current(gcp, approved_files: dict | None) -> dict | None:
+    """How the approved files are protected now, from Cloud Storage (1.4.2): {files, protected, until (the earliest
+    retention), holds}. An approval made before the lock was configured records none; the renewer or a deploy adds it
+    later, and lineage showed nothing (found re-running the book's Chapter 21). None without files."""
+    if not approved_files or not approved_files.get("files"):
+        return None
+    bucket, prefix = _split(approved_files["folder"])
+    untils, holds, protected = [], 0, 0
+    for f in approved_files["files"]:
+        meta = _meta(gcp, Artifact(bucket, prefix + f["file"], str(f["generation"]), "model_file"))
+        body = meta.body if getattr(meta, "ok", False) else {}
+        until, hold = _until(body), bool((body or {}).get("temporaryHold"))
+        if until and until > datetime.now(timezone.utc):
+            untils.append(until)
+        holds += hold
+        protected += bool(hold or (until and until > datetime.now(timezone.utc)))
+    return {"files": len(approved_files["files"]), "protected": protected, "holds": holds,
+            "until": min(untils).strftime("%Y-%m-%d %H:%M") if untils else None}
+
+
 def _bucket_retention(gcp, bucket: str, cache: dict) -> bool:
     if bucket not in cache:
         r = gcp.get(f"{GCS}/b/{bucket}", fields="objectRetention")

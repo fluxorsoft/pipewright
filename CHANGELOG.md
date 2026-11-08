@@ -79,6 +79,9 @@ and [docs/SERVING.md](docs/SERVING.md).
   runs as the tenant's runner. A deployment of the same version made without it (under `features: request`) answered
   every lookup with HTTP 403, and `deploy-model` said there was nothing to do; it now deploys the version again, as
   the runner, and drains the old deployment.
+- **Lineage says how approved files are protected now** (FR-116): read from Cloud Storage (retention and holds),
+  not only from the approval. A version approved before the lock was configured, then protected by the renewer or a
+  deploy, showed no protection at all.
 
 ### Fixed (found re-running the book on 1.4.2)
 

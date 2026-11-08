@@ -126,6 +126,10 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
             out["integrity"] = {**check.summary(), "problems_found": check.problems, "notes": check.notes}
         if check.approval and check.approval.get("lock"):
             out["integrity"]["lock"] = check.approval["lock"]
+        if check.approval and check.approval.get("files"):
+            from pipewright.models import protection
+
+            out["integrity"]["protection"] = protection.current(gcp, check.approval["files"])
         if not check.approval and check.problems and out.get("default"):
             out["integrity"]["made_default"] = integrity.who_made_default(gcp, env, resource, out["version"],
                                                                           out.get("created"))
@@ -354,6 +358,12 @@ def _render_integrity(info: dict, lines: list[str]) -> None:
     if made:
         lines.append(f"           made the default by {made['principal']} at {made['at']} ({made['method']}, "
                      "Admin Activity audit log)" if made.get("principal") else f"           {made.get('note')}")
+    p = i.get("protection")
+    if p:
+        now = (f"{p['protected']} of {p['files']} approved files protected now"
+               + (f", until {p['until']} UTC" if p.get("until") else "")
+               + (f", {p['holds']} by a temporary hold" if p.get("holds") else "")) if p.get("protected")             else f"none of the {p['files']} approved files is protected now (no retention or hold)"
+        lines.append(f"           {now}")
     if i.get("lock"):
         lk = i["lock"]
         how = ("on a temporary hold (no end date)" if lk.get("method") == "hold" else
