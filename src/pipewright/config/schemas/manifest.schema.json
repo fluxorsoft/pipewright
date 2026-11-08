@@ -913,6 +913,20 @@
                   "null"
                 ],
                 "description": "the network a private endpoint is reached from"
+              },
+              "dns_zone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the private DNS zone for prediction.p.vertexai.goog; deploy-model writes the endpoint's record once Agent Platform has made its address"
+              },
+              "dns_project": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the zone's project, when not the environment's"
               }
             }
           }

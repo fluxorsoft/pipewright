@@ -160,7 +160,8 @@ def gateway_target(contract, manifest: dict, online: dict, gcp) -> dict:
     else:
         url = f"https://{region}-aiplatform.googleapis.com{path}"
     g = online.get("gateway") or {}
-    return {"endpoint": resource, "predict_url": url, "private": private, "retries": int(g.get("retries", 3))}
+    return {"endpoint": resource, "predict_url": url, "private": private, "retries": int(g.get("retries", 3)),
+            "region": region}
 
 
 def allow_gateway(gcp, region: str, endpoint: str, identity: str) -> None:

@@ -91,6 +91,40 @@ def predict_private(gcp, url: str, instances: list, env, usecase: str) -> dict:
                           f"{unreachable_note(env, usecase)}") from None
 
 
+def publish_dns(gcp, env, usecase: str, endpoint_resource: str, log=print) -> str | None:
+    """A private endpoint's name in the platform's private zone (manifest serving.endpoints.<uc>.dns_zone), pointing
+    at the address Agent Platform made for it. Found live: Agent Platform makes that address with the endpoint's
+    first deployed model, so Terraform, which creates the endpoint empty, cannot write the record; deploy-model
+    does, once the address exists. Returns the address, or None when there is nothing to do or it could not."""
+    entry = declared(env, usecase) or {}
+    zone = entry.get("dns_zone")
+    if not entry.get("private") or not zone:
+        return None
+    r = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{endpoint_resource}")
+    autos = ((r.body or {}).get("privateServiceConnectConfig") or {}).get("pscAutomationConfigs") or [] if r.ok else []
+    address = next((a.get("ipAddress") for a in autos if a.get("ipAddress")), None)
+    if not address:
+        log(f"{usecase}'s private endpoint has no address yet; its DNS name is not written (the lookup gateway does "
+            "not need it)")
+        return None
+    parts = endpoint_resource.split("/")
+    name = (entry.get("dns") or dns_name(endpoint_resource, env.region, parts[1] if len(parts) > 1 else "")) + "."
+    project = entry.get("dns_project") or env.project
+    api = f"https://dns.googleapis.com/dns/v1/projects/{project}/managedZones/{zone}/rrsets"
+    record = {"name": name, "type": "A", "ttl": 300, "rrdatas": [address]}
+    current = gcp.get(f"{api}/{name}/A")
+    if current.ok and (current.body or {}).get("rrdatas") == [address]:
+        return address
+    w = gcp.patch(f"{api}/{name}/A", record) if current.ok else gcp.post(api, record)
+    if not w.ok:
+        log(f"{name} -> {address} was not written to zone {zone} (HTTP {w.status}): give the deployer "
+            "dns.resourceRecordSets.create and update on it, or add the record by hand; the lookup gateway does "
+            "not need it")
+        return None
+    log(f"{name} -> {address} (private zone {zone})")
+    return address
+
+
 def unreachable_note(env, usecase: str) -> str:
     return (f"{usecase}'s endpoint is private: it answers only inside {env.name}'s network. Run this from there (a "
             "Cloud Run job, a VM, or CI with a runner in the network), or call it through the lookup gateway")

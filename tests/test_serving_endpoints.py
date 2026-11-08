@@ -85,3 +85,42 @@ def test_how_to_call_through_the_gateway():
 def test_how_to_call_a_public_endpoint_is_unchanged():
     text = deploy.how_to_call(_uc(), env(), RES)
     assert text.startswith("How to call it:") and "aiplatform.googleapis.com" in text
+
+
+class Dns:
+    def __init__(self, ip, existing=None, write_status=200):
+        self.ip, self.existing, self.write_status, self.writes = ip, existing, write_status, []
+
+    def get(self, url, **p):
+        if "aiplatform" in url:
+            return SimpleNamespace(ok=True, status=200, body={"privateServiceConnectConfig": {
+                "pscAutomationConfigs": [{"ipAddress": self.ip}] if self.ip else [{}]}})
+        if self.existing is None:
+            return SimpleNamespace(ok=False, status=404, body={})
+        return SimpleNamespace(ok=True, status=200, body={"rrdatas": [self.existing]})
+
+    def post(self, url, body, **p):
+        self.writes.append(("POST", url, body))
+        return SimpleNamespace(ok=self.write_status < 300, status=self.write_status, body={})
+
+    def patch(self, url, body, **p):
+        self.writes.append(("PATCH", url, body))
+        return SimpleNamespace(ok=self.write_status < 300, status=self.write_status, body={})
+
+
+def test_deploy_writes_a_private_endpoints_name_once_it_has_an_address():
+    e = env({"churn": {"private": True, "dns_zone": "pw-vertexai-prediction"}})
+    d = Dns("10.10.9.2")
+    assert endpoints.publish_dns(d, e, "churn", RES, log=lambda m: None) == "10.10.9.2"
+    method, url, body = d.writes[0]
+    assert method == "POST" and url.endswith("/managedZones/pw-vertexai-prediction/rrsets")
+    assert body["name"] == "987-europe-west2-123.prediction.p.vertexai.goog." and body["rrdatas"] == ["10.10.9.2"]
+    d = Dns("10.10.9.2", existing="10.10.9.2")
+    endpoints.publish_dns(d, e, "churn", RES, log=lambda m: None)
+    assert d.writes == []                                  # already right: nothing written
+    said = []
+    assert endpoints.publish_dns(Dns(None), e, "churn", RES, log=said.append) is None and "no address yet" in said[0]
+    said = []
+    assert endpoints.publish_dns(Dns("10.1.1.1", write_status=403), e, "churn", RES, log=said.append) is None
+    assert "dns.resourceRecordSets" in said[0]
+    assert endpoints.publish_dns(Dns("10.1.1.1"), env({"churn": {"private": True}}), "churn", RES) is None

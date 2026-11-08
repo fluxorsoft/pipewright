@@ -222,3 +222,27 @@ def test_the_server_answers_predict_only_with_a_gateway():
     r = Req("/predict", b'{"entity_ids": ["a"]}', fake).out
     assert r["code"] == 200 and r["body"]["not_found"] == ["a"]
     assert Req("/predict", b'{"entity_ids": []}', fake).out["code"] == 400
+
+
+def test_a_private_endpoint_is_called_at_its_address_with_its_name():
+    """Found live: Agent Platform makes a private endpoint's address with its first model, so the gateway reads it
+    from the endpoint when the network has no DNS name for it, and presents the name (TLS and Host)."""
+    sent = []
+    cfg = {**CFG, "gateway": {"predict_url": "https://987-us-central1-123.prediction.p.vertexai.goog/v1/e:predict",
+                              "private": True, "endpoint": "projects/123/locations/us-central1/endpoints/987",
+                              "region": "us-central1", "retries": 0}}
+    g = gw.Gateway(cfg, Source({"c-1": {"tenure": 1, "spend": 2}}), Tokens(), context="CTX",
+                   resolver=lambda: "10.10.9.2",
+                   poster=lambda addr, host, path, body, headers, ctx: sent.append((addr, host, path, ctx)) or
+                   {"predictions": [0.5], "deployedModelId": "7"})
+    body, _ = g.predict(["c-1"])
+    assert body["predictions"] == {"c-1": 0.5}
+    assert sent == [("10.10.9.2", "987-us-central1-123.prediction.p.vertexai.goog", "/v1/e:predict", "CTX")]
+
+
+def test_a_private_endpoint_without_an_address_is_said_plainly():
+    cfg = {**CFG, "gateway": {"predict_url": "https://987-us-central1-123.prediction.p.vertexai.goog/v1/e:predict",
+                              "private": True, "endpoint": "e", "region": "us-central1", "retries": 0}}
+    g = gw.Gateway(cfg, Source({"c-1": {}}), Tokens(), resolver=lambda: None)
+    with pytest.raises(ConnectionError, match="first deployed model"):
+        g.predict(["c-1"])

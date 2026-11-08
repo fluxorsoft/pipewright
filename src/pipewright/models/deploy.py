@@ -398,6 +398,15 @@ def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: in
                              version=version, endpoint=endpoint_name(uc), traffic_percent=traffic,
                              by=gcp.identity(), **({"integrity": check.deployed()} if check is not None else {})),
                 env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
+    from pipewright.serving import endpoints as tf_endpoints
+
+    if tf_endpoints.is_private(env, uc.name):        # FR-92: the name exists once the endpoint has its address
+        try:
+            resource = find_endpoint(uc, env, gcp)
+            if resource:
+                tf_endpoints.publish_dns(gcp, env, uc.name, resource)
+        except Exception as e:  # noqa: BLE001 - a missing DNS name never fails a deploy
+            print(f"the private endpoint's DNS name was not written: {e}")
 
 
 def _canary_state(uc: ResolvedUseCase, env: Environment, creds):

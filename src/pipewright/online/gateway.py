@@ -88,12 +88,20 @@ def caller_of(header: str | None) -> str:
         return "unknown"
 
 
-def pinned_context(host: str, fetch=None) -> ssl.SSLContext:
+def _fetch_pem(host: str, address: str | None = None) -> str:
+    """The certificate a private endpoint presents, asking for `host` at `address` (its IP when DNS has no name)."""
+    probe = ssl.create_default_context()
+    probe.check_hostname, probe.verify_mode = False, ssl.CERT_NONE
+    with socket.create_connection((address or host, 443), timeout=10) as raw:
+        with probe.wrap_socket(raw, server_hostname=host) as s:
+            return ssl.DER_cert_to_PEM_cert(s.getpeercert(binary_form=True))
+
+
+def pinned_context(host: str, fetch=None, address: str | None = None) -> ssl.SSLContext:
     """A private endpoint's certificate is signed by Google for *.prediction.p.vertexai.goog, not by a public CA.
     Google's guidance is to fetch it and trust it: the gateway fetches it once per instance from the endpoint's
-    address inside the network (private DNS, made by the platform's Terraform), checks it names that domain, and
-    trusts exactly that certificate."""
-    pem = (fetch or (lambda h: ssl.get_server_certificate((h, 443), timeout=10)))(host)
+    address inside the network, checks it names that domain, and trusts exactly that certificate."""
+    pem = fetch(host) if fetch else _fetch_pem(host, address)
     ctx = ssl.create_default_context(cadata=pem)
     ctx.check_hostname = False               # checked below against the certificate's own name
     der = ssl.PEM_cert_to_DER_cert(pem)
@@ -102,10 +110,50 @@ def pinned_context(host: str, fetch=None) -> ssl.SSLContext:
     return ctx
 
 
+def endpoint_address(endpoint: str, token: str, region: str, opener=None) -> str | None:
+    """The address Agent Platform made for a private endpoint in the network (its Private Service Connect
+    automation), from the endpoint itself. Found live: Agent Platform makes it with the endpoint's first deployed
+    model, so Terraform cannot know it when it creates the endpoint, and a DNS name may not exist yet."""
+    req = urllib.request.Request(f"https://{region}-aiplatform.googleapis.com/v1/{endpoint}",
+                                 headers={"Authorization": "Bearer " + token})
+    with (opener or urllib.request.urlopen)(req, timeout=10) as r:
+        cfg = (json.loads(r.read() or b"{}").get("privateServiceConnectConfig")) or {}
+    for a in cfg.get("pscAutomationConfigs") or []:
+        ok = a.get("state", "PSC_AUTOMATION_STATE_SUCCESSFUL") == "PSC_AUTOMATION_STATE_SUCCESSFUL"
+        if a.get("ipAddress") and ok:
+            return a["ipAddress"]
+    return None
+
+
+def post_private(address: str, host: str, path: str, body: bytes, headers: dict, ctx, timeout: float = 30) -> dict:
+    """POST to a private endpoint at its address, presenting its DNS name (TLS and Host), as urllib would."""
+    import http.client
+
+    class Conn(http.client.HTTPSConnection):
+        def connect(self):
+            raw = socket.create_connection((address, 443), timeout)
+            self.sock = ctx.wrap_socket(raw, server_hostname=host)
+
+    conn = Conn(host, 443, timeout=timeout, context=ctx)
+    try:
+        conn.request("POST", path, body=body, headers=headers)
+        r = conn.getresponse()
+        data = r.read()
+        if r.status >= 400:
+            raise urllib.error.HTTPError(f"https://{host}{path}", r.status, r.reason, dict(r.getheaders()), None)
+        return json.loads(data or b"{}")
+    finally:
+        conn.close()
+
+
 class Gateway:
-    def __init__(self, cfg: dict, source, tokens=None, opener=None, sleep=time.sleep, context=None):
+    def __init__(self, cfg: dict, source, tokens=None, opener=None, sleep=time.sleep, context=None,
+                 poster=None, resolver=None):
         g = cfg["gateway"]
         self.url, self.private = g["predict_url"], bool(g.get("private"))
+        self.endpoint, self.region = g.get("endpoint"), g.get("region")
+        self._post, self._resolve = poster or post_private, resolver
+        self._address = None
         self.retries = int(g.get("retries", 3))
         self.features, self.usecase = cfg["features"], cfg.get("usecase", "")
         self.source, self._sleep = source, sleep
@@ -118,26 +166,40 @@ class Gateway:
             return self._tokens.get()
         return json.loads(_md("/token"))["access_token"]
 
-    def _ctx(self):
-        if not self.private:
-            return None
+    def _target(self) -> tuple[str, object]:
+        """A private endpoint's (address, pinned TLS context): its DNS name when the network resolves it, otherwise
+        the address Agent Platform made for it, read from the endpoint."""
         with self._lock:
-            if self._context is None:
-                self._context = pinned_context(urllib.parse.urlparse(self.url).hostname)
-            return self._context
+            if self._address is None:
+                host = urllib.parse.urlparse(self.url).hostname
+                try:
+                    address = socket.getaddrinfo(host, 443)[0][4][0]
+                except OSError:
+                    resolve = self._resolve or (lambda: endpoint_address(self.endpoint, self._token(), self.region))
+                    address = resolve()
+                if not address:
+                    raise ConnectionError("the private endpoint has no address yet (Agent Platform makes it with "
+                                          "the endpoint's first deployed model)")
+                if self._context is None:
+                    self._context = pinned_context(host, address=address)
+                self._address = address
+            return self._address, self._context
+
+    def _send(self, body: bytes) -> dict:
+        headers = {"Authorization": "Bearer " + self._token(), "Content-Type": "application/json"}
+        if self.private:
+            address, ctx = self._target()
+            parts = urllib.parse.urlparse(self.url)
+            return self._post(address, parts.hostname, parts.path, body, headers, ctx)
+        request = urllib.request.Request(self.url, data=body, method="POST", headers=headers)
+        with self._open(request, timeout=30) as r:
+            return json.loads(r.read() or b"{}")
 
     def _call(self, instances: list) -> tuple[dict, int]:
         body = json.dumps({"instances": instances}).encode()
         for attempt in range(self.retries + 1):
-            request = urllib.request.Request(self.url, data=body, method="POST", headers={
-                "Authorization": "Bearer " + self._token(), "Content-Type": "application/json"})
             try:
-                kwargs = {"timeout": 30}
-                ctx = self._ctx()
-                if ctx is not None:
-                    kwargs["context"] = ctx
-                with self._open(request, **kwargs) as r:
-                    return json.loads(r.read() or b"{}"), attempt + 1
+                return self._send(body), attempt + 1
             except urllib.error.HTTPError as e:
                 if e.code not in RETRY_STATUS or attempt >= self.retries:
                     raise
