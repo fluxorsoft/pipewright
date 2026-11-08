@@ -464,6 +464,7 @@ def promote(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     endpoint.update(traffic_split={newest.id: 100})
     old = [d for d in deployed if d.id != newest.id]
     if uc.model["serving"].get("pool"):        # FR-105: removing a version restarts the pool's machines
+        _drain(uc, old, log)
         _undeploy_on_pool(uc, env, creds, uc.model["serving"]["pool"], endpoint, old, log)
     else:
         _drain(uc, old, log)
@@ -480,6 +481,7 @@ def undeploy_canary(uc: ResolvedUseCase, env: Environment, creds, log=print) -> 
     rest = [d for d in deployed if d.id != newest.id]
     endpoint.update(traffic_split={**{d.id: 0 for d in rest[1:]}, rest[0].id: 100, newest.id: 0})
     if uc.model["serving"].get("pool"):        # FR-105: a pool change, one at a time and announced
+        _drain(uc, [newest], log)
         _undeploy_on_pool(uc, env, creds, uc.model["serving"]["pool"], endpoint, [newest], log)
     else:
         _drain(uc, [newest], log)
