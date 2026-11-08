@@ -514,6 +514,9 @@ def cmd_features_sync(args, load: bool = True) -> int:
 
     gcp, ml, env, tenant, usecase, release_id = _online_source(args)
     online = ml.get("online_features") or {}
+    if load and not online:
+        raise ConfigError(f"{usecase} has no online features to sync: model.serving.features is request (set it to "
+                          "online, with an online_view on the feature source)")
     if load and online.get("store") and online.get("type", "bigtable") == "bigtable":
         # FR-110: the tenant's Bigtable store (1.1) syncs itself on its schedule; this starts one now and waits
         out = sync.sync_bigtable_views(online, gcp)
