@@ -1,0 +1,4 @@
+churn-shared (churn): n1-standard-2, 2-2 machines, psc endpoints, managed by ci
+  cost      2 x n1-standard-2 at $0.157 an hour: about $229 a month at its minimum
+  apply     create
+  note      serving.pools.churn-shared: PyTorch co-hosting is a Google Preview (no SLA, may change)

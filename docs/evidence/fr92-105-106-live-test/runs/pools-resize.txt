@@ -1,0 +1,3 @@
+pool churn-shared: resize (min 2 -> 2, max 2 -> 3). Every machine restarts, so churnf, churnx may get errors for about a minute (callers through the lookup gateway retry); announced
+pool churn-shared: waiting 6 minutes for its machines to finish restarting
+pool churn-shared: settled after resize (min 2 -> 2, max 2 -> 3); announced

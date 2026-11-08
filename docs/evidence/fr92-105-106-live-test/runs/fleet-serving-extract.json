@@ -1,0 +1,30 @@
+ ],
+ "cells": {
+  "churnf": {
+   "private": true,
+   "pools": [
+    "churn-shared"
+   ],
+   "calls": 9000,
+   "failed": 2746,
+   "retried": 0,
+   "days": 7,
+   "callers": [
+    "pw9b-caller@pipewright-enterprise.iam.gserviceaccount.com"
+   ]
+  },
+  "churnx": {
+   "private": true,
+   "pools": [
+    "churn-shared"
+   ],
+   "calls": 7359,
+   "failed": 14,
+   "retried": 78,
+   "days": 7,
+   "callers": [
+    "pw9b-caller@pipewright-enterprise.iam.gserviceaccount.com"
+   ]
+  }
+ }
+}

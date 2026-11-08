@@ -1,0 +1,6 @@
+== from a pod with pipewright-usecase=churnf
+If you don't see a command prompt, try pressing enter.
+{"calls": 50, "found": 194, "asked": 250, "p50_ms": 11.4, "p95_ms": 147.6}
+== from a pod with app=other
+    raise URLError(err)
+urllib.error.URLError: <urlopen error timed out>

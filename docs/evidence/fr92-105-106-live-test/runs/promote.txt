@@ -1,0 +1,7 @@
+promoting v2 (was 10%) to 100%
+pool churn-shared: undeploy churnf v1. Every machine restarts, so churnf, churnx may get errors for about a minute (callers through the lookup gateway retry); announced
+undeploying previous 5134000770865168384 (v1)
+PrivateEndpoint model undeployed. Resource name: projects/486008751903/locations/us-central1/endpoints/1253321926
+pool churn-shared: waiting 6 minutes for its machines to finish restarting
+pool churn-shared: settled after undeploy churnf v1; announced
+live: churnf-endpoint serves churnf-classifier v2

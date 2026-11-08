@@ -1,0 +1,2 @@
+pool churn-shared: creating (n1-standard-2, 2 to 2 machines; machines start with its first model)
+pool churn-shared: created

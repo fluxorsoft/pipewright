@@ -1,0 +1,7 @@
+Serving (endpoint, pool, gateway)
+  OK    endpoint: churnf-endpoint (private, inside the network only), created by the platform's Terraform; a private endpoint: $0.01 an hour (about $7 a month) plus $0.004 to $0.01 per GiB processed
+  OK    pool churn-shared: n1-standard-2, 2 to 3 machines, 2 models on it; 2 x n1-standard-2 at $0.157 an hour: about $229 a month at its minimum, about 1/2 of it for each model
+  OK    lookup gateway: pwl-churn-churnf reads Cloud SQL and calls the endpoint; https://pwl-churn-churnf-6clclvcyhq-uc.a.run.app/predict; 1 callers, 3 retries
+
+Permissions of the identity running doctor (what `release` will need)
+  OK    project: aiplatform.pipelineJobs.create, aiplatform.models.upload, aiplatform.endpoints.deploy, cloudscheduler.jobs.create, cloudscheduler.jobs.update

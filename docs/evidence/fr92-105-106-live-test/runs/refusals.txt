@@ -1,0 +1,16 @@
+== s/      pool: churn-shared /      machine: n1-standard-4\n      pool: churn-shared /
+FAIL  churnf (ent)
+usecases\churnf\usecase.yaml (ent): model.serving.pool: the pool sets the machines; remove model.serving.machine
+0 valid, 1 with problems
+== s/      pool: churn-shared /      pool: no-such-pool /
+FAIL  churnf (ent)
+usecases\churnf\usecase.yaml (ent): model.serving.pool 'no-such-pool': ent has no such pool (manifest serving.pools: churn-shared); ask the platform team, or leave it out to deploy on the use case's own machines
+0 valid, 1 with problems
+== s/mode: gateway,/mode: gateway, retries: 9,/
+FAIL  churnf (ent)
+usecases\churnf\usecase.yaml: spec.model.serving.online_store.lookup.retries: 9 is greater than the maximum of 5
+0 valid, 1 with problems
+== s/                  callers: \["serviceAccount:pw9b-caller@pipewright-enterprise.iam.gserviceaccount.com"\] }/                  callers: [] }/
+FAIL  churnf (ent)
+usecases\churnf\usecase.yaml (ent): model.serving.online_store.lookup.callers: with mode gateway, name who may call it (serviceAccount:, group: or user: members get run.invoker on the lookup service)
+0 valid, 1 with problems
