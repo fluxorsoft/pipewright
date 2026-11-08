@@ -165,8 +165,9 @@ def gateway_target(contract, manifest: dict, online: dict, gcp) -> dict:
 
 
 def allow_gateway(gcp, region: str, endpoint: str, identity: str) -> None:
-    """The gateway's identity may predict on that one endpoint (resource IAM on the endpoint)."""
-    api = f"{AIP.format(region=region)}/{endpoint}"
+    """The gateway's identity may predict on that one endpoint (resource IAM on the endpoint). Endpoint IAM is on
+    the v1beta1 API only (found live: v1 answers 404)."""
+    api = f"https://{region}-aiplatform.googleapis.com/v1beta1/{endpoint}"
     pol = gcp.post(f"{api}:getIamPolicy", {})
     if not pol.ok:
         raise ConfigError(f"cannot read the IAM policy of {endpoint.rsplit('/', 1)[-1]} (HTTP {pol.status}): the "
