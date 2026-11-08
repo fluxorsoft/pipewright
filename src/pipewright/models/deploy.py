@@ -472,7 +472,8 @@ def undeploy(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
         log(f"{endpoint_name(uc)} does not exist")
         return
     endpoints[0].undeploy_all()
-    from pipewright.serving import endpoints as tf_endpoints, prices
+    from pipewright.serving import endpoints as tf_endpoints
+    from pipewright.serving import prices
 
     if tf_endpoints.is_private(env, uc.name):        # found live: a private endpoint is billed while it exists
         log(f"undeployed all models from {endpoint_name(uc)}; the private endpoint itself still costs "

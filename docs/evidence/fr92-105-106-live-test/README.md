@@ -51,4 +51,5 @@ image, CMEK, the tenant's identity), each behind a private endpoint Terraform cr
 | F7 | access tokens from the metadata server were reused for a fixed 25 minutes, but the server hands out its current token, which may have minutes left: after about 30 minutes every gateway call failed 401 | reuse until five minutes before `expires_in`; also the lookup service's database login and the serving handler's lookup client (FR-104 code) |
 | F8 | the gateway retries the endpoint, not the team's store: the store's cold start (scaled to zero) failed the first calls | documented in the serving example: keep the store warm or raise `http.timeout_ms` |
 | F9 | a pool deploy also printed "deploying on n1-standard-2" | removed for pool deploys |
+| F11 | undeploy said "the endpoint itself costs nothing", untrue for a private endpoint | says it still costs $0.01 an hour until Terraform removes it |
 | F10 | the gateway called the team's store at its URL, the serving handler at `<url>/lookup` | the gateway calls `<url>/lookup` too |
