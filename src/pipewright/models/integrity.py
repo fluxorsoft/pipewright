@@ -382,8 +382,11 @@ def verify(gcp, env: Environment, usecase: str, version: str, folder: str | None
                            "approval cannot be checked")
         return check
     if not events:
-        check.problems.append(f"v{version} has no model.approved event: it became the default outside Pipewright "
-                              "(the console, gcloud or the API), so nobody approved it here")
+        # Found re-running the book on 1.4.2: in test, promote_model auto makes a passing model the default by itself,
+        # which is not "outside Pipewright". Name both ways a version becomes the default without an approval.
+        check.problems.append(f"v{version} has no model.approved event: nobody approved it here. It became the default "
+                              "by itself (approvals.promote_model auto: the pipeline makes a model that passes its "
+                              "gates the champion) or outside Pipewright (the console, gcloud or the API)")
         return check
     approval = check.approval = events[0]
     if model:
@@ -605,7 +608,8 @@ def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
     except Exception as e:  # noqa: BLE001 - the launcher cannot read the log: the approval cannot be shown
         return mode, f"the approval of v{version} cannot be shown: {str(e).splitlines()[0][:120]}"
     if events == []:
-        return mode, f"v{version} of {name} has no model.approved event: it became the default outside Pipewright"
+        return mode, (f"v{version} of {name} has no model.approved event: nobody approved it (it became the default "
+                      "by itself under promote_model auto, or outside Pipewright)")
     return mode, None
 
 

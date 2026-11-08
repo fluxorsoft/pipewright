@@ -197,7 +197,7 @@ def test_verify_compares_what_is_on_file_with_the_approval(monkeypatch):
 def test_a_default_nobody_approved_here_is_a_problem(monkeypatch):
     monkeypatch.setattr(integrity, "approval_events", lambda *a: [])
     check = integrity.verify(store(), env(), "churn", "4", FOLDER, None)
-    assert "became the default outside Pipewright" in check.problems[0]
+    assert "nobody approved it here" in check.problems[0] and "promote_model auto" in check.problems[0]
     monkeypatch.setattr(integrity, "approval_events", lambda *a: None)            # no event log at all
     check = integrity.verify(store(), env(), "churn", "4", FOLDER, None)
     assert check.problems == [] and "keeps no event log" in check.notes[0]
@@ -422,7 +422,7 @@ def test_scoring_with_an_unapproved_default_is_flagged(monkeypatch):
     manifest = {"policies": {"integrity": {"inference": "refuse"}}, "observability": {"evidence_dataset": "ev"}}
     monkeypatch.setattr(integrity, "approval_events", lambda *a: [])
     mode, problem = integrity.inference_check(_registry(), manifest, CONTRACT)
-    assert mode == "refuse" and "became the default outside Pipewright" in problem
+    assert mode == "refuse" and "nobody approved it" in problem and "outside Pipewright" in problem
     mode, problem = integrity.inference_check(_registry({"approval": "pending"}), manifest, CONTRACT)
     assert "nobody has approved it" in problem
     monkeypatch.setattr(integrity, "approval_events", lambda *a: [{"at": "x", "by": "a@x"}])
