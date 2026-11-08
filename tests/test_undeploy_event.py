@@ -29,3 +29,15 @@ def test_undeploy_emits_one_event_per_version(monkeypatch):
     got = [(e["event_type"], e["data"]["version"]) for e in sent]
     assert got == [("model.undeployed", "10"), ("model.undeployed", "11")]
     assert all("approval" in e["data"] for e in sent)          # a decision: how it was approved is recorded
+
+
+def test_a_release_records_the_person_behind_ci(monkeypatch):
+    """FR-113: release.live carries the approval (GitHub actor and run) like every other decision."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_ACTOR", "someone")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.delenv("PIPEWRIGHT_APPROVAL", raising=False)
+    e = events.event("release.live", "uc", "test", "t", "r1", None, by="ci@example.com")
+    assert e["data"]["approval"]["via"] == "github" and e["data"]["approval"]["actor"] == "someone"

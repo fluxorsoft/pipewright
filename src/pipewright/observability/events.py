@@ -35,8 +35,11 @@ def _lost(event_type: str, why: str) -> None:
 
 
 # Human decisions (FR-56, D-121, D-122): each records how it was approved next to the identity that acted.
-DECISIONS = ("model.approved", "model.deployed", "model.undeployed", "model.promoted", "release.promoted",
-             "release.rolled_back", "retrain.approval", "retrain.approved", "retrain.declined", "retrain.snoozed")
+# release.live (Pipewright 1.4.2, FR-113): a CI release's event named the CI account only; the person behind it was
+# on the release pointer (`pipewright status`) but not on the event lineage and the fleet report read.
+DECISIONS = ("model.approved", "model.deployed", "model.undeployed", "model.promoted", "release.live",
+             "release.promoted", "release.rolled_back", "retrain.approval", "retrain.approved", "retrain.declined",
+             "retrain.snoozed")
 
 
 def approval() -> dict:

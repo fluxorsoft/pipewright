@@ -68,6 +68,9 @@ and [docs/SERVING.md](docs/SERVING.md).
   `deploy-model --undeploy`, a promote, a replace or an abandoned canary, as a decision (who, and how it was
   approved). Lineage, the fleet report and the evidence read it, but nothing emitted it, so a model's story ended at
   "deployed".
+- **A CI release names the person behind it** (FR-113): `release.live` records how it was approved (the GitHub
+  actor and run), like every other decision. The release pointer had it (`pipewright status`), but the event that
+  lineage and the fleet report read named only the CI account.
 
 ### Fixed (found re-running the book on 1.4.2)
 
