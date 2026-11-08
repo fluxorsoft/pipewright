@@ -434,8 +434,15 @@ def check_source(gcp, src_env: Environment, dst_env: Environment, usecase: str, 
 
 def enforce(check: Check, env: Environment, what: str, log=print,
             reason: str = "what is on file is not what was approved",
-            remedy: str = "re-approve the version after review (`pipewright model approve`)") -> None:
+            remedy: str | None = None) -> None:
     """Refuse (or, under policies.integrity.mode warn, say) what a check found."""
+    if remedy is None:
+        # 1.4.2: a changed file is put back first; re-approving it would bless the change (found writing the
+        # book's Chapter 21, where the hint offered only re-approval or warn).
+        changed = any("changed after the approval" in p or "missing" in p for p in check.problems)
+        remedy = ("restore the approved files (`pipewright model restore-files`, a dry run first, then --confirm), or "
+                  "re-approve the version after review (`pipewright model approve`)" if changed
+                  else "re-approve the version after review (`pipewright model approve`)")
     for note in check.notes:
         log(f"integrity: {note}")
     if not check.problems:
