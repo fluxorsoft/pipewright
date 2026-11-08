@@ -1046,10 +1046,10 @@ def cmd_run(args) -> int:
     release = launch.live_release(env, args.usecase)
     result = launch.run(env, {**payload, **({"release": release} if release else {})})
     if result.get("status") == "requested":
-        print(f"requested: {result['usecase']} {result['pipeline']} over Pub/Sub (run key {result['run_key']}, "
+        print(f"requested: {result['usecase']} {result['pipeline'] or 'training'} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")
         return 0
-    print(f"{result.get('status')}: {result.get('usecase')} {result.get('pipeline', '')} job {result.get('job_id')}"
+    print(f"{result.get('status')}: {result.get('usecase')} {result.get('pipeline') or 'training'} job {result.get('job_id')}"
           + (f" (release {result['release']})" if result.get("release") else ""))
     return 0
 
