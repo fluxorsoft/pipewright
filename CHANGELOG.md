@@ -60,6 +60,10 @@ and [docs/SERVING.md](docs/SERVING.md).
 - **Sync a Bigtable online store now** (FR-110): `pipewright features sync` starts a sync of each feature view of
   the tenant's Bigtable store and waits for it (it refused this store before). A new view had no sync until its
   06:00 schedule, so it served nothing, and `doctor` said "start a sync" without saying how; it now names the command.
+- **Which cut-offs a performance value measures** (FR-111): with `labels.time_column`, the monitoring row records
+  `performance_cutoffs` (outcomes per cut-off) and a note. A run scoring a month whose outcomes are not known yet
+  reports the version's performance on the earlier months it scored, which read as that month's. In the churn example's
+  monitor step (copy it into a use case made from an earlier example) and in BigQuery ML monitoring.
 
 ### Fixed (found re-running the book on 1.4.2)
 

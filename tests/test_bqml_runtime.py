@@ -175,6 +175,12 @@ def test_performance_joins_this_versions_latest_scores_with_outcomes(cfg):
     assert ("JOIN `p.churn.outcomes` AS lb ON lb.`customer_id` = pr.`customer_id` AND DATE(lb.`scored_for`) = "
             "DATE(pr.`snapshot_date`)") in sql
     assert "PARTITION BY pr.`customer_id`, pr.`snapshot_date` ORDER BY pr.scored_at DESC" in sql
+    # 1.4.2: which cut-offs the value measures, so a run for a month without outcomes is not read as that month's
+    counts = rt.performance_cutoffs_sql(cfg, "p", "7")
+    assert "CAST(DATE(pr.`snapshot_date`) AS STRING) AS cutoff, COUNT(*) AS n" in counts
+    assert "DATE(lb.`scored_for`) = DATE(pr.`snapshot_date`)" in counts and "model_version_id = '7'" in counts
+    del cfg["monitoring"]["performance"]["labels"]["time_column"]
+    assert rt.performance_cutoffs_sql(cfg, "p", "7") is None
 
 
 def test_lower_is_better_matches_the_core():

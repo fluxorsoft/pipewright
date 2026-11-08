@@ -790,6 +790,25 @@ def performance_sql(ml_config: dict, project: str, model_version: str, out_table
                   labels_table=f"{project}.{dataset}.{source['table']}", model_version=str(int(model_version)))
 
 
+def performance_cutoffs_sql(ml_config: dict, project: str, model_version: str) -> str | None:
+    """Pipewright 1.4.2: outcomes per cut-off that the performance value measures, with labels.time_column and
+    bqml.performance_cutoff; None without them. A run scoring a month whose outcomes are not known yet still reports
+    the version's performance on earlier months, so the monitoring row says which (found re-running the book)."""
+    data, perf = ml_config["data"], ml_config["monitoring"]["performance"]
+    source, cutoff = perf["labels"], ml_config["bqml"].get("performance_cutoff")
+    if not (cutoff and source.get("time_column")):
+        return None
+    dataset = ml_config["platform"]["bigquery_dataset"]
+    key = q(source["key"])
+    return (f"SELECT CAST(DATE(pr.{q(cutoff)}) AS STRING) AS cutoff, COUNT(*) AS n FROM ("
+            f"SELECT pr.* FROM `{project}.{dataset}.{ml_config['inference']['output_table']}` AS pr "
+            f"JOIN `{project}.{dataset}.{source['table']}` AS lb "
+            f"ON lb.{key} = pr.{key} AND DATE(lb.{q(source['time_column'])}) = DATE(pr.{q(cutoff)}) "
+            f"WHERE pr.model_version_id = '{int(model_version)}' "
+            f"QUALIFY ROW_NUMBER() OVER (PARTITION BY pr.{key}, pr.{q(cutoff)} ORDER BY pr.scored_at DESC) = 1) AS pr "
+            f"GROUP BY cutoff ORDER BY cutoff")
+
+
 def performance_trigger(value: float | None, metric: str, minimum: float | None) -> bool:
     """Whether the value is worse than the limit (monitoring.performance.min: a minimum, or a maximum for errors)."""
     if value is None or minimum is None:

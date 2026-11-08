@@ -64,7 +64,8 @@ def check_batch(
             # Pipewright 1.2.0 (FR-78): each outcome meets the score made for its cut-off, never a later score that
             # already knows the outcome. Outcomes of cut-offs this version has not scored are not counted.
             sql = f"""
-            SELECT pr.churn_probability AS prob, CAST(lb.{labels['label']} AS INT64) AS outcome
+            SELECT pr.churn_probability AS prob, CAST(lb.{labels['label']} AS INT64) AS outcome,
+                   CAST(pr.scored_for AS STRING) AS cutoff
             FROM `{project}.{bq_dataset}.{ml_config['inference']['output_table']}` AS pr
             JOIN `{project}.{bq_dataset}.{labels['table']}` AS lb
               ON lb.{key} = pr.{key} AND DATE(lb.{when}) = pr.scored_for
@@ -90,6 +91,13 @@ def check_batch(
             query_parameters=[bigquery.ScalarQueryParameter("version", "STRING", model_version)]))
         labelled = job.to_dataframe()
         result["labelled_rows"] = len(labelled)
+        if "cutoff" in labelled:
+            # Pipewright 1.4.2: which cut-offs the value measures. A run scoring a month whose outcomes are not known
+            # yet still reports the version's performance on the earlier months it scored; say which, so the row is
+            # not read as this month's (found re-running the book's Chapter 14).
+            result["performance_cutoffs"] = {str(k): int(v) for k, v in labelled["cutoff"].value_counts().sort_index().items()}
+            result["notes"].append("performance measured on cut-offs " + ", ".join(
+                f"{k} ({v} outcomes)" for k, v in result["performance_cutoffs"].items()))
         if len(labelled) >= 50:
             value = compute_metrics(labelled["outcome"], labelled["prob"], ml_config["inference"]["decision_threshold"],
                                     [perf["metric"]])[perf["metric"]]

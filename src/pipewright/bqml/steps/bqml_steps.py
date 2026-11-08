@@ -424,6 +424,12 @@ def bqml_monitor(project: str, rows_table: str, scored_table: str, rows: int, mo
         jobs.run(rt.performance_sql(ml_config, project, model_version, labelled, jobs.labels), "labelled predictions")
         row = (jobs.run(rt.metrics_sql(ml_config, labelled), "performance") or [{}])[0]
         result["labelled_rows"] = int(row.get("row_count") or 0)
+        counts_sql = rt.performance_cutoffs_sql(ml_config, project, model_version)
+        if counts_sql and result["labelled_rows"]:
+            result["performance_cutoffs"] = {str(r["cutoff"]): int(r["n"])
+                                             for r in jobs.run(counts_sql, "outcomes per cut-off") or []}
+            result["notes"].append("performance measured on cut-offs " + ", ".join(
+                f"{k} ({v} outcomes)" for k, v in result["performance_cutoffs"].items()))
         if result["labelled_rows"] >= rt.MIN_LABELLED:
             value = rt.shape_metrics(row, [perf["metric"]])[perf["metric"]]
             result["performance"] = {perf["metric"]: value}
