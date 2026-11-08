@@ -223,11 +223,9 @@ def test_a_champion_whose_model_is_gone_is_named():
 def test_the_champion_is_measured_only_when_the_use_case_compares():
     """Found re-running the book's Chapter 8 on 1.4.2: with evaluation.champion off, a registry default whose
     BigQuery model was gone still failed every run (the step measured it anyway)."""
-    import inspect
-
     from pipewright.bqml.steps import bqml_steps
 
-    src = inspect.getsource(bqml_steps.bqml_evaluate)
+    src = open(bqml_steps.__file__, encoding="utf-8").read()
     assert 'elif champion_model and ml_config["evaluation"]["champion"]["enabled"]:' in src
 
 
