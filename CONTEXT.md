@@ -1878,6 +1878,28 @@ and gave the untouched models about a minute of 503s (min 1: 557 of 9,980 calls 
 of 6,782), and the gateway retrying 503s brought one change to 1 failure in 4,629 calls. Billing of a pool not yet
 confirmed (no billing export).
 
+**Settled after the spike (user, 2026-11-08):** a private endpoint behind the gateway is the Enterprise default;
+production pools keep min 2, changes run one at a time (a lock per pool) and are announced, and gateway retries are on
+by default; one endpoint type per pool; no container variables on pool models (settings in `serving.json`). Pools
+only when a team asks for co-hosting; the default stays the dedicated deployment. The pool image rule applies only
+with `serving.pool` (custom serving images stay on dedicated machines; KServe on GKE named as the alternative).
+**The Pipewright custom solution (user, 2026-11-08):** `lookup.mode: gateway` also with `type: http`, the gateway in
+front of a team's own lookup service inside the network.
+
+**Build and live test (2026-11-08, `docs/evidence/fr92-105-106-live-test/`):** built as settled: `serving/`
+(endpoints, pools, prices), the gateway (`online/gateway.py`, `POST /predict` on the lookup service, Cloud SQL or the
+team's store), `pipewright serving pools plan | apply | list`, `doctor`'s serving section, the starter's
+`serving.yaml`, Enterprise's `spec.serving`, Fleet View (pools, private endpoints, gateway callers), the serving
+example (every key and toggle), `docs/SERVING.md`, the GKE guideline (`examples/gke-lookup/`). Live in `ent` (secured,
+lean, GKE for the guideline): 19 scenarios passed, 11 findings fixed: Terraform optional maps; a private endpoint's
+address exists only with its first deployed model (deploy-model writes the DNS record, the gateway reads the address);
+the SDK's `Endpoint.list` leaves out private endpoints; endpoint IAM is v1beta1 only; a private endpoint checks
+predict on the project (a predict-only custom role for each tenant's lookup identity, in Terraform); Enterprise's
+deny-all egress needed the private endpoints' subnet; metadata access tokens were reused past their expiry (401
+after about 30 minutes; also FR-104's lookup service and lookup client); the gateway does not retry a cold team
+store (documented); log and message fixes. Under load across two pool changes, through the gateway: 17 of 13,059
+calls failed (0.13%). Not applied live: the starter's `serving.yaml` (first item of the QA round on pw-ebook).
+
 **Rules:** additive and off by default; costs shown before a toggle is switched on; names, digests and counts in every
 message and record, never a feature value. Numbered FR-105 (co-hosting) and FR-106 (the gateway), phase 9 with FR-92
 and FR-104.
