@@ -43,12 +43,22 @@ def endpoint_name(uc: ResolvedUseCase) -> str:
     return f"{uc.name}-endpoint"
 
 
+def list_endpoints(ai, name: str) -> list:
+    """The endpoints with this display name. The SDK's Endpoint.list leaves out private (Private Service Connect)
+    endpoints, which PrivateEndpoint.list returns (found live, FR-92)."""
+    found = ai.Endpoint.list(filter=f'display_name="{name}"')
+    if found:
+        return found
+    private = getattr(ai, "PrivateEndpoint", None)
+    return private.list(filter=f'display_name="{name}"') if private else []
+
+
 def _endpoint_for(ai, uc: ResolvedUseCase, env: Environment, create: bool):
     """The use case's endpoint. One the platform's Terraform owns (FR-92) is never created here: a missing one is
     refused, so a public endpoint never stands in for a private one."""
     from pipewright.serving import endpoints as tf_endpoints
 
-    found = ai.Endpoint.list(filter=f'display_name="{endpoint_name(uc)}"')
+    found = list_endpoints(ai, endpoint_name(uc))
     if found:
         return found[0]
     if tf_endpoints.declared(env, uc.name):
@@ -141,7 +151,7 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     if not models:
         raise ConfigError(f"no model {uc.model['name']!r} in the registry yet: run the pipeline first")
     default = ai.Model(model_name=f"{models[0].resource_name}@default")
-    endpoints = ai.Endpoint.list(filter=f'display_name="{endpoint_name(uc)}"')
+    endpoints = list_endpoints(ai, endpoint_name(uc))
     deployed = endpoints[0].list_models() if endpoints else []
     current = [d for d in deployed if d.model == default.resource_name and d.model_version_id == default.version_id]
     serving = uc.model["serving"]
@@ -411,7 +421,7 @@ def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: in
 
 def _canary_state(uc: ResolvedUseCase, env: Environment, creds):
     ai = _aiplatform(env, creds)
-    endpoints = ai.Endpoint.list(filter=f'display_name="{endpoint_name(uc)}"')
+    endpoints = list_endpoints(ai, endpoint_name(uc))
     if not endpoints:
         raise ConfigError(f"{endpoint_name(uc)} does not exist: nothing to promote")
     endpoint = endpoints[0]
@@ -456,7 +466,7 @@ def undeploy_canary(uc: ResolvedUseCase, env: Environment, creds, log=print) -> 
 
 def undeploy(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     ai = _aiplatform(env, creds)
-    endpoints = ai.Endpoint.list(filter=f'display_name="{endpoint_name(uc)}"')
+    endpoints = list_endpoints(ai, endpoint_name(uc))
     if not endpoints:
         log(f"{endpoint_name(uc)} does not exist")
         return

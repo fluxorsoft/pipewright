@@ -167,7 +167,7 @@ class GcpBackend:
 
         uc, env, creds = self._prod()
         ai = deploy._aiplatform(env, creds)
-        endpoints = ai.Endpoint.list(filter=f'display_name="{deploy.endpoint_name(uc)}"')
+        endpoints = deploy.list_endpoints(ai, deploy.endpoint_name(uc))
         if not endpoints or not endpoints[0].list_models():
             raise ConfigError(f"retraining.loop.canary: {deploy.endpoint_name(uc)} serves no version in "
                               f"{env.name}, so there is nothing to compare a canary with: deploy the current version "

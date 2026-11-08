@@ -124,3 +124,13 @@ def test_deploy_writes_a_private_endpoints_name_once_it_has_an_address():
     assert endpoints.publish_dns(Dns("10.1.1.1", write_status=403), e, "churn", RES, log=said.append) is None
     assert "dns.resourceRecordSets" in said[0]
     assert endpoints.publish_dns(Dns("10.1.1.1"), env({"churn": {"private": True}}), "churn", RES) is None
+
+
+def test_private_endpoints_are_found_where_the_sdk_lists_them():
+    """Found live: the SDK's Endpoint.list leaves out Private Service Connect endpoints."""
+    ai = SimpleNamespace(Endpoint=SimpleNamespace(list=lambda filter: []),
+                         PrivateEndpoint=SimpleNamespace(list=lambda filter: ["psc"]))
+    assert deploy.list_endpoints(ai, "churn-endpoint") == ["psc"]
+    ai = SimpleNamespace(Endpoint=SimpleNamespace(list=lambda filter: ["public"]),
+                         PrivateEndpoint=SimpleNamespace(list=lambda filter: ["psc"]))
+    assert deploy.list_endpoints(ai, "churn-endpoint") == ["public"]
