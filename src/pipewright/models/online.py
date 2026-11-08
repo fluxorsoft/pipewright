@@ -70,8 +70,16 @@ def packaged_lookup(env_vars: dict, serving_json: dict | None) -> tuple[dict | N
 
 
 def check(expected: dict | None, env_vars: dict, serving_json: dict | None, environment: str) -> str | None:
-    """A problem when the model would read another project's online store than the environment's, else None."""
+    """A problem when the model would read another project's online store than the environment's, else None.
+    Without online features expected (model.serving.features request), a problem when the model carries a lookup
+    anyway (Pipewright 1.4.2, FR-114): it would read each caller's feature values as entity IDs and answer an error
+    for every one (found re-running the book's Chapter 19 with a version trained online in Chapter 13)."""
     if not expected:
+        got, source = packaged_lookup(env_vars, serving_json)
+        if got and got.get("mode") != "gateway":
+            return (f"the model looks its features up in an online store by ID ({source}), but "
+                    f"model.serving.features is request in {environment}: it would read the callers' feature values "
+                    "as IDs. Deploy a version trained with features request, or set model.serving.features online")
         return None
     if expected.get("type"):                  # FR-104: bigquery, cloudsql, http
         got, source = packaged_lookup(env_vars, serving_json)

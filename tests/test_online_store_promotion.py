@@ -45,8 +45,10 @@ def test_a_model_without_any_lookup_is_refused_when_online_features_are_on():
     assert "no online lookup" in online.check(lookup(PROD_STORE), {}, None, "prod")
 
 
-def test_request_mode_use_cases_are_not_checked():
-    assert online.check(None, {}, {"online_features": lookup(TEST_STORE)}, "prod") is None
+def test_request_mode_use_cases_refuse_a_model_that_looks_features_up():
+    # 1.2.0 left request mode unchecked; FR-114 (1.4.2): the handler would read the callers' values as IDs
+    assert "features request" in online.check(None, {}, {"online_features": lookup(TEST_STORE)}, "prod")
+    assert online.check(None, {}, {"features": ["a"]}, "prod") is None
 
 
 def test_promotion_gives_the_model_the_destinations_store(monkeypatch):

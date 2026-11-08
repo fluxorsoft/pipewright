@@ -41,3 +41,15 @@ def test_a_release_records_the_person_behind_ci(monkeypatch):
     monkeypatch.delenv("PIPEWRIGHT_APPROVAL", raising=False)
     e = events.event("release.live", "uc", "test", "t", "r1", None, by="ci@example.com")
     assert e["data"]["approval"]["via"] == "github" and e["data"]["approval"]["actor"] == "someone"
+
+
+def test_a_model_trained_online_is_refused_where_callers_send_features():
+    """FR-114: model.serving.features request, but the model carries an online lookup: refused, not served wrongly."""
+    from pipewright.models import online
+
+    lookup = {"store": "projects/p/locations/r/featureOnlineStores/s", "views": []}
+    msg = online.check(None, {online.ENV_VAR: online.env_value(lookup)}, None, "test")
+    assert msg and "features up in an online store by ID" in msg and "features request" in msg
+    assert online.check(None, {}, {"online_features": lookup}, "test")              # from serving.json too
+    assert online.check(None, {}, None, "test") is None                              # a request-mode model
+    assert online.check(None, {}, {"online_features": {**lookup, "mode": "gateway"}}, "test") is None

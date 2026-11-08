@@ -93,7 +93,7 @@ def online_store_problem(uc: ResolvedUseCase, env: Environment, gcp, model) -> s
     """FR-76: with online features, the model must read this environment's online store, not the one of the
     environment it was trained or promoted from."""
     expected = uc.ml.get("online_features")
-    if not expected:
+    if not expected and (uc.model["serving"].get("target") or "vertex") != "vertex":
         return None
     from pipewright.models import online
 

@@ -71,6 +71,10 @@ and [docs/SERVING.md](docs/SERVING.md).
 - **A CI release names the person behind it** (FR-113): `release.live` records how it was approved (the GitHub
   actor and run), like every other decision. The release pointer had it (`pipewright status`), but the event that
   lineage and the fleet report read named only the CI account.
+- **A model trained online is not served to callers who send features** (FR-114): with
+  `model.serving.features: request`, `deploy-model` refuses a version that carries an online lookup. The serving
+  handler would read each caller's feature values as entity IDs and answer an error for every one; 1.2.0 checked only
+  the opposite case.
 
 ### Fixed (found re-running the book on 1.4.2)
 
