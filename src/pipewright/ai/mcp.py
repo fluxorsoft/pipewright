@@ -444,6 +444,12 @@ def build_app(server: Server, tools: tuple[str, ...] = TOOLS, **settings):
         f"Pipewright tools for environment {server.env.name}. Read and verify only: they never change Google Cloud. "
         "Rows of data are never returned. Propose changes as a pull request with review_bundle; never merge, "
         "release, approve or deploy."), **settings)
+    # The server's own version in the handshake, not the mcp library's (found re-running the book's Chapter 20:
+    # serverInfo said 1.30.0). FastMCP takes no version; its low-level server reports this field.
+    from pipewright import __version__
+
+    if hasattr(getattr(app, "_mcp_server", None), "version"):
+        app._mcp_server.version = __version__
 
     def safe(fn):
         def run(**kwargs):
