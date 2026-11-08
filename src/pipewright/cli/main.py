@@ -441,8 +441,7 @@ def cmd_model_list(args) -> int:
     from pipewright.models import registry
 
     uc, env = _one(args)
-    if args.json:                            # the Agent Platform SDK prints progress to stdout: keep it off the JSON
-        _quiet_agent_platform_sdk()
+    _quiet_agent_platform_sdk()              # its "Getting versions for ..." line (seen re-running the book on 1.4.2)
     with contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext():
         rows = registry.versions(uc, env, Gcp().session.credentials)
     if args.json:                            # Pipewright 1.2.0 (FR-86): stable field names
@@ -799,6 +798,7 @@ def cmd_model_approve(args) -> int:
     from pipewright.models import registry
 
     uc, env = _one(args)
+    _quiet_agent_platform_sdk()
     gcp = Gcp()
     registry.approve(uc, env, gcp.session.credentials, args.version, gcp.identity(), args.approve)
     return 0
