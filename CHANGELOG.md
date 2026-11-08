@@ -82,6 +82,9 @@ and [docs/SERVING.md](docs/SERVING.md).
 - **Lineage says how approved files are protected now** (FR-116): read from Cloud Storage (retention and holds),
   not only from the approval. A version approved before the lock was configured, then protected by the renewer or a
   deploy, showed no protection at all.
+- **Who changed an approved model file** (FR-117): lineage shows who wrote or deleted a changed model file after the
+  approval, from Cloud Storage Data Access audit logs, as it already did for the evaluation record. A refusal for a
+  changed file now says to restore it (`pipewright model restore-files`) before re-approving.
 
 ### Fixed (found re-running the book on 1.4.2)
 

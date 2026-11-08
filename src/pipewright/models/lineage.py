@@ -130,6 +130,16 @@ def check_integrity(gcp, env: Environment, uc: ResolvedUseCase, out: dict, resou
             from pipewright.models import protection
 
             out["integrity"]["protection"] = protection.current(gcp, check.approval["files"])
+            # 1.4.2: who wrote a changed or missing model file, from Data Access audit logs, as for the evaluation
+            # record (FR-95); a changed file showed only its name (found writing the book's Chapter 21)
+            touched = [p.split(":", 1)[0] for p in check.problems
+                       if "changed after the approval" in p or "now missing" in p]
+            approved_at = next((d.get("at") for d in reversed(out.get("decisions") or [])
+                                if d.get("event") == "model.approved"), None)
+            folder = (check.approval["files"].get("folder") or "").rstrip("/")
+            if touched and approved_at and folder:
+                out["integrity"]["written_by"] = {f: integrity.who_wrote(gcp, env, f"{folder}/{f}", approved_at)
+                                                  for f in touched[:5]}
         if not check.approval and check.problems and out.get("default"):
             out["integrity"]["made_default"] = integrity.who_made_default(gcp, env, resource, out["version"],
                                                                           out.get("created"))
@@ -352,6 +362,12 @@ def _render_integrity(info: dict, lines: list[str]) -> None:
     lines.append(f"  integrity {i.get('result')}" + (f": {i['problems']} problem(s)" if i.get("problems") else ""))
     for p in i.get("problems_found") or []:
         lines.append(f"           {p}")
+    for f, w in (i.get("written_by") or {}).items():
+        for e in (w.get("entries") or [])[:3]:
+            lines.append(f"           {f}: {e.get('method')} by {e.get('principal')} at {e.get('at')} "
+                         "(Data Access audit log)")
+        if not w.get("entries") and w.get("note"):
+            lines.append(f"           {f}: who wrote it: {w['note']}")
     for n in i.get("notes") or []:
         lines.append(f"           note: {n}")
     made = i.get("made_default")
