@@ -80,12 +80,7 @@ def test_the_launcher_makes_the_gateway_and_grants_only_what_it_needs():
     assert cfg["gateway"]["predict_url"] == f"https://europe-west2-aiplatform.googleapis.com/v1/{ENDPOINT}:predict"
     assert cfg["usecase"] == "churn-x" and cfg["host"] == "10.41.0.3"
     sets = [c for c in gcp.calls if c[1].endswith(":setIamPolicy")]
-    endpoint_set = next(c for c in sets if "/endpoints/" in c[1])
-    assert "/v1beta1/" in endpoint_set[1]                          # found live: v1 has no endpoint IAM
-    endpoint_policy = endpoint_set[2]["policy"]
-    assert endpoint_policy["bindings"] == [{"role": "roles/aiplatform.user",
-                                            "members": [
-                                                "serviceAccount:pwl-churn@acme-ml-dev.iam.gserviceaccount.com"]}]
+    assert not any("/endpoints/" in c[1] for c in sets)              # the platform grants predict (found live)
     service_policy = next(c for c in sets if "/services/" in c[1])[2]["policy"]
     assert service_policy["bindings"] == [{"role": "roles/run.invoker", "members": [CALLER]}]   # not the runner
 

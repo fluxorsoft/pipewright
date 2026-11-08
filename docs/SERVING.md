@@ -96,7 +96,7 @@ model:
 ```
 
 `deploy-model` then creates the endpoint first (the gateway calls it), then the lookup service with the gateway, and
-lets the gateway's identity predict on that one endpoint. The callers, not the endpoint, may invoke the service.
+the gateway's identity predicts with the platform's predict-only grant. The callers, not the endpoint, may invoke the service.
 "How to call it" points callers at the gateway:
 
 ```bash
@@ -226,7 +226,7 @@ busy model slows the others. `doctor` shows each model's share of its pool.
 
 | Who | Grant | Why |
 |---|---|---|
-| The gateway's identity (the tenant's lookup identity) | `aiplatform.user` on its one endpoint (resource IAM, set by the launcher) | calls the endpoint |
+| The gateway's identity (the tenant's lookup identity) | a custom role with only `aiplatform.endpoints.predict`, on the project (Terraform) | calls the endpoint. Found live: a private endpoint checks predict on the project, so a grant on the endpoint alone is refused; the gateway can therefore predict on any endpoint in the environment's project, and nothing else |
 | The gateway's callers | `run.invoker` on the use case's lookup service | call `/predict` |
 | An endpoint's callers (direct) | `aiplatform.user` on that endpoint (Terraform, `callers`) | predict without the gateway |
 | CI/CD | create, patch and get deployment resource pools; write the pool's lock under `serving/pools/` in the artifacts bucket | `serving pools apply`, deploys onto pools |

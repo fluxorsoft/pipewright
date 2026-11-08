@@ -164,30 +164,6 @@ def gateway_target(contract, manifest: dict, online: dict, gcp) -> dict:
             "region": region}
 
 
-def allow_gateway(gcp, region: str, endpoint: str, identity: str) -> None:
-    """The gateway's identity may predict on that one endpoint (resource IAM on the endpoint). Endpoint IAM is on
-    the v1beta1 API only (found live: v1 answers 404)."""
-    api = f"https://{region}-aiplatform.googleapis.com/v1beta1/{endpoint}"
-    pol = gcp.post(f"{api}:getIamPolicy", {})
-    if not pol.ok:
-        raise ConfigError(f"cannot read the IAM policy of {endpoint.rsplit('/', 1)[-1]} (HTTP {pol.status}): the "
-                          "launcher needs aiplatform.endpoints.getIamPolicy and setIamPolicy")
-    policy = pol.body or {}
-    member, role = f"serviceAccount:{identity}", "roles/aiplatform.user"
-    bindings = policy.get("bindings") or []
-    if any(b.get("role") == role and member in (b.get("members") or []) for b in bindings):
-        return
-    others = [b for b in bindings if b.get("role") != role]
-    mine = next((b for b in bindings if b.get("role") == role), {"role": role, "members": []})
-    bindings = [*others, {"role": role, "members": sorted({*mine.get("members", []), member})}]
-    r = gcp.post(f"{api}:setIamPolicy", {"policy": {**policy, "bindings": bindings}})
-    if not r.ok:
-        raise ConfigError(f"the gateway's identity {identity} may not call endpoint {endpoint.rsplit('/', 1)[-1]} "
-                          f"and the launcher could not allow it (HTTP {r.status}). An endpoint the platform's "
-                          "Terraform creates gets the grant there (serving.endpoints); otherwise grant it "
-                          "roles/aiplatform.user on that endpoint")
-
-
 def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, sleep=time.sleep) -> dict:
     online = online_of(contract)
     if not has_service(online):
@@ -202,8 +178,8 @@ def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, slee
                               "cloudsql.instances.get (roles/cloudsql.viewer)")
     gateway = gateway_target(contract, manifest, online, gcp) if online.get("mode") == "gateway" else None
     spec = service_spec(contract, manifest, online, ca, gateway)
-    if gateway:
-        allow_gateway(gcp, region, gateway["endpoint"], spec["template"]["serviceAccount"])
+    # The gateway's identity predicts with the platform's grant (a predict-only role on the project, in Terraform):
+    # found live, a private endpoint checks predict on the project, so an endpoint-level grant is refused.
     base = f"{RUN}/projects/{project}/locations/{region}/services"
     name = online["service"]
     current = gcp.get(f"{base}/{name}")
