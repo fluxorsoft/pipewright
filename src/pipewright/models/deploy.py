@@ -266,8 +266,9 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     endpoint = existing or _endpoint_for(ai, uc, env, create=True)
     previous = endpoint.list_models()
     share = int(uc.model["serving"].get("canary_percent") or 10) if canary and previous else 100
-    log(f"deploying {p.model} v{p.version} to {p.endpoint} on {p.machine} with {share}% of traffic "
-        "(takes about 10-20 minutes)")
+    if not p.pool:                         # a pool deploy says its own line (the pool sets the machines)
+        log(f"deploying {p.model} v{p.version} to {p.endpoint} on {p.machine} with {share}% of traffic "
+            "(takes about 10-20 minutes)")
     # Online features (FR-51): the endpoint reads the tenant's feature views, so it runs as the tenant's runner.
     identity = uc.resources["runner_service_account"] if uc.ml.get("online_features") else None
     serving = uc.model["serving"]
