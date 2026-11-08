@@ -401,6 +401,44 @@ def connector(env, gcp, online: dict):
     return connect
 
 
+def sync_bigtable_views(online: dict, gcp, log=print, wait_s: int = 1800, sleep=time.sleep) -> list[dict]:
+    """FR-110 (Pipewright 1.4.2): starts a sync of each feature view of the tenant's Bigtable online store and waits
+    for it. A new view had no sync until its schedule (06:00) in 1.4.2's re-run of the book's Chapter 13, so the
+    store served nothing, and `doctor` said "start a sync" without a way to. Returns one entry per view."""
+    from pipewright.gcp.session import error_text
+
+    region = online["store"].split("/")[3]
+    api = f"https://{region}-aiplatform.googleapis.com/v1"
+    out = []
+    for view in online.get("views") or []:
+        name = f"{online['store']}/featureViews/{view['view']}"
+        r = gcp.post(f"{api}/{name}:sync", {})
+        if not r.ok:
+            raise ConfigError(f"view {view['view']}: the sync did not start: {error_text(r)}")
+        sync_name = r.body["featureViewSync"]
+        log(f"view {view['view']}: sync {sync_name.rsplit('/', 1)[-1]} started")
+        waited, got = 0, {}
+        while waited <= wait_s:
+            g = gcp.get(f"{api}/{sync_name}")
+            got = g.body if g.ok else {}
+            if got.get("finalStatus") is not None or (got.get("runTime") or {}).get("endTime"):
+                break
+            sleep(10)
+            waited += 10
+        status = got.get("finalStatus") or {}
+        if status.get("code"):
+            raise ConfigError(f"view {view['view']}: the sync failed: {status.get('message', '')[:300]} (a first "
+                              "sync can fail while a new grant reaches every part of Google Cloud: try again in a "
+                              "minute)")
+        if not (got.get("runTime") or {}).get("endTime"):
+            raise ConfigError(f"view {view['view']}: the sync had not finished after {wait_s} s; doctor shows it "
+                              "once it has")
+        rows = (got.get("syncSummary") or {}).get("rowSynced")
+        log(f"view {view['view']}: synced{f' {rows} rows' if rows else ''}")
+        out.append({"view": view["view"], "sync": sync_name, "rows": int(rows) if rows else None})
+    return out
+
+
 def run(ml_config: dict, env, tenant: str, usecase: str, gcp, connect=None, now: datetime | None = None,
         log=print, release: str | None = None, load: bool = True) -> dict:
     """One sync of a use case's online store. `connect()` opens the Cloud SQL connection (IAM login) for cloudsql;

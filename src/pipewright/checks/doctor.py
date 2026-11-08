@@ -729,7 +729,8 @@ def _check_online_features(uc: ResolvedUseCase, gcp: Gcp, report: Report) -> Non
         finished = [f for f in finished if f]
         if not finished:
             report.add(s, Result(WARN, f"view {view['view']}", "no finished sync yet: it serves no values",
-                                 "wait for its sync schedule, or start a sync"))
+                                 f"wait for its sync schedule, or start one now: pipewright features sync "
+                                 f"--usecase {uc.name} --env <env>"))
             continue
         age = (now - datetime.fromisoformat(finished[0].replace("Z", "+00:00"))).total_seconds() / 3600
         report.add(s, Result(OK if age <= ONLINE_STALE_HOURS else WARN, f"view {view['view']}",

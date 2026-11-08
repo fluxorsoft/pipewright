@@ -57,6 +57,9 @@ and [docs/SERVING.md](docs/SERVING.md).
   After the traffic moves, the endpoint goes on routing requests to the old version for a few minutes; undeploying it
   at once answered every call with 404 for about three minutes (found re-running the book's canary). `0` undeploys
   at once, as before.
+- **Sync a Bigtable online store now** (FR-110): `pipewright features sync` starts a sync of each feature view of
+  the tenant's Bigtable store and waits for it (it refused this store before). A new view had no sync until its
+  06:00 schedule, so it served nothing, and `doctor` said "start a sync" without saying how; it now names the command.
 
 ### Fixed (found re-running the book on 1.4.2)
 

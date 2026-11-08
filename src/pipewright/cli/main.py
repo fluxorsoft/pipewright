@@ -514,6 +514,12 @@ def cmd_features_sync(args, load: bool = True) -> int:
 
     gcp, ml, env, tenant, usecase, release_id = _online_source(args)
     online = ml.get("online_features") or {}
+    if load and online.get("store") and online.get("type", "bigtable") == "bigtable":
+        # FR-110: the tenant's Bigtable store (1.1) syncs itself on its schedule; this starts one now and waits
+        out = sync.sync_bigtable_views(online, gcp)
+        if args.json:
+            print(json.dumps(out, indent=2, default=str))
+        return 0
     if not load and not online.get("export"):
         from pipewright.online import config as online_config
 
@@ -1429,7 +1435,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_features_contract)
     for name, func, text in (
             ("sync", cmd_features_sync, "the latest feature values per entity into the use case's online store "
-                                        "(model.serving.online_store bigquery or cloudsql; FR-104)"),
+                                        "(bigquery or cloudsql, FR-104); for the Bigtable store, starts each view's sync and waits (FR-110)"),
             ("export", cmd_features_export, "the latest feature values per entity as Parquet with a manifest, for a "
                                             "store the team builds (FR-104)")):
         sp = fsub.add_parser(name, help=text)
