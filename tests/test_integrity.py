@@ -484,7 +484,7 @@ def test_the_remedy_is_said_but_never_counted_as_a_problem():
     with pytest.raises(ConfigError) as e:
         integrity.enforce(check, env, "v1 of m is not served", lambda *_: None)
     text = str(e.value)
-    assert "2 problems" in text and "\n  fix: re-approve the version after review" in text
+    assert "2 problems" in text and "\n  fix: restore the approved files (`pipewright model restore-files`" in text
     assert len(e.value.problems) == 2
 
 
