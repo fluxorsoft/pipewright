@@ -52,6 +52,11 @@ and [docs/SERVING.md](docs/SERVING.md).
   rows, and each segment's size in the evaluation record. Measured by default for clustering; it gates only when a
   use case sets a gate on it. Found re-running the book: Davies-Bouldin passed a model with segments of 5 and 3
   customers.
+- **No 404s after a promote** (FR-109): a version that no longer takes traffic keeps serving for
+  `model.serving.drain_seconds` (default 240) before it is undeployed, on a replace, a promote or an abandoned canary.
+  After the traffic moves, the endpoint goes on routing requests to the old version for a few minutes; undeploying it
+  at once answered every call with 404 for about three minutes (found re-running the book's canary). `0` undeploys
+  at once, as before.
 
 ### Fixed (found re-running the book on 1.4.2)
 

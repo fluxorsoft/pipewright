@@ -903,6 +903,7 @@
           }
         },
         "scale_to_zero": { "type": "boolean", "description": "with replicas.min 0: an idle endpoint runs no replica, and the first request after a quiet spell waits for one to start (Pipewright 1.2.0; Agent Platform preview)" },
+        "drain_seconds": { "type": "integer", "minimum": 0, "maximum": 3600, "description": "seconds a version that no longer takes traffic keeps serving before it is undeployed, on a replace, a promote or an abandoned canary (Pipewright 1.4.2, FR-109, default 240): the endpoint goes on routing to it for a few minutes. 0 undeploys at once, as before" },
         "fill_missing": { "type": "boolean", "description": "the endpoint fills an empty feature with its training median, as batch scoring does (Pipewright 1.2.0, default true); false: it answers an error naming the feature" },
         "pool": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$", "description": "model co-hosting (Pipewright 1.4.2, FR-105): deploy onto this shared pool of the environment (manifest serving.pools) instead of the use case's own machines. Only when the team wants co-hosting; leave it out to deploy as before" },
         "online_store": {

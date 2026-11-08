@@ -307,6 +307,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
             "rest. Watch it, then `pipewright deploy-model --promote` (or --undeploy-canary).")
         _deployed(uc, env, creds, p.version, share, p.integrity)
         return
+    _drain(uc, previous, log)
     for old in previous:
         log(f"undeploying previous {old.id} (v{old.model_version_id})")
         endpoint.undeploy(deployed_model_id=old.id)
@@ -437,6 +438,25 @@ def _canary_state(uc: ResolvedUseCase, env: Environment, creds):
     return endpoint, deployed, newest, traffic
 
 
+# FR-109 (Pipewright 1.4.2): after the traffic moves, Agent Platform's serving front end goes on sending requests to the
+# version it moved from for a while. Undeploying that version at once answered every call with 404 for about three
+# minutes (found re-running the book's Chapter 13 canary on 1.4.2). So a version leaves only after a drain.
+DRAIN_SECONDS = 240
+
+
+def _drain(uc: ResolvedUseCase, leaving: list, log=print, sleep=None) -> None:
+    """Waits model.serving.drain_seconds (default 240; 0 undeploys at once, as before 1.4.2) before versions that no
+    longer take traffic are undeployed, so requests still routed to them are answered."""
+    seconds = int((uc.model.get("serving") or {}).get("drain_seconds", DRAIN_SECONDS))
+    if not leaving or seconds <= 0:
+        return
+    import time
+
+    log(f"draining for {seconds}s: {', '.join(f'v{d.model_version_id}' for d in leaving)} no longer takes traffic, "
+        "but the endpoint may route requests to it for a few minutes")
+    (sleep or time.sleep)(seconds)
+
+
 def promote(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     """Moves all traffic to the newest deployed version and removes the others."""
     endpoint, deployed, newest, traffic = _canary_state(uc, env, creds)
@@ -446,6 +466,7 @@ def promote(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     if uc.model["serving"].get("pool"):        # FR-105: removing a version restarts the pool's machines
         _undeploy_on_pool(uc, env, creds, uc.model["serving"]["pool"], endpoint, old, log)
     else:
+        _drain(uc, old, log)
         for d in old:
             log(f"undeploying {d.id} (v{d.model_version_id})")
             endpoint.undeploy(deployed_model_id=d.id)
@@ -461,6 +482,7 @@ def undeploy_canary(uc: ResolvedUseCase, env: Environment, creds, log=print) -> 
     if uc.model["serving"].get("pool"):        # FR-105: a pool change, one at a time and announced
         _undeploy_on_pool(uc, env, creds, uc.model["serving"]["pool"], endpoint, [newest], log)
     else:
+        _drain(uc, [newest], log)
         endpoint.undeploy(deployed_model_id=newest.id)
     log(f"removed canary v{newest.model_version_id}; v{rest[0].model_version_id} serves all traffic")
 
