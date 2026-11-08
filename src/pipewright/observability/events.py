@@ -6,7 +6,7 @@ PagerDuty, Slack, BigQuery); Pipewright has no vendor code. Components emit the 
 pipewright_runtime.emit_event.
 
 Event types: run.submitted, run.duplicate, release.live, release.rolled_back, model.registered, model.approved,
-model.deployed, training.evaluated, monitoring.recorded, monitoring.alert, retrain.requested, data.erased, run.failed
+model.deployed, model.undeployed (1.4.2), training.evaluated, monitoring.recorded, monitoring.alert, retrain.requested, data.erased, run.failed
 (Pipewright 1.2.0: a run that ended failed or cancelled, from the launcher's tick); retrain
 decisions (pipewright.retraining): retrain.proposed, retrain.approval, retrain.approved, retrain.declined,
 retrain.snoozed, retrain.reopened, retrain.escalated, retrain.digest.
@@ -35,8 +35,8 @@ def _lost(event_type: str, why: str) -> None:
 
 
 # Human decisions (FR-56, D-121, D-122): each records how it was approved next to the identity that acted.
-DECISIONS = ("model.approved", "model.deployed", "model.promoted", "release.promoted", "release.rolled_back",
-             "retrain.approval", "retrain.approved", "retrain.declined", "retrain.snoozed")
+DECISIONS = ("model.approved", "model.deployed", "model.undeployed", "model.promoted", "release.promoted",
+             "release.rolled_back", "retrain.approval", "retrain.approved", "retrain.declined", "retrain.snoozed")
 
 
 def approval() -> dict:

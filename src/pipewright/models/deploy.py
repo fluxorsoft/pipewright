@@ -311,6 +311,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     for old in previous:
         log(f"undeploying previous {old.id} (v{old.model_version_id})")
         endpoint.undeploy(deployed_model_id=old.id)
+        _undeployed(uc, env, creds, old.model_version_id)
     log(f"live: {p.endpoint} serves {p.model} v{p.version}")
     _deployed(uc, env, creds, p.version, 100, p.integrity)
 
@@ -361,6 +362,7 @@ def _undeploy_on_pool(uc, env, creds, pool_name: str, endpoint, old: list, log=p
         for d in old:
             log(f"undeploying previous {d.id} (v{d.model_version_id})")
             endpoint.undeploy(deployed_model_id=d.id)
+            _undeployed(uc, env, creds, d.model_version_id)
 
     pools.change(Gcp(creds), env, pool_name,
                  f"undeploy {uc.name} " + ", ".join(f"v{d.model_version_id}" for d in old), run, log=log)
@@ -397,6 +399,21 @@ def _bqml_parity(uc: ResolvedUseCase, env: Environment, creds, p: DeployPlan, en
                                   f"(tolerance {serving.TOLERANCE})")
     raise ConfigError(f"v{p.version} of {p.model} was removed from {p.endpoint}: its scores do not match ML.PREDICT "
                       f"({why})" + ("; the previous version serves all traffic again" if previous else ""))
+
+
+def _undeployed(uc: ResolvedUseCase, env: Environment, creds, version) -> None:
+    """model.undeployed (Pipewright 1.4.2, FR-112): a version left the endpoint, on an undeploy, a promote, a replace
+    or an abandoned canary. Lineage, the fleet report and the evidence read it as a decision, but nothing emitted it,
+    so a model's story ended at "deployed" (found re-running the book's Chapter 17)."""
+    import io
+
+    from pipewright.gcp import Gcp
+    from pipewright.observability import events
+
+    gcp = Gcp(creds)
+    events.emit(events.event("model.undeployed", uc.name, env.name, uc.tenant, None, None, model=uc.model["name"],
+                             version=str(version), endpoint=endpoint_name(uc), by=gcp.identity()),
+                env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
 
 
 def _deployed(uc: ResolvedUseCase, env: Environment, creds, version, traffic: int, check=None) -> None:
@@ -471,6 +488,7 @@ def promote(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
         for d in old:
             log(f"undeploying {d.id} (v{d.model_version_id})")
             endpoint.undeploy(deployed_model_id=d.id)
+            _undeployed(uc, env, creds, d.model_version_id)
     log(f"live: {endpoint_name(uc)} serves {uc.model['name']} v{newest.model_version_id}")
     _deployed(uc, env, creds, newest.model_version_id, 100)
 
@@ -486,6 +504,7 @@ def undeploy_canary(uc: ResolvedUseCase, env: Environment, creds, log=print) -> 
     else:
         _drain(uc, [newest], log)
         endpoint.undeploy(deployed_model_id=newest.id)
+        _undeployed(uc, env, creds, newest.model_version_id)
     log(f"removed canary v{newest.model_version_id}; v{rest[0].model_version_id} serves all traffic")
 
 
@@ -495,7 +514,10 @@ def undeploy(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     if not endpoints:
         log(f"{endpoint_name(uc)} does not exist")
         return
+    leaving = [d.model_version_id for d in endpoints[0].list_models()]
     endpoints[0].undeploy_all()
+    for version in leaving:
+        _undeployed(uc, env, creds, version)
     from pipewright.serving import endpoints as tf_endpoints
     from pipewright.serving import prices
 

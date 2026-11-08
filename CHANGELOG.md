@@ -64,6 +64,10 @@ and [docs/SERVING.md](docs/SERVING.md).
   `performance_cutoffs` (outcomes per cut-off) and a note. A run scoring a month whose outcomes are not known yet
   reports the version's performance on the earlier months it scored, which read as that month's. In the churn example's
   monitor step (copy it into a use case made from an earlier example) and in BigQuery ML monitoring.
+- **Undeploys are recorded** (FR-112): `model.undeployed` is emitted for each version that leaves an endpoint, on
+  `deploy-model --undeploy`, a promote, a replace or an abandoned canary, as a decision (who, and how it was
+  approved). Lineage, the fleet report and the evidence read it, but nothing emitted it, so a model's story ended at
+  "deployed".
 
 ### Fixed (found re-running the book on 1.4.2)
 
