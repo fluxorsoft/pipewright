@@ -220,6 +220,17 @@ def test_a_champion_whose_model_is_gone_is_named():
     rt.require_champion(jobs, "p.d.m", "2", "churn-bqml-classifier")       # exists: nothing to say
 
 
+def test_the_champion_is_measured_only_when_the_use_case_compares():
+    """Found re-running the book's Chapter 8 on 1.4.2: with evaluation.champion off, a registry default whose
+    BigQuery model was gone still failed every run (the step measured it anyway)."""
+    import inspect
+
+    from pipewright.bqml.steps import bqml_steps
+
+    src = inspect.getsource(bqml_steps.bqml_evaluate)
+    assert 'elif champion_model and ml_config["evaluation"]["champion"]["enabled"]:' in src
+
+
 def test_a_champion_whose_labels_were_removed_is_named():
     """Found live in phase 6: ALTER MODEL outside Pipewright drops the registry labels; every later version failed
     the champion gate with no reason given."""

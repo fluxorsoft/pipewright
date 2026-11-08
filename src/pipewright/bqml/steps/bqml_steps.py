@@ -190,7 +190,9 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
                 got = rt.evaluate_forecast(jobs, ml_config, approved, "", rows_table, champion_table)
                 record["champion"] = {**got["metrics"], "_version": champion.get("versionId"), "_settings": approved}
                 champion_model = "ai_forecast"
-    elif champion_model:
+    elif champion_model and ml_config["evaluation"]["champion"]["enabled"]:
+        # Only when the use case compares with the champion (found re-running the book's Chapter 8 on 1.4.2: with
+        # evaluation.champion off, a champion whose BigQuery model was gone still failed every run).
         dataset = ml_config["platform"]["bigquery_dataset"]
         champion_ref = f"{project}.{dataset}.{champion_model}"
         rt.require_champion(jobs, champion_ref, champion.get("versionId"), section["registry_id"])
