@@ -268,3 +268,44 @@ def test_a_kserve_test_is_judged_by_the_routers_counts(monkeypatch):
     calm = [_line(65, "a"), _line(11, "a", treatment_calls=400, treatment_errors=1, treatment_ms=16000,
                                   control_calls=1600, control_errors=4, control_ms=64000)]
     assert watch.check_serving(Gcp(calm), MANIFEST, test, _section(), NOW)["breach"] is None
+
+
+class TimedGcp(Gcp):
+    """Reads log lines as Cloud Logging does: only those at or after the filter's timestamp."""
+
+    def post(self, url, body, **k):
+        import re
+
+        if url != watch.LOG_API:
+            return super().post(url, body, **k)
+        since = watch._dt(re.search(r'timestamp>="([^"]+)"', body["filter"]).group(1))
+        kept, self.logs = self.logs, [x for x in self.logs if watch._ts(x) >= since]
+        try:
+            return super().post(url, body, **k)
+        finally:
+            self.logs = kept
+
+
+def test_a_trip_seen_too_early_is_not_lost_by_the_next_tick(monkeypatch):
+    """Found in the battle test: the hourly tick saw a fresh trip, moved its mark past it, and no later tick saw it."""
+    fake, events = _setup(monkeypatch, _test(analysis_requested_at=NOW.isoformat()))
+    _metrics(monkeypatch, 0, 0)
+    trip_at = NOW + timedelta(minutes=3)
+    logs = [{**_line(-3, "a"), "event": "breaker_tripped"},
+            _line(65, "a"), _line(-2, "a", treatment_calls=400, treatment_errors=10)]
+    early = watch.tick(TimedGcp(logs), MANIFEST, [_contract(_section())], now=trip_at + timedelta(minutes=5))
+    assert early["tests"][0]["serving"]["breach"] is None
+    t = TestStore(None, "b").get("churn", "lapse-v7")
+    assert t["pending_trip"] and t["state"] == "running"
+    later = watch.tick(TimedGcp(logs), MANIFEST, [_contract(_section())], now=trip_at + timedelta(minutes=25))
+    assert "breaker tripped" in later["tests"][0]["serving"]["breach"]
+    t = TestStore(None, "b").get("churn", "lapse-v7")
+    assert t["state"] == "decision_required" and t["allocation"][-1]["treatment_bp"] == 0 and "pending_trip" not in t
+
+
+def test_errors_the_router_saw_count_when_monitoring_has_none(monkeypatch):
+    """Found in the battle test: an endpoint whose model is gone refuses calls without per-model errors."""
+    _metrics(monkeypatch, 0, 0)
+    counts = [_line(65, "a"), _line(11, "a", treatment_calls=400, treatment_errors=40)]
+    out = watch.check_serving(Gcp(counts), MANIFEST, _test(), _section(), NOW)
+    assert out["answered"] == 400 and out["errors"] == 40 and "40 error(s)" in out["breach"]

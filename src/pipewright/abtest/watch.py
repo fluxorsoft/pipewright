@@ -238,7 +238,12 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
     breaker = ((section.get("guardrails") or {}).get("technical") or {}).get("breaker") or {}
     limit = float(breaker.get("max_error_rate", 0.05))
     minimum = min(int(breaker.get("window", 200)), 20)
-    since = _dt(test.get("watched_at")) or _dt(test.get("started_at")) or start
+    # From an unconfirmed trip, else from the last look less the settling lag: a line becomes readable some seconds
+    # after its time, and a trip waits two lags before it is trusted (found in the battle test: an hourly tick saw a
+    # fresh trip, moved its mark past it, and every later tick missed it)
+    watched = _dt(test.get("watched_at"))
+    since = _dt(test.get("pending_trip")) or (watched - LAG if watched else None) or \
+        _dt(test.get("started_at")) or start
     trips = log_lines(gcp, project, test["name"], since, now, ("breaker_tripped",))
     counts = log_lines(gcp, project, test["name"], start - timedelta(minutes=3), end, ("counts",))
     sent, loss = router_calls(counts, start)
@@ -257,9 +262,14 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
             if endpoint else {}
     answered = sum(int(m.get("predictions") or 0) for m in metrics.values())
     errors = sum(int(m.get("errors") or 0) for m in metrics.values())
+    if not kserve:
+        # Calls an endpoint refuses before a model answers (its model gone, found in the battle test) are not in
+        # Monitoring's per-model errors: the routers saw them, so the larger of the two counts
+        answered = max(answered, sent["treatment_calls"])
+        errors = max(errors, sent["treatment_errors"])
     rate = errors / answered if answered else 0.0
     out = {"router": loss, "answered": answered, "errors": errors, "sent": sent, "breach": None, "bypassed": 0,
-           "window": [_z(start), _z(end)]}
+           "window": [_z(start), _z(end)], "trips": [_z(_ts(x)) for x in trips]}
     technical = (section.get("guardrails") or {}).get("technical") or {}
     compared = None
     if (control_endpoint or kserve) and answered >= int(technical.get("min_requests", 200)):
@@ -359,6 +369,10 @@ def _serving(gcp, manifest, contract, test, section, tests, refresh, now) -> dic
             router[k] = max(int(router.get(k) or 0), int(v or 0))      # once seen, a loss stays on the record
         t["router"] = router
         t["watched_at"] = _z(now)
+        if breach or not seen.get("trips"):
+            t.pop("pending_trip", None)
+        else:                                             # a trip not yet trusted: read from it next time
+            t["pending_trip"] = t.get("pending_trip") or min(seen["trips"])
         if breach:
             t["allocation"] = t["allocation"] + [{"at": _z(now), "treatment_bp": 0, "by": "pipewright",
                                                   "reason": f"technical guardrail: {breach}"}]
@@ -378,7 +392,8 @@ def _serving(gcp, manifest, contract, test, section, tests, refresh, now) -> dic
     if seen["bypassed"] and not int((test.get("router") or {}).get("bypassed") or 0):
         service.emit(tests.env, tests.uc, gcp, "ab_test.guardrail_breached", t, kind="integrity",
                      why=f"the treatment's endpoint answered {seen['bypassed']} call(s) the gateway did not send")
-    return {k: seen[k] for k in ("answered", "errors", "sent", "router", "bypassed", "breach", "window")}
+    return {k: seen.get(k) for k in ("answered", "errors", "sent", "router", "bypassed", "breach", "window",
+                                      "trips", "note")}
 
 
 def _z(d: datetime) -> str:
