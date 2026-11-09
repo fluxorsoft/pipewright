@@ -184,6 +184,11 @@ def apply_policy(t: dict, policy: dict, env_name: str, problems: list[str]) -> N
     required = list(dict.fromkeys([*(policy.get("required_approvers") or []),
                                    *t["decision"]["approvals"]["required"]]))
     t["decision"]["approvals"]["required"] = required
+    declared = {g.get("name") for g in (t.get("guardrails") or {}).get("business") or []}
+    missing = [g for g in policy.get("required_guardrails") or [] if g not in declared]
+    if missing and t.get("mode", "ab") == "ab":
+        problems.append(f"ab_test.guardrails.business: {env_name} requires {', '.join(missing)} on every test "
+                        "(policies.ab_test.required_guardrails): declare each with its metric")
 
 
 def resolved(ml: dict) -> dict | None:

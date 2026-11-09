@@ -103,6 +103,7 @@ class ABTests:
         treatment = str(section["arms"]["treatment"]["model_version"]).removeprefix("v")
         if treatment == default.version_id:
             raise ConfigError(f"v{treatment} is the default: the treatment must be another version")
+        overlaps = self._overlaps(section)
         release = launch.live_release(self.env, self.uc.name, self.gcp)
         record = registry.approve_for_test(self.uc, self.env, creds, treatment, section["name"], identity, approved,
                                            self.log)
@@ -116,6 +117,8 @@ class ABTests:
                                 "by": identity, "reason": "start"}],
                 "decision": {"required": list(section["decision"]["approvals"]["required"]), "approvals": []},
                 "history": []}
+        if overlaps:
+            test["overlaps"] = overlaps
         self._history(test, "start", identity)
         self.store.create(test)
         if self.online is not None:
@@ -138,6 +141,32 @@ class ABTests:
         self.log(f"started {test['name']}: v{treatment} against the default v{default.version_id}, "
                  f"{section['allocation']['treatment_bp'] / 100:g}% of units to the treatment (mode {section['mode']})")
         return test
+
+    def _overlaps(self, section: dict) -> list[dict]:
+        """Other use cases' active tests in this environment on the same unit (policies.ab_test.overlap): their
+        units would be in two tests at once, so neither result is clean. refuse stops the start; warn records them on
+        the test (Fleet View shows overlaps across environments too); allow (the default) does not look."""
+        mode = (((self.env.policies or {}).get("ab_test") or {}).get("overlap") or "allow")
+        if mode == "allow":
+            return []
+        from pipewright.abtest.store import ACTIVE
+
+        found = []
+        for other in self.store.usecases():
+            if other == self.uc.name:
+                continue
+            t = self.store.current(other)
+            if t and t.get("state") in ACTIVE and t.get("unit") == section["unit"]:
+                found.append({"usecase": other, "ab_test": t["name"], "unit": t["unit"], "state": t["state"]})
+        if found and mode == "refuse":
+            names = ", ".join(f"{o['ab_test']} ({o['usecase']})" for o in found)
+            raise ConfigError(f"{names} already test(s) units by {section['unit']} in {self.env.name}: a unit in two "
+                              "tests at once spoils both results (policies.ab_test.overlap: refuse); wait for it to "
+                              "end, or test on another unit")
+        for o in found:
+            self.log(f"warning: {o['ab_test']} ({o['usecase']}) also tests units by {o['unit']}: the results of "
+                     "both are affected (policies.ab_test.overlap: warn)")
+        return found
 
     # ------------------------------------------------------------------------------- allocation and state --
     def set_allocation(self, bp: int, reason: str, identity: str | None) -> dict:

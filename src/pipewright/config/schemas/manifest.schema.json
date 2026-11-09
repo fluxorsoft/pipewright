@@ -244,6 +244,15 @@
             "feed_exposures": {
               "type": "boolean",
               "description": "true lets ab_test.publish.exposures copy per-unit lines (pseudonymised) to the tenant's feed; default false"
+            },
+            "overlap": {
+              "enum": ["allow", "warn", "refuse"],
+              "description": "another use case's active test on the same unit at a test's start: allow (default), warn (recorded on the test), refuse"
+            },
+            "required_guardrails": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "business guardrails every A/B test must declare, by name (such as complaints)"
             }
           }
         },

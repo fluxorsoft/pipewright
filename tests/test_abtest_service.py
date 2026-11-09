@@ -116,7 +116,7 @@ def _svc(monkeypatch, record=None, **uc_kw):
                          resources={"bigquery_dataset": "ds"}, approvals={})
     for k, v in uc_kw.items():
         setattr(uc, k, v)
-    env = SimpleNamespace(name="prod", artifacts_bucket="b", project="p", region="r", security={},
+    env = SimpleNamespace(name="prod", artifacts_bucket="b", project="p", region="r", security={}, policies={},
                           observability={}, tenants={}, approver_groups={})
     s = svc.ABTests(uc, env, SimpleNamespace(), log=lambda m: None)
     if record:
@@ -170,3 +170,30 @@ def test_plan_sizes_the_test_and_warns_when_it_cannot_finish(monkeypatch):
     assert "give --baseline" in s.plan()["note"]
     p = s.plan(baseline=0.3, per_day=50)
     assert p["needed"]["treatment"] < p["needed"]["control"] and "beyond max_days" in p["warning"]
+
+
+# -- platform rules (phase C) ---------------------------------------------------------------------------------------
+
+def test_overlapping_tests_on_one_unit_are_refused_or_recorded(monkeypatch):
+    s = _svc(monkeypatch)
+    s.store.create({**_test(name="other-test"), "usecase": "upsell"})
+    s.store.create({**_test(name="by-account", unit="account_id"), "usecase": "fraud"})
+    s.env.policies = {}
+    assert s._overlaps(_section()) == []
+    s.env.policies = {"ab_test": {"overlap": "warn"}}
+    found = s._overlaps(_section())
+    assert [(o["usecase"], o["ab_test"]) for o in found] == [("upsell", "other-test")]
+    s.env.policies = {"ab_test": {"overlap": "refuse"}}
+    with pytest.raises(ConfigError, match=r"other-test \(upsell\) already test"):
+        s._overlaps(_section())
+
+
+def test_the_platform_may_require_business_guardrails():
+    problems = []
+    t = _section()
+    abc.apply_policy(t, {"required_guardrails": ["complaints"]}, "prod", problems)
+    assert any("requires complaints" in p for p in problems)
+    t["guardrails"]["business"] = [{"name": "complaints"}]
+    problems = []
+    abc.apply_policy(t, {"required_guardrails": ["complaints"]}, "prod", problems)
+    assert problems == []
