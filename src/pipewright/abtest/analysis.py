@@ -220,7 +220,23 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
 
 def render(result: dict, test: dict) -> str:
     """A short text for `pipewright ab status` and the decision pack."""
-    lines = [f"test {test['name']} ({test.get('state')}), {result.get('age_days', 0)} days, status {result['status']}"]
+    lines = [f"test {test['name']} ({test.get('state')}), {result.get('age_days', result.get('days', 0))} days, "
+             f"status {result['status']}"]
+    if result.get("mode") == "shadow":
+        s = result.get("shadow") or {}
+
+        def num(v, f):
+            return format(v, f) if isinstance(v, (int, float)) else "n/a"
+
+        lines.append(f"  shadow: {s.get('calls', 0)} calls copied to the treatment, {s.get('failures', 0)} failed "
+                     f"({num(s.get('failure_rate'), '.2%')}); {s.get('compared', 0)} scores compared: mean absolute "
+                     f"difference {num(s.get('mean_abs_diff'), '.4f')}, agreement {num(s.get('agreement'), '.1%')}; "
+                     f"treatment latency p50 {num(s.get('ms_p50'), '.0f')} ms, p95 {num(s.get('ms_p95'), '.0f')} ms")
+        for b in result.get("blocked") or []:
+            lines.append(f"  BLOCKED: {b}")
+        for r in result.get("decision_reasons") or []:
+            lines.append(f"  decision: {r}")
+        return "\n".join(lines)
     sh = result.get("shares") or {}
     if sh.get("observed") is not None:
         lines.append(f"  shares: treatment {sh['observed']:.4f} (planned {sh['planned']:.4f}, expected "
@@ -255,11 +271,63 @@ def render(result: dict, test: dict) -> str:
     return "\n".join(lines)
 
 
+def shadow_sql(test: dict, project: str, dataset: str) -> str:
+    """The gateway's comparison lines of a shadow test (one per shadowed call), summed."""
+    name = test["name"].replace("'", "")
+    j = "jsonPayload"
+    n = f"CAST({j}.n AS FLOAT64)"
+    return (f"SELECT COUNT(*) AS calls, COUNTIF({j}.ok = FALSE) AS failures, COALESCE(SUM({n}), 0) AS compared, "
+            f"SAFE_DIVIDE(SUM(CAST({j}.mean_abs_diff AS FLOAT64) * {n}), SUM(IF({j}.mean_abs_diff IS NULL, 0, {n}))) "
+            f"AS mean_abs_diff, SAFE_DIVIDE(SUM(CAST({j}.agreement AS FLOAT64) * {n}), "
+            f"SUM(IF({j}.agreement IS NULL, 0, {n}))) AS agreement, "
+            f"APPROX_QUANTILES(CAST({j}.ms AS FLOAT64), 100)[SAFE_OFFSET(50)] AS ms_p50, "
+            f"APPROX_QUANTILES(CAST({j}.ms AS FLOAT64), 100)[SAFE_OFFSET(95)] AS ms_p95, MIN(timestamp) AS first_at "
+            f"FROM `{project}.{dataset}.{EXPOSURES_ONLINE}` WHERE {j}.ab_test = '{name}' AND {j}.event = 'shadow'")
+
+
+def evaluate_shadow(test: dict, section: dict, row: dict | None, now: datetime) -> dict:
+    """A shadow test's verdict: how often the treatment failed, how far its scores were from the control's and how
+    often they agreed, its latency; a decision is due after min_days (at most max_days). The treatment cannot win a
+    shadow: what follows is an A/B test or a normal deploy."""
+    row = row or {}
+    started = datetime.fromisoformat(test["started_at"].replace("Z", "+00:00"))
+    days = (now - started).total_seconds() / 86400
+    dur = section.get("duration") or {}
+    calls, failures = int(row.get("calls") or 0), int(row.get("failures") or 0)
+    rate = failures / calls if calls else 0.0
+    limit = float((((section.get("guardrails") or {}).get("technical") or {}).get("breaker") or {})
+                  .get("max_error_rate", 0.05))
+    shadow = {"calls": calls, "failures": failures, "failure_rate": round(rate, 6),
+              "compared": int(row.get("compared") or 0), "mean_abs_diff": row.get("mean_abs_diff"),
+              "agreement": row.get("agreement"), "ms_p50": row.get("ms_p50"), "ms_p95": row.get("ms_p95")}
+    guard = [{"name": "treatment_errors", "kind": "technical", "value": round(rate, 6), "limit": limit,
+              "breached": calls >= 20 and rate > limit}]
+    reasons = []
+    if days >= int(dur.get("max_days", 60)):
+        reasons.append(f"max_days ({dur.get('max_days', 60)}) is reached")
+    elif days >= int(dur.get("min_days", 14)) and shadow["compared"] > 0:
+        reasons.append(f"min_days ({dur.get('min_days', 14)}) is reached with {shadow['compared']} scores compared")
+    if guard[0]["breached"]:
+        reasons.append(f"the treatment failed {rate:.2%} of shadowed calls (more than {limit:.0%})")
+    blocked = [] if calls else ["no shadow lines yet: the gateway logs one per shadowed call"]
+    status = "blocked" if blocked else ("decision_required" if reasons else "continue")
+    return {"at": now.isoformat(), "mode": "shadow", "status": status, "blocked": blocked,
+            "decision_reasons": reasons, "shadow": shadow, "guardrails": guard, "days": round(days, 2),
+            "primary": {"name": "shadow", "treatment_better": False},
+            "exposed": {"control": calls, "treatment": calls}, "matured": {"control": 0, "treatment": 0}}
+
+
 def run(test: dict, section: dict, project: str, dataset: str, output_table: str | None, online: bool, query,
         now: datetime | None = None, previous: dict | None = None) -> dict:
     """Runs the queries with `query(sql) -> rows` (the caller's BigQuery, with the environment's key) and evaluates.
     The CUPED covariate is read as of the test's start."""
     now = now or datetime.now(timezone.utc)
+    if test.get("mode") == "shadow":
+        try:
+            rows = query(shadow_sql(test, project, dataset)) if online else []
+        except Exception:  # noqa: BLE001 - the sink makes the table (and its columns) with the first lines
+            rows = []
+        return evaluate_shadow(test, section, rows[0] if rows else None, now)
     segments = list(section["analysis"].get("segments") or [])
     exposures = exposures_sql(test, project, dataset, output_table, online, segments)
     cup = section["analysis"].get("cuped") or {}

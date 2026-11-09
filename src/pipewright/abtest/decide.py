@@ -20,6 +20,8 @@ def record(test: dict, group: str, by: str, winner: str, reason: str, at: str, a
         raise Refused(f"test {test['name']} is {test.get('state')}: nothing to decide")
     if winner not in ("treatment", "control"):
         raise Refused("winner must be treatment or control")
+    if winner == "treatment" and test.get("mode") == "shadow":
+        raise Refused("a shadow test shows how the candidate behaves on live calls, not that it is better for the business: conclude it with the control, then start an A/B test (or deploy the candidate as usual)")
     if not (reason or "").strip():
         raise Refused("a reason is required")
     d = test.setdefault("decision", {"required": [], "approvals": []})

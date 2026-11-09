@@ -144,6 +144,9 @@ def check_tables(ml: dict, tables: dict, has_inference: bool, serving: bool, pro
     """Where the arms are recorded: a batch test writes ab_test and arm beside each score in inference.output_table
     (nullable STRING columns the team adds to its schema); an online test needs model.serving."""
     t = ml["ab_test"]
+    if t.get("mode") == "shadow" and not serving:
+        problems.append("ab_test.mode shadow: the gateway copies online calls to the treatment, and this use case "
+                        "serves nothing online (model.serving); score the candidate in a run of its own instead")
     if not has_inference and not serving:
         problems.append("ab_test: the use case scores nothing (no inference pipeline, model.serving off): a test "
                         "needs batch scoring, online serving or both")

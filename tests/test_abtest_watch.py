@@ -200,3 +200,34 @@ def test_a_use_case_without_a_test_is_not_checked(monkeypatch):
     _setup(monkeypatch, _test(state="stopped"))
     assert watch.tick(Gcp(), MANIFEST, [_contract(_section())], now=NOW)["checked"] == 0
     assert watch.tick(Gcp(), MANIFEST, [_contract({})], now=NOW)["checked"] == 0
+
+
+# -- shadow tests (phase D) ----------------------------------------------------------------------------------------
+
+def test_a_shadow_is_summed_from_the_gateways_lines_and_never_won_by_the_treatment(monkeypatch):
+    from pipewright.abtest import analysis, decide
+
+    section = _section(mode="shadow")
+    test = _test(mode="shadow")
+    sql = analysis.shadow_sql(test, "p", "ds")
+    assert "jsonPayload.event = 'shadow'" in sql and "pipewright_ab_exposure" in sql
+    row = {"calls": 500, "failures": 2, "compared": 4800, "mean_abs_diff": 0.031, "agreement": 0.94,
+           "ms_p50": 41.0, "ms_p95": 90.0}
+    early = analysis.run(test, section, "p", "ds", None, True, lambda q: [row], now=STARTED + timedelta(days=3))
+    assert early["status"] == "continue" and early["shadow"]["failure_rate"] == 0.004
+    late = analysis.evaluate_shadow(test, section, row, STARTED + timedelta(days=15))
+    assert late["status"] == "decision_required" and "min_days" in late["decision_reasons"][0]
+    assert "agreement 94.0%" in analysis.render(late, test)
+    broken = analysis.evaluate_shadow(test, section, {**row, "failures": 100}, STARTED + timedelta(days=1))
+    assert broken["guardrails"][0]["breached"] and broken["status"] == "decision_required"
+    assert analysis.run(test, section, "p", "ds", None, True, lambda q: 1 / 0, now=NOW)["status"] == "blocked"
+    row_out = analysis.results_row(test, late, "R1")
+    assert row_out["exposed_treatment"] == 500 and row_out["diff"] is None
+    with pytest.raises(decide.Refused, match="shadow test shows"):
+        decide.record(test, "ml-leads", "a@example.com", "treatment", "x", "t1")
+
+
+def test_shadow_needs_online_serving():
+    problems = []
+    abc.check_tables({"ab_test": _section(mode="shadow")}, {}, True, False, problems)
+    assert any("mode shadow" in p for p in problems)

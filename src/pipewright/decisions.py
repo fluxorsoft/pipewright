@@ -49,8 +49,15 @@ def ab_items(usecase: str, env: str, tests: list[dict]) -> list[Item]:
         res = t.get("analysis") or {}
         p = res.get("primary") or {}
         winner = "treatment" if p.get("treatment_better") and not res.get("blocked") else "control"
-        summary = (f"test {t['name']}: {p.get('name')} difference {p.get('diff', 0):+.4f} (p {p.get('p', 1):.3g}); "
-                   f"{'; '.join(res.get('decision_reasons') or [])}; the analysis supports the {winner}")
+        if t.get("mode") == "shadow":
+            s = res.get("shadow") or {}
+            summary = (f"shadow test {t['name']}: {s.get('compared', 0)} scores compared, mean difference "
+                       f"{s.get('mean_abs_diff')}, agreement {s.get('agreement')}, failures {s.get('failures', 0)}; "
+                       f"{'; '.join(res.get('decision_reasons') or [])}; a shadow ends with the control")
+        else:
+            summary = (f"test {t['name']}: {p.get('name')} difference {p.get('diff', 0):+.4f} "
+                       f"(p {p.get('p', 1):.3g}); {'; '.join(res.get('decision_reasons') or [])}; the analysis "
+                       f"supports the {winner}")
         d = t.get("decision") or {}
         if d.get("winner") or not d.get("required"):
             chosen = d.get("winner") or winner
