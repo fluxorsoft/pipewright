@@ -315,7 +315,9 @@ def create_app(registry: Registry | None = None) -> Flask:
         if group is None:
             return jsonify(status="refused", reason="A/B decisions come from an approver group's topic"), 409
         try:
-            by = identity.verify(message.get("id_token") or "", audiences())
+            # people sign with gcloud (its client is the audience), service accounts for the launcher, as retrain
+            # decisions (found in the A/B battle test: a person's decision was dropped)
+            by = identity.verify(message.get("id_token") or "", [*audiences(), identity.GCLOUD_CLIENT_ID])
         except identity.NotVerified as e:
             log.warning("A/B decision dropped: %s", e)
             return jsonify(status="dropped", reason=str(e)), 200

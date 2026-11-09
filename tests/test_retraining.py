@@ -327,6 +327,34 @@ def test_launcher_routes(gcs, monkeypatch):
                                                                                          "digest": 1}
 
 
+def test_an_ab_decision_accepts_a_persons_gcloud_token(gcs, monkeypatch):
+    """Found in the A/B battle test: a person's decision (gcloud's ID token) was dropped for its audience."""
+    pytest.importorskip("flask")
+    from pipewright.launcher.app import create_app
+    from tests.test_launcher import FakeRegistry
+
+    seen = []
+
+    def verify(token, audiences):
+        seen.append(list(audiences))
+        raise identity.NotVerified("stop here")
+
+    monkeypatch.setattr(identity, "verify", verify)
+    reg = FakeRegistry([CONTRACT])
+    reg.gcp, reg.bucket = None, "b"
+    reg.manifest.update(launcher={"url": "https://l", "service_account": "launcher@p"},
+                        approver_groups={"ml-leads": {"topic": "projects/p/topics/a",
+                                                      "subscription": "projects/p/subscriptions/a"}})
+    client = create_app(reg).test_client()
+    decision = {"kind": "ab.decision", "usecase": "churn", "ab_test": "t1", "winner": "treatment",
+                "reason": "go", "id_token": "tok"}
+    push = {"message": {"data": base64.b64encode(json.dumps(decision).encode()).decode()},
+            "subscription": "projects/p/subscriptions/a"}
+    r = client.post("/retraining/decide", json=push, headers={"Authorization": _token("launcher@p")})
+    assert r.status_code == 200 and r.json["status"] == "dropped"
+    assert seen and identity.GCLOUD_CLIENT_ID in seen[-1] and "https://l" in seen[-1]
+
+
 # ----------------------------------------------------------------------------------------------- alerts --
 
 def test_decision_alert_policies(repo):
