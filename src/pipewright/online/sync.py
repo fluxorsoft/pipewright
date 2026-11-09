@@ -440,7 +440,7 @@ def sync_bigtable_views(online: dict, gcp, log=print, wait_s: int = 1800, sleep=
 
 
 def run(ml_config: dict, env, tenant: str, usecase: str, gcp, connect=None, now: datetime | None = None,
-        log=print, release: str | None = None, load: bool = True) -> dict:
+        log=print, release: str | None = None, load: bool = True, event_stream=None) -> dict:
     """One sync of a use case's online store. `connect()` opens the Cloud SQL connection (IAM login) for cloudsql;
     load=False exports only (`pipewright features export`)."""
     from pipewright.build.templates.pipewright_runtime import resolve_feature_groups
@@ -527,5 +527,6 @@ def run(ml_config: dict, env, tenant: str, usecase: str, gcp, connect=None, now:
                              **{k: out[k] for k in ("type", "generation", "rows", "as_of", "timings")
                                 if k in out}, manifest_sha256=out.get("manifest_sha256"),
                              feature_contract=out["feature_contract"]),
-                topic=(env.observability or {}).get("events_topic"), gcp=gcp, region=env.region)
+                topic=(env.observability or {}).get("events_topic"), gcp=gcp, region=env.region,
+                stream=event_stream)       # the CLI passes a sink: the line is for Cloud Logging, in the job
     return out

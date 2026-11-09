@@ -529,7 +529,10 @@ def cmd_features_sync(args, load: bool = True) -> int:
         online = {**online, "export": {"uri": online_config.export_prefix(env, tenant, usecase), "keep": 3,
                                        "readers": []}}
         ml = {**ml, "online_features": online}
-    out = sync.run(ml, env, tenant, usecase, gcp, release=release_id, load=load)
+    import io
+
+    out = sync.run(ml, env, tenant, usecase, gcp, release=release_id, load=load,
+                   event_stream=None if getattr(args, "request", None) else io.StringIO())
     if args.json:
         print(json.dumps(out, indent=2, default=str))
     else:
