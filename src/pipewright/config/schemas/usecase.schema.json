@@ -121,6 +121,7 @@
         "monitoring": { "$ref": "#/$defs/monitoring" },
         "retraining": { "$ref": "#/$defs/retraining" },
         "synthetic": { "$ref": "#/$defs/synthetic" },
+        "ab_test": { "$ref": "#/$defs/ab_test" },
         "bqml": { "$ref": "#/$defs/bqml" },
         "feature_contract": {
           "type": "object",
@@ -637,6 +638,144 @@
         "max_bytes_billed": { "type": "integer", "minimum": 1 }
       }
     },
+    "ab_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A/B testing of models (Pipewright FR-57; off unless enabled): the champion against a candidate, units assigned stickily by a hash of the test name and the unit key, a business metric and guardrails fixed in advance, a person decides",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "name": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]{1,40}[a-z0-9]$" },
+        "mode": { "enum": ["ab", "shadow"] },
+        "unit": { "type": ["string", "null"] },
+        "arms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "control": { "enum": ["champion"] },
+            "treatment": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "model_version": { "type": ["integer", "string", "null"] } }
+            }
+          }
+        },
+        "allocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "treatment_bp": { "type": "integer", "minimum": 1, "maximum": 9999 } }
+        },
+        "metric": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+          "name": { "type": "string", "description": "what the metric is called in the results, such as renewed_90d" },
+          "source": { "type": "string", "pattern": "^bq://", "description": "a bq:// table of outcome events: one row per event, with the unit key and a time" },
+          "key": { "type": ["string", "null"], "description": "the unit key's column in the source (default: ab_test.unit)" },
+          "time_column": { "type": "string", "description": "when each event happened; events count within window_days after a unit's first exposure" },
+          "value_column": { "type": ["string", "null"], "description": "mean and ratio: the value summed per unit (revenue, orders)" },
+          "denominator_column": { "type": ["string", "null"], "description": "ratio: the denominator summed per unit (sessions, visits)" },
+          "where": { "type": ["string", "null"], "description": "a SQL condition on the source's rows, such as event_type = 'renewal'" },
+          "window_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+          "type": { "enum": ["proportion", "mean", "ratio"] },
+          "direction": { "enum": ["higher", "lower"] },
+            "minimum_effect": { "type": ["number", "null"], "exclusiveMinimum": 0 }
+          }
+        },
+        "guardrails": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "technical": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_error_rate_increase": { "type": "number", "minimum": 0 },
+                "max_latency_increase": { "type": "number", "minimum": 0 },
+                "min_requests": { "type": "integer", "minimum": 1 },
+                "breaker": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "window": { "type": "integer", "minimum": 20 },
+                    "max_error_rate": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+                  }
+                }
+              }
+            },
+            "business": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "source", "max_drop"],
+                "properties": {
+                  "name": { "type": "string", "description": "what the metric is called in the results, such as renewed_90d" },
+                  "source": { "type": "string", "pattern": "^bq://", "description": "a bq:// table of outcome events: one row per event, with the unit key and a time" },
+                  "key": { "type": ["string", "null"], "description": "the unit key's column in the source (default: ab_test.unit)" },
+                  "time_column": { "type": "string", "description": "when each event happened; events count within window_days after a unit's first exposure" },
+                  "value_column": { "type": ["string", "null"], "description": "mean and ratio: the value summed per unit (revenue, orders)" },
+                  "denominator_column": { "type": ["string", "null"], "description": "ratio: the denominator summed per unit (sessions, visits)" },
+                  "where": { "type": ["string", "null"], "description": "a SQL condition on the source's rows, such as event_type = 'renewal'" },
+                  "window_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+                  "type": { "enum": ["proportion", "mean", "ratio"] },
+                  "direction": { "enum": ["higher", "lower"] },
+                  "max_drop": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }
+                }
+              }
+            }
+          }
+        },
+        "duration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+            "max_days": { "type": "integer", "minimum": 1, "maximum": 365 }
+          }
+        },
+        "analysis": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": { "enum": ["fixed", "sequential"] },
+            "alpha": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 0.5 },
+            "power": { "type": "number", "minimum": 0.5, "exclusiveMaximum": 1 },
+            "schedule": { "type": "string" },
+            "cuped": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "covariate": { "type": ["string", "null"] },
+                "source": { "type": ["string", "null"], "pattern": "^bq://" }
+              }
+            },
+            "segments": { "type": "array", "items": { "type": "string" } },
+            "tau": { "type": ["number", "null"], "exclusiveMinimum": 0 }
+          }
+        },
+        "decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "approvals": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "required": { "type": "array", "items": { "type": "string" } } }
+            }
+          }
+        },
+        "publish": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "events": { "type": "boolean" },
+            "exposures": { "type": "boolean" }
+          }
+        },
+        "results_table": { "type": ["string", "null"] }
+      }
+    },
     "synthetic": {
       "type": "object",
       "additionalProperties": false,
@@ -1112,6 +1251,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "ab_test": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "per environment: whether the test runs there, its allocation, duration, feed and approvers",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "allocation": { "$ref": "#/$defs/ab_test/properties/allocation" },
+            "duration": { "$ref": "#/$defs/ab_test/properties/duration" },
+            "publish": { "$ref": "#/$defs/ab_test/properties/publish" },
+            "decision": { "$ref": "#/$defs/ab_test/properties/decision" }
+          }
+        },
         "parameters": { "$ref": "#/$defs/parameters" },
         "resources_per_step": { "$ref": "#/$defs/steps" },
         "steps": { "$ref": "#/$defs/steps" },

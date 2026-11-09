@@ -1,7 +1,7 @@
 """ML lifecycle sections: defaults and cross-checks.
 
 data · features · training · evaluation · explainability · registry · model_card · inference · monitoring ·
-retraining · data_protection · synthetic
+retraining · data_protection · synthetic · ab_test
 
 Pipewright checks that the sections agree with each other and with the data contract; the pipeline code does
 the ML. The resolved sections reach the pipeline as one `ml_config` parameter.
@@ -12,6 +12,8 @@ from __future__ import annotations
 import copy
 import re
 
+from pipewright.abtest import config as ab_config
+from pipewright.abtest.config import DEFAULTS as AB_DEFAULTS
 from pipewright.config.merge import deep_merge
 from pipewright.synthetic import config as synthetic_config
 from pipewright.synthetic.config import DEFAULTS as SYNTHETIC_DEFAULTS
@@ -79,6 +81,7 @@ DEFAULTS = {
                    "snooze": {"max_days": 30, "reopen_when_worse_by": 0.1}},
     "data_protection": {"personal_data_columns": [], "erasure": None},
     "synthetic": SYNTHETIC_DEFAULTS,               # FR-49: off unless synthetic.enabled
+    "ab_test": AB_DEFAULTS,                        # FR-57: off unless ab_test.enabled
 }
 SECTIONS = tuple(DEFAULTS)
 # Pipewright 1.4.1 (FR-103): sections with no defaults, present only when the use case has them, so a use case
@@ -276,6 +279,11 @@ def resolve_ml(spec: dict, usecase: str, has_inference: bool, table_names: set[s
     synthetic_config.check(ml, columns, label, known, problems)
     if not ml["synthetic"]["enabled"]:
         del ml["synthetic"]
+
+    # ---- A/B testing (FR-57, off unless enabled): left out when off, like synthetic data.
+    ab_config.check(ml, set(columns), label, known, problems, task)
+    if not ml["ab_test"]["enabled"]:
+        del ml["ab_test"]
 
     return copy.deepcopy(ml)
 
