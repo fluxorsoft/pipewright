@@ -114,6 +114,14 @@ def _cmp_dict(c: stats.Comparison) -> dict:
             "n": list(c.n), **({"cuped": c.cuped} if c.cuped else {})}
 
 
+LOSSES = {  # what each of the gateway's counts means for the comparison
+    "unassigned": "the gateway served {n} unit(s) without a unit key (not assigned, not exposed)",
+    "dropped": "{n} exposure line(s) were dropped or not written by the gateway",
+    "mismatched_model": "{n} treatment call(s) were answered by a model other than the treatment's deployment",
+    "bypassed": "the treatment's endpoint answered {n} call(s) the gateway did not send (callers around the router)",
+}
+
+
 def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dict], now: datetime,
              previous: dict | None = None) -> dict:
     """The analysis result from the aggregates: share checks, the primary metric (with CUPED and the sequential
@@ -148,7 +156,7 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
         blocked.append(f"{primary['switched']} unit(s) were exposed to both arms: the assignment was broken")
     for k in ("unassigned", "dropped", "mismatched_model", "bypassed"):
         if (test.get("router") or {}).get(k):
-            blocked.append(f"the gateway counted {test['router'][k]} {k.replace('_', ' ')} call(s)")
+            blocked.append(LOSSES[k].format(n=test["router"][k]))
     out["blocked"] = blocked
     # 2. the primary metric
     cuped = bool((a.get("cuped") or {}).get("enabled"))
@@ -190,7 +198,8 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
     # 5. segments: for reading only
     segs = {}
     for name, arms in primary["segments"].items():
-        if name == "all" or "control" not in arms or "treatment" not in arms:
+        # online exposures carry no segment (segments are a batch test's scored columns): no "None" segment
+        if name in ("all", None, "None") or "control" not in arms or "treatment" not in arms:
             continue
         sc, st_ = arms["control"][0], arms["treatment"][0]
         if sc.n >= 30 and st_.n >= 30:
