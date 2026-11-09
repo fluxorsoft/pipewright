@@ -96,9 +96,10 @@ def default_version(uc: ResolvedUseCase, env: Environment, gcp) -> dict:
 
 
 def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: dict,
-                      pinned: dict | None = None) -> dict:
+                      pinned: dict | None = None, name: str | None = None, labels: dict | None = None) -> dict:
     """pinned (Pipewright 1.4.1, FR-101 item 2): the approved copy the pods load, and that an init container checks
-    file by file (generation and SHA-256) before the server starts; a changed copy keeps the new pod from starting."""
+    file by file (generation and SHA-256) before the server starts; a changed copy keeps the new pod from starting.
+    name and labels (FR-57): an A/B test's treatment arm, a second InferenceService beside the use case's."""
     from pipewright.ray_clusters.service import pod_resources
 
     serving = uc.model["serving"]
@@ -114,9 +115,11 @@ def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: d
                 {"name": "AIP_HEALTH_ROUTE", "value": health},
                 {"name": "AIP_MODE", "value": "PREDICTION"}]
     env_vars += [{"name": e["name"], "value": e.get("value", "")} for e in spec.get("env") or []]
-    name = service_name(uc)
+    extra = labels or {}
+    name = name or service_name(uc)
     labels = {"app.kubernetes.io/managed-by": "pipewright", "pipewright.dev/usecase": _label(uc.name),
-              "pipewright.dev/model": _label(uc.model["name"]), "pipewright.dev/version": _label(version["versionId"])}
+              "pipewright.dev/model": _label(uc.model["name"]), "pipewright.dev/version": _label(version["versionId"]),
+              **extra}
     container = {"name": "kserve-container", "image": serving_image(spec["imageUri"], env, s["mirror"]),
                  "env": env_vars, "ports": [{"containerPort": port, "protocol": "TCP"}],
                  "resources": pod_resources(serving["machine"]),
@@ -167,13 +170,13 @@ def load_balancer(uc: ResolvedUseCase, s: dict, port: int) -> dict:
 
 
 class KServe:
-    def __init__(self, uc: ResolvedUseCase, env: Environment, gcp):
+    def __init__(self, uc: ResolvedUseCase, env: Environment, gcp, name: str | None = None):
         from pipewright.kube import KubeClient
 
         self.uc, self.env, self.gcp = uc, env, gcp
         self.s = settings(uc, env)
         self.kube = KubeClient.from_manifest({"kubernetes": env.kubernetes}, gcp, dns=True)
-        self.name = service_name(uc)
+        self.name = name or service_name(uc)
 
     def _path(self, name: str = "") -> str:
         return f"{API}/namespaces/{self.s['namespace']}/inferenceservices" + (f"/{name}" if name else "")

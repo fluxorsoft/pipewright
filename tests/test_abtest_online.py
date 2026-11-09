@@ -314,10 +314,149 @@ def test_a_failed_gateway_stops_the_test_and_removes_the_arm(monkeypatch):
     assert s.store.get("churn", "lapse-v7")["state"] == "stopped" and s.current() is None
 
 
-def test_an_online_arm_on_kserve_is_refused_before_anything_happens(monkeypatch):
-    arms, _ = _arms(monkeypatch)
-    arms.uc.model["serving"]["target"] = "kserve"
-    with pytest.raises(ConfigError, match="needs model.serving.target vertex"):
-        arms.check()
-    arms.uc.model["serving"]["target"] = "vertex"
+# -- KServe (private GKE) ------------------------------------------------------------------------------------------
+
+KSERVE_TEST = {"name": "lapse-k1", "usecase": "churn-x", "tenant": "churn", "unit": "customer_id", "mode": "ab",
+               "state": "running", "release": "R1", "allocation": [{"treatment_bp": 2000}],
+               "arms": {"control": {"version": "5"}, "treatment": {
+                   "version": "7", "endpoint": "kserve:serving-churn/churn-x-ab",
+                   "service": "http://churn-x-ab-predictor.serving-churn.svc.cluster.local",
+                   "route": "/predictions/model"}}}
+
+
+class FakeKube:
+    def __init__(self, objects=None):
+        self.objects, self.calls = dict(objects or {}), []
+
+    def _r(self, status, body=None):
+        return SimpleNamespace(ok=200 <= status < 300, status=status, body=body or {})
+
+    def get(self, path, **k):
+        self.calls.append(("GET", path))
+        return self._r(200, self.objects[path]) if path in self.objects else self._r(404)
+
+    def post(self, path, body, **k):
+        self.calls.append(("POST", path))
+        self.objects[f"{path}/{body['metadata']['name']}"] = {**body, "status": {
+            "availableReplicas": 2, "updatedReplicas": 2, "replicas": 2}, "metadata": {
+            **body["metadata"], "resourceVersion": "1"}}
+        return self._r(201, body)
+
+    def request(self, method, path, body=None, **k):
+        self.calls.append((method, path))
+        return self._r(200, body)
+
+    def delete(self, path):
+        self.calls.append(("DELETE", path))
+        self.objects.pop(path, None)
+        return self._r(200)
+
+
+def _karms(monkeypatch, kube=None, control=True, image="r-docker.pkg.dev/p/pw/launcher@sha256:ab"):
+    from pipewright.models import kserve
+
+    kube = kube or FakeKube()
+
+    class K:
+        def __init__(self, uc, env, gcp, name=None):
+            self.s = {"namespace": "serving-churn", "service_account": "serving", "mirror": None}
+            self.kube, self.name = kube, name or "churn-x"
+
+        def current(self):
+            if self.name == "churn-x" and control:
+                return {"metadata": {"annotations": {"pipewright.dev/predict-route": "/predictions/model"}}}
+            return None
+
+        def endpoints(self):
+            return {"cluster": f"http://{self.name}-predictor.serving-churn.svc.cluster.local"}
+
+    monkeypatch.setattr(kserve, "KServe", K)
+    written = {}
+    from pipewright.gcp import storage
+
+    monkeypatch.setattr(storage, "gcs_write", lambda gcp, b, n, text, **k: written.update({n: json.loads(text)}))
+    uc = SimpleNamespace(name="churn-x", tenant="churn", resources={"online_serving": True},
+                         model={"name": "m", "serving": {"target": "kserve"}},
+                         ml={"ab_test": {"guardrails": {"technical": {"breaker": {"window": 50}}}}})
+    env = SimpleNamespace(name="prod", project="p", region="r", artifacts_bucket="art", policies={}, tenants={},
+                          launcher={"image": image} if image else {}, observability={})
+    return ab_online.KServeArms(uc, env, SimpleNamespace(), log=lambda m: None), kube, written
+
+
+def test_kserve_use_cases_get_a_kserve_arm_and_its_checks(monkeypatch):
+    arms, _, _ = _karms(monkeypatch)
+    assert isinstance(ab_online.arms_for(arms.uc, arms.env, None), ab_online.KServeArms)
     arms.check()
+    with pytest.raises(ConfigError, match="no launcher.image"):
+        _karms(monkeypatch, image=None)[0].check()
+    with pytest.raises(ConfigError, match="deploy the champion first"):
+        _karms(monkeypatch, control=False)[0].check()
+
+
+def test_the_router_runs_in_the_namespace_and_only_it_reaches_the_arm(monkeypatch):
+    arms, kube, written = _karms(monkeypatch)
+    arms.apply(KSERVE_TEST)
+    dep = kube.objects["/apis/apps/v1/namespaces/serving-churn/deployments/pw-ab-router-churn-x"]
+    pod = dep["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "serving" and pod["containers"][0]["image"].endswith("@sha256:ab")
+    cfg = json.loads(pod["containers"][0]["env"][0]["value"])
+    assert cfg["source"] == "none" and cfg["gateway"]["auth"] == "none"
+    assert cfg["gateway"]["predict_url"] == "http://churn-x-predictor.serving-churn.svc.cluster.local/predictions/model"
+    ab = cfg["ab_test"]
+    assert ab["treatment"]["predict_url"].startswith("http://churn-x-ab-predictor") and ab["treatment_bp"] == 2000
+    assert ab["follow"] == {"bucket": "art", "object": "online-sync/churn/churn-x/ab/lapse-k1.router.json",
+                            "every": 30}
+    pol = kube.objects["/apis/networking.k8s.io/v1/namespaces/serving-churn/networkpolicies/churn-x-ab-only-router"]
+    assert pol["spec"]["podSelector"]["matchLabels"] == {"serving.kserve.io/inferenceservice": "churn-x-ab"}
+    assert pol["spec"]["ingress"][0]["from"][0]["podSelector"]["matchLabels"]["app"] == "pw-ab-router"
+    assert written["online-sync/churn/churn-x/ab/lapse-k1.router.json"] == {
+        "ab_test": "lapse-k1", "mode": "ab", "state": "running", "treatment_bp": 2000}
+    kube.calls.clear()
+    arms.stop({**KSERVE_TEST, "state": "stopped"})
+    assert written["online-sync/churn/churn-x/ab/lapse-k1.router.json"]["treatment_bp"] == 0
+    assert sum(1 for m, _ in kube.calls if m == "DELETE") == 3
+
+
+def test_a_paused_kserve_test_sends_everyone_to_the_control():
+    assert ab_online.state_of({**KSERVE_TEST, "state": "paused"})["treatment_bp"] == 0
+    assert ab_online.state_of({**KSERVE_TEST, "state": "decision_required"})["state"] == "running"
+    assert ab_online.is_kserve(KSERVE_TEST) and not ab_online.is_kserve(TEST)
+
+
+def test_the_router_follows_the_tests_state_file():
+    import io
+    import urllib.error
+
+    answers = [json.dumps({"state": "paused", "treatment_bp": 0}).encode(), 404]
+
+    def opener(req, timeout):
+        a = answers.pop(0)
+        if a == 404:
+            raise urllib.error.HTTPError(req.full_url, 404, "gone", {}, None)
+        return io.BytesIO(a)
+
+    class Ctx(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def wrapped(req, timeout):
+        out = opener(req, timeout)
+        return Ctx(out.getvalue())
+
+    r = abrouter.ABRouter({"name": "t", "mode": "ab", "state": "running", "treatment_bp": 5000, "counts_every": 0,
+                           "follow": {"bucket": "art", "object": "online-sync/x/y/ab/t.router.json", "every": 3600}},
+                          FakeGateway("C"), FakeGateway("T"), None, token=lambda: "tok", opener=wrapped)
+    assert r.cfg["state"] == "paused" and r._bp() == 0
+    r.follow()
+    assert r.cfg["state"] == "stopped"
+
+
+def test_the_router_counts_errors_and_time_per_arm():
+    r, _ = router()
+    r.treatment.fail = True
+    with pytest.raises(ConnectionError):
+        r.predict(UNITS)
+    assert r.counts["treatment_errors"] == 1 and r.counts["control_errors"] == 0 and r.counts["control_calls"] == 1

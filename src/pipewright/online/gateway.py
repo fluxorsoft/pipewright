@@ -159,6 +159,7 @@ class Gateway:
         self._post, self._resolve = poster or post_private, resolver
         self._address = None
         self.retries = int(g.get("retries", 3))
+        self.no_auth = g.get("auth") == "none"
         self.features, self.usecase = cfg["features"], cfg.get("usecase", "")
         self.source, self._sleep = source, sleep
         self._tokens = tokens                      # access tokens for the endpoint (the gateway's identity)
@@ -190,7 +191,9 @@ class Gateway:
             return self._address, self._context
 
     def _send(self, body: bytes) -> dict:
-        headers = {"Authorization": "Bearer " + self._token(), "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json"}
+        if not self.no_auth:                       # FR-57 on KServe: a cluster address, reached by network policy
+            headers["Authorization"] = "Bearer " + self._token()
         if self.private:
             address, ctx = self._target()
             parts = urllib.parse.urlparse(self.url)

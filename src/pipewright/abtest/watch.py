@@ -202,7 +202,8 @@ def router_calls(lines: list, start: datetime) -> tuple[dict, dict]:
     by: dict[str, list] = {}
     for line in lines:
         by.setdefault(line.get("instance") or "?", []).append(line)
-    sent = {k: 0 for k in ("treatment_calls", "treatment_instances", "control_calls", "control_instances")}
+    sent = {k: 0 for k in ("treatment_calls", "treatment_instances", "control_calls", "control_instances",
+                           "treatment_errors", "control_errors", "treatment_ms", "control_ms")}
     loss = {k: 0 for k in ("unassigned", "dropped", "mismatched_model")}
     for rows in by.values():
         before = [r for r in rows if _ts(r) < start]
@@ -242,8 +243,18 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
     counts = log_lines(gcp, project, test["name"], start - timedelta(minutes=3), end, ("counts",))
     sent, loss = router_calls(counts, start)
     endpoint = (test["arms"]["treatment"] or {}).get("endpoint") or ""
-    metrics = canary.endpoint_metrics(gcp, project, endpoint.rsplit("/", 1)[-1], _z(start), _z(end)) if endpoint \
-        else {}
+    kserve = endpoint.startswith("kserve:")
+    if kserve:
+        # KServe has no Agent Platform metrics: the routers' own counts of what each arm answered (the arm admits
+        # only the routers' pods, so these are all its calls), with their mean time
+        def arm(a):
+            n = sent[f"{a}_calls"]
+            return {"predictions": n, "errors": sent[f"{a}_errors"],
+                    "latency_ms": sent[f"{a}_ms"] / n if n else None}
+        metrics = {"router": arm("treatment")}
+    else:
+        metrics = canary.endpoint_metrics(gcp, project, endpoint.rsplit("/", 1)[-1], _z(start), _z(end)) \
+            if endpoint else {}
     answered = sum(int(m.get("predictions") or 0) for m in metrics.values())
     errors = sum(int(m.get("errors") or 0) for m in metrics.values())
     rate = errors / answered if answered else 0.0
@@ -251,9 +262,9 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
            "window": [_z(start), _z(end)]}
     technical = (section.get("guardrails") or {}).get("technical") or {}
     compared = None
-    if control_endpoint and answered >= int(technical.get("min_requests", 200)):
-        control = _total(canary.endpoint_metrics(gcp, project, control_endpoint.rsplit("/", 1)[-1], _z(start),
-                                                 _z(end)))
+    if (control_endpoint or kserve) and answered >= int(technical.get("min_requests", 200)):
+        control = arm("control") if kserve else _total(canary.endpoint_metrics(
+            gcp, project, control_endpoint.rsplit("/", 1)[-1], _z(start), _z(end)))
         cfg = {"max_error_rate_increase": float(technical.get("max_error_rate_increase", 0.01)),
                "max_latency_increase": float(technical.get("max_latency_increase", 0.2)),
                "min_requests": int(technical.get("min_requests", 200))}
@@ -272,7 +283,7 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
         out["breach"] = compared
     # Calls the router did not send: the endpoint answered more than either measure of what was sent explains.
     expected = max(sent["treatment_calls"], sent["treatment_instances"])
-    if counts and answered > expected * 1.1 + 10:
+    if not kserve and counts and answered > expected * 1.1 + 10:
         out["bypassed"] = answered - expected
     return out
 
@@ -329,13 +340,14 @@ def tick(gcp, manifest: dict, live, emit_fn=None, refresh=None, now: datetime | 
 
 
 def _serving(gcp, manifest, contract, test, section, tests, refresh, now) -> dict:
-    from pipewright.abtest import service
+    from pipewright.abtest import online, service
 
+    kserve = online.is_kserve(test)
     control = None
     try:                                      # the control's endpoint, for the comparison of the arms
         from pipewright.online import launcher as online_launcher
 
-        control = online_launcher.gateway_target(contract, manifest, {}, gcp)["endpoint"]
+        control = None if kserve else online_launcher.gateway_target(contract, manifest, {}, gcp)["endpoint"]
     except Exception:  # noqa: BLE001 - without it, the breaker's limit alone
         control = None
     seen = check_serving(gcp, manifest, test, section, now, control_endpoint=control)
@@ -361,7 +373,7 @@ def _serving(gcp, manifest, contract, test, section, tests, refresh, now) -> dic
     if breach:
         service.emit(tests.env, tests.uc, gcp, "ab_test.guardrail_breached", t, kind="technical", why=breach,
                      answered=seen["answered"], errors=seen["errors"])
-        if refresh is not None:
+        if refresh is not None and not kserve:     # a KServe router follows the state file _change wrote
             refresh(contract)
     if seen["bypassed"] and not int((test.get("router") or {}).get("bypassed") or 0):
         service.emit(tests.env, tests.uc, gcp, "ab_test.guardrail_breached", t, kind="integrity",

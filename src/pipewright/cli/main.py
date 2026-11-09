@@ -1038,7 +1038,7 @@ def _ab_online(uc, env, gcp):
         return None
     from pipewright.abtest import online
 
-    return online.Arms(uc, env, gcp)
+    return online.arms_for(uc, env, gcp)
 
 
 def cmd_decisions(args) -> int:

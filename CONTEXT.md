@@ -1091,9 +1091,13 @@ request path. Spike S1: 4,000 calls, each arm answered only by its own model, ro
 mismatch between the answering model and the arm's approved deployment is counted (an integrity check per call).
 *Changed in the build:* an endpoint cannot admit only the gateway (Agent Platform checks predict on the project, found
 building FR-106), so the gateway logs its counts each minute and the launcher's tick compares the treatment's calls
-in Cloud Monitoring with what the gateway sent: calls that bypassed the router block a decision. Online arms are Agent
-Platform endpoints only for now: the gateway has no KServe target yet, so `ab start` refuses an online test on KServe
-(batch tests work there).
+in Cloud Monitoring with what the gateway sent: calls that bypassed the router block a decision. On KServe (private GKE,
+user 2026-11-09: built in phase 10): the treatment is a second InferenceService `<service>-ab` from its pinned
+approved copy; the router is the gateway server as a Deployment in the tenant's serving namespace (the serving
+identity), calling both at their cluster addresses; a NetworkPolicy admits only the router's pods to the arm (no
+bypass, so no bypass check); the router follows a state file the test rewrites on every change
+(`online-sync/<tenant>/<usecase>/ab/<name>.router.json`), so pauses, allocations and the tick's stop need no access to
+the cluster; the technical guardrails come from the routers' counts (errors, mean time per arm).
 
 **Exposures.** Log lines from the gateway, copied by a per-tenant log sink into the tenant's dataset (the platform's
 Terraform makes the sink and its grant). Spike S4: 4,000 of 4,000 delivered, no duplicates, within about 5 minutes;

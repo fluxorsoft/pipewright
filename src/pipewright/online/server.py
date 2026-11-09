@@ -233,7 +233,7 @@ def build(cfg: dict, log=None):
             exposure = log if log is not None else ExposureLog(
                 ab["project"], tokens.get, {"pipewright-usecase": cfg.get("usecase", ""),
                                             "pipewright-tenant": ab.get("tenant", "")})
-            gateway = ABRouter(ab, gateway, treatment, exposure)
+            gateway = ABRouter(ab, gateway, treatment, exposure, token=tokens.get)
     return lookup, gateway
 
 

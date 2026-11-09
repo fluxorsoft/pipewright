@@ -251,3 +251,20 @@ def test_the_arms_are_compared_as_the_canary_is(monkeypatch):
     loose["guardrails"]["technical"].update(max_error_rate_increase=0.05, max_latency_increase=1.5)
     assert watch.check_serving(Gcp(counts), MANIFEST, _test(), loose, NOW,
                                control_endpoint="projects/1/e/7")["breach"] is None
+
+
+def test_a_kserve_test_is_judged_by_the_routers_counts(monkeypatch):
+    from pipewright.loop import canary
+
+    monkeypatch.setattr(canary, "endpoint_metrics", lambda *a: pytest.fail("KServe has no Agent Platform metrics"))
+    test = _test(arms={"control": {"version": "5"}, "treatment": {"version": "7",
+                                                                   "endpoint": "kserve:serving-retail/lapse-risk-ab"}})
+    counts = [_line(65, "a", treatment_calls=0, control_calls=0),
+              _line(11, "a", treatment_calls=400, treatment_errors=30, treatment_ms=24000,
+                    control_calls=1600, control_errors=4, control_ms=64000)]
+    out = watch.check_serving(Gcp(counts), MANIFEST, test, _section(), NOW)
+    assert out["answered"] == 400 and out["errors"] == 30 and "30 error(s)" in out["breach"]
+    assert out["compared"]["control"]["latency_ms"] == 40 and out["bypassed"] == 0
+    calm = [_line(65, "a"), _line(11, "a", treatment_calls=400, treatment_errors=1, treatment_ms=16000,
+                                  control_calls=1600, control_errors=4, control_ms=64000)]
+    assert watch.check_serving(Gcp(calm), MANIFEST, test, _section(), NOW)["breach"] is None

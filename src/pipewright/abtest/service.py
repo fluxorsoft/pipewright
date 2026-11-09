@@ -75,6 +75,10 @@ class ABTests:
         out = self.store.update(self.uc.name, name, fn)
         if out is None:
             raise ConfigError(f"test {name} of {self.uc.name} is gone")
+        from pipewright.abtest import online
+
+        if online.is_kserve(out):                 # a KServe router follows this file within 30 seconds
+            online.write_state(self.gcp, self.env.artifacts_bucket, out)
         return out
 
     def _history(self, t: dict, action: str, by: str | None, **extra) -> dict:

@@ -133,19 +133,72 @@ class ABRouter:
     {name, mode, treatment_bp, state, release, usecase, tenant, project, treatment_deployed_model,
      breaker: {window, max_error_rate}, feed: {exposures, key}}"""
 
-    def __init__(self, cfg: dict, control, treatment, log: ExposureLog | None):
+    def __init__(self, cfg: dict, control, treatment, log: ExposureLog | None, token=None, opener=None):
         self.cfg, self.control, self.treatment, self.log = cfg, control, treatment, log
+        self._token, self._open = token, opener or urllib.request.urlopen
         b = cfg.get("breaker") or {}
         self.breaker = Breaker(int(b.get("window", 200)), float(b.get("max_error_rate", 0.05)))
         self.counts = collections.Counter()
         feed = cfg.get("feed") or {}
         key = feed.get("key") or (os.environ.get(feed["key_env"]) if feed.get("key_env") else None)
+        if not key and feed.get("key_secret") and feed.get("exposures") and token is not None:
+            key = self._secret(feed["key_secret"])          # on pods (KServe): read from Secret Manager at start
         self._feed_key = key.encode() if key and (cfg.get("feed") or {}).get("exposures") else None
         self.usecase = getattr(control, "usecase", cfg.get("usecase", ""))
         self.instance = os.environ.get("K_REVISION", "local") + "-" + os.urandom(4).hex()
         self._beat_every = float(cfg.get("counts_every", 60))
         if self.log is not None and self._beat_every > 0:
             threading.Thread(target=self._beats, daemon=True).start()
+        follow = cfg.get("follow") or {}
+        if follow.get("bucket") and self._token is not None:
+            self.follow()                                   # the state now, then every `every` seconds
+            threading.Thread(target=self._follows, args=(float(follow.get("every", 30)),), daemon=True).start()
+
+    # ---------------------------------------------------------------------- following the test (KServe) --
+    def follow(self) -> None:
+        """The test's state as its record says (a small file the test writes on every change, in the tenant's
+        online-sync prefix): a pause, a lower allocation or a stop takes effect here within `every` seconds, on
+        every pod, without anyone changing the router. A file that is gone means the test ended: control only."""
+        from urllib.parse import quote
+
+        f = self.cfg["follow"]
+        url = f"https://storage.googleapis.com/storage/v1/b/{f['bucket']}/o/{quote(f['object'], safe='')}?alt=media"
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + self._token()})
+        try:
+            with self._open(req, timeout=10) as r:
+                state = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                print(json.dumps({"severity": "ERROR", "message": "ab state not read", "status": e.code}), flush=True)
+                return
+            state = {"state": "stopped", "treatment_bp": 0}
+        except Exception as e:  # noqa: BLE001 - the last state stays until the next read
+            print(json.dumps({"severity": "ERROR", "message": "ab state not read", "error": type(e).__name__}),
+                  flush=True)
+            return
+        changed = {k: state.get(k) for k in ("state", "treatment_bp") if state.get(k) != self.cfg.get(k)}
+        if changed:
+            self.cfg.update(changed)
+            print(json.dumps({"severity": "INFO", "message": "ab state", "ab_test": self.cfg["name"], **changed}),
+                  flush=True)
+
+    def _follows(self, every: float):
+        while True:
+            time.sleep(every)
+            self.follow()
+
+    def _secret(self, name: str) -> str | None:
+        import base64
+
+        try:
+            req = urllib.request.Request(f"https://secretmanager.googleapis.com/v1/{name}/versions/latest:access",
+                                         headers={"Authorization": "Bearer " + self._token()})
+            with self._open(req, timeout=10) as r:
+                return base64.b64decode(json.loads(r.read())["payload"]["data"]).decode()
+        except Exception as e:  # noqa: BLE001 - without the key, no feed lines; exposures still go to the dataset
+            print(json.dumps({"severity": "ERROR", "message": "the feed key was not read: no feed exposures",
+                              "error": type(e).__name__}), flush=True)
+            return None
 
     def _beats(self):
         while True:
@@ -159,7 +212,8 @@ class ABRouter:
         self.log.put("pipewright_ab_exposure", {
             "ab_test": self.cfg["name"], "event": "counts", "usecase": self.usecase, "instance": self.instance,
             **{k: self.counts.get(k, 0) for k in ("control_calls", "treatment_calls", "control_instances",
-                                                  "treatment_instances", "unassigned", "mismatched_model")},
+                                                  "treatment_instances", "control_errors", "treatment_errors",
+                                                  "control_ms", "treatment_ms", "unassigned", "mismatched_model")},
             "dropped": getattr(self.log, "dropped", 0) + getattr(self.log, "failed", 0),
             "breaker_tripped": self.breaker.tripped_at is not None, "at": time.time()})
 
@@ -190,23 +244,27 @@ class ABRouter:
                                                     "usecase": self.usecase, "tenant": self.cfg.get("tenant"),
                                                     "at": now})
 
-    def _sent(self, a: str, n: int) -> None:
+    def _call(self, a: str, fn, payload):
+        """An arm's answer, counted (calls, instances, errors, time); the treatment's also by the breaker. A failure
+        is raised so the caller gets the error (units in the treatment are not silently scored by the control)."""
         self.counts[f"{a}_calls"] += 1
-        self.counts[f"{a}_instances"] += n
-
-    def _treatment_call(self, fn, *args):
-        """The treatment's answer, recorded by the breaker; a failure is raised so the caller gets the error (the
-        units in the treatment are not silently scored by the control mid-call)."""
-        self._sent("treatment", len(args[0]) if args else 0)
+        self.counts[f"{a}_instances"] += len(payload)
+        t = time.perf_counter()
         try:
-            out = fn(*args)
+            out = fn(payload)
         except Exception:
-            if self.breaker.record(False):
+            self.counts[f"{a}_errors"] += 1
+            if a == "treatment" and self.breaker.record(False):
                 self._tripped()
             raise
-        if self.breaker.record(True):
+        finally:
+            self.counts[f"{a}_ms"] += int((time.perf_counter() - t) * 1000)
+        if a == "treatment" and self.breaker.record(True):
             self._tripped()
         return out
+
+    def _treatment_call(self, fn, payload):
+        return self._call("treatment", fn, payload)
 
     def _tripped(self):
         print(json.dumps({"severity": "WARNING", "message": "ab_breaker_tripped", "ab_test": self.cfg["name"],
@@ -240,9 +298,7 @@ class ABRouter:
             if not groups[a]:
                 continue
             g = self.control if a == "control" else self.treatment
-            if a == "control":
-                self._sent("control", len(groups[a]))
-            out, f = (self._treatment_call(g.predict, groups[a]) if a == "treatment" else g.predict(groups[a]))
+            out, f = self._call(a, g.predict, groups[a])
             body["predictions"].update(out["predictions"])
             body["not_found"] += out["not_found"]
             body["deployed_model"][a], body["model_version"][a] = out.get("deployed_model"), out.get("model_version")
@@ -287,9 +343,7 @@ class ABRouter:
                 continue
             g = self.control if a == "control" else self.treatment
             batch = [instances[k] for k in idx]
-            if a == "control":
-                self._sent("control", len(batch))
-            out = self._treatment_call(g.call, batch) if a == "treatment" else g.call(batch)
+            out = self._call(a, g.call, batch)
             deployed[a] = out.get("deployedModelId")
             self._check_model(a, deployed[a])
             for k, p in zip(idx, out.get("predictions") or [], strict=False):

@@ -29,6 +29,18 @@ writes one exposure line per unit (test, arm, unit, the answering deployed model
 the request path. A log sink copies those lines into the tenant's dataset (table `pipewright_ab_exposure`). A use case
 whose callers send features gets a router-only gateway during the test: callers post `instances` with their `units`.
 
+**Online on KServe (private GKE).** With `model.serving.target: kserve`, the treatment is a second
+InferenceService, `<service>-ab`, serving its approved copy (the pods check every file before they start, as
+`deploy-model`'s do). The router is the same gateway server, as a Deployment and a Service (`pw-ab-router-<service>`)
+in the tenant's serving namespace, running as the namespace's serving identity; callers in the cluster post
+`instances` and `units` to `http://pw-ab-router-<service>.<namespace>.svc.cluster.local/predict`. A NetworkPolicy
+admits only the router's pods to the treatment, so nobody can call it around the assignment. The router follows the
+test's state file (`online-sync/<tenant>/<usecase>/ab/<name>.router.json`), which every change rewrites: a pause, a
+lower allocation or the launcher stopping the treatment takes effect on every pod within 30 seconds. The technical
+guardrails come from the routers' own counts (errors and mean time per arm), as KServe has no Agent Platform
+metrics. Deploy the champion with `deploy-model` first; the test adds the arm and the router and removes both at the
+end.
+
 **Shadow.** `mode: shadow` sends every call to the control, which answers, and a copy to the treatment in the
 background. Only a comparison is logged (how many scores, the mean absolute difference, how often they agree, the
 treatment's latency and failures). Nothing acts on the treatment's answers. A shadow shows how the candidate behaves
@@ -186,8 +198,8 @@ million lines kept (log routing is free); the analysis one query per run. The fe
 
 ## Limits
 
-- An online test needs `model.serving.target: vertex`: the gateway routes to Agent Platform endpoints. KServe
-  (private GKE) runs batch tests.
+- On KServe, callers send features (the router-only mode): Pipewright's lookup runs on Cloud Run, and on GKE a
+  team serves its features itself (Appendix C of the book). The router is reached inside the cluster.
 - One active test per use case. Tests on the same unit in different use cases overlap; `policies.ab_test.overlap`
   decides what happens.
 - Forecasts and unsupervised models have no unit-level outcome to compare, and are refused.
