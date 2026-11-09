@@ -460,3 +460,13 @@ def test_the_router_counts_errors_and_time_per_arm():
     with pytest.raises(ConnectionError):
         r.predict(UNITS)
     assert r.counts["treatment_errors"] == 1 and r.counts["control_errors"] == 0 and r.counts["control_calls"] == 1
+
+
+def test_a_change_to_a_running_kserve_test_only_rewrites_the_state_file(monkeypatch):
+    """Found in the battle test: a pause re-applied the router Deployment, rolling its pods."""
+    arms, kube, written = _karms(monkeypatch)
+    arms.apply(KSERVE_TEST)
+    kube.calls.clear()
+    arms.apply({**KSERVE_TEST, "state": "paused"})
+    assert [m for m, _ in kube.calls] == ["GET", "GET", "GET"]
+    assert written["online-sync/churn/churn-x/ab/lapse-k1.router.json"]["state"] == "paused"

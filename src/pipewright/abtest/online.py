@@ -360,16 +360,19 @@ class KServeArms:
 
         write_state(self.gcp, self.env.artifacts_bucket, test)
         kube = self._control().kube
+        made = False
         for path, name, body in self.manifests(test):
             r = kube.get(f"{path}/{name}")
-            if r.status == 404:
-                r = kube.post(path, body)
-            elif r.ok and body["kind"] == "Deployment":
-                body = {**body, "metadata": {**body["metadata"],
-                                             "resourceVersion": r.body["metadata"]["resourceVersion"]}}
-                r = kube.request("PUT", f"{path}/{name}", body)
+            if r.status == 404:                  # what exists is left alone: replacing the Deployment would roll its
+                r = kube.post(path, body)        # pods for a change the routers read from the state file anyway
+                made = True                      # (found in the battle test: a pause rolled the router)
             if not r.ok:
                 raise ConfigError(f"the A/B router's {body['kind']} {name}: {r.status} {message(r)}")
+        if not made:
+            s = state_of(test)
+            self.log(f"the A/B router follows the state file within 30 seconds: {s['state']}, treatment "
+                     f"{s['treatment_bp'] / 100:g}%")
+            return
         self._wait_router(kube)
         self.log(f"the A/B router: POST {self.router_url()}/predict with {{\"instances\": [...], \"units\": [...]}} "
                  "(in the cluster)")
