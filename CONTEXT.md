@@ -1076,6 +1076,8 @@ ab_test:
 | D7 | Batch first (phase A, on the book's lapse-risk), then online (phase B) |
 | D8 | Everything that runs an A/B test is open source, statistics included; Enterprise adds platform policy, cross-team overlap detection, Fleet View pages and an evidence control |
 
+| D9 | A feed for the team's own tools (user, 2026-11-09): `ab_test.publish` (off by default) copies the test to a Pub/Sub topic the platform provides per tenant (`tenants.<t>.ab_test_feed`): `events` (started, analysed, guardrail breached, decided: aggregates) and, only where the platform allows, `exposures` (per-unit lines with a pseudonymised unit, a keyed hash). BigQuery stays the record; the feed is a copy, at-least-once and unordered |
+
 **Assignment.** `bucket = int(first 7 bytes of SHA-256(name + ":" + unit), big endian)`; treatment iff
 `bucket < treatment_bp * 2^56 // 10000`. Seven bytes because BigQuery has no unsigned 64-bit integer; an integer
 threshold so Python and SQL compare exactly. Spike S3: identical in Python and BigQuery on 1,000,004 keys and five
