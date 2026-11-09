@@ -9,6 +9,9 @@ Pipewright runs the whole test as part of the platform: the assignment, the rout
 model, the analysis, the guardrails, the decision and its approvers, and the lineage of both versions. It is off by
 default: with `ab_test.enabled` false nothing changes.
 
+[AB_TESTING_WALKTHROUGH.md](AB_TESTING_WALKTHROUGH.md) shows a test from start to decision, with screenshots, and how
+a team collects a test's logs through Pub/Sub.
+
 ## How it works
 
 **Sticky assignment.** Each unit (a customer, an account, a device: a column of the data contract) is assigned by a
