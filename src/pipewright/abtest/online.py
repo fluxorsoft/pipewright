@@ -402,7 +402,10 @@ class KServeArms:
         if arm.current() is not None:
             arm.delete()
             self._event("model.undeployed", test, test["arms"]["treatment"]["version"], arm)
-        self.log(f"removed the treatment's InferenceService {arm.s['namespace']}/{arm.name} and the A/B router")
+            self.log(f"removed the treatment's InferenceService {arm.s['namespace']}/{arm.name} and the A/B router")
+        else:          # found in the battle test: it said it removed an InferenceService someone had already deleted
+            self.log(f"removed the A/B router; the treatment's InferenceService {arm.s['namespace']}/{arm.name} "
+                     "was already gone")
 
 
 def arms_for(uc, env, gcp, log=print):
