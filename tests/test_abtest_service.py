@@ -217,3 +217,25 @@ def test_with_cmek_the_results_table_carries_its_key_in_its_options(monkeypatch)
     create = next((sql, k) for sql, k in jobs if sql.startswith("CREATE"))
     assert "OPTIONS(kms_key_name='projects/p/locations/r/keyRings/k/cryptoKeys/bq')" in create[0] and create[1] is None
     assert all(k is None for sql, k in jobs if sql.startswith("INSERT"))
+
+
+def test_a_stop_that_could_not_remove_the_arm_can_be_finished(monkeypatch):
+    """Found in the battle test: a dropped connection left the router running and `ab stop` refused a second go."""
+    s = _svc(monkeypatch, _test())
+    calls = []
+
+    class Online:
+        def stop(self, t):
+            calls.append(t["state"])
+            if len(calls) == 1:
+                raise ConnectionError("dropped")
+
+    s.online = Online()
+    with pytest.raises(ConfigError, match="run `pipewright ab stop --env prod --usecase churn` again"):
+        s.set_state("stopped", "enough", "a@example.com")
+    assert s.current() is None and s.store.get("churn", "lapse-v7")["state"] == "stopped"
+    done = s.set_state("stopped", "finish", "a@example.com")
+    assert done["name"] == "lapse-v7" and calls == ["stopped", "stopped"]
+    s.online = None
+    with pytest.raises(ConfigError, match="no running test"):
+        s.set_state("stopped", "x", "a@example.com")

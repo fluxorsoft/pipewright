@@ -60,7 +60,10 @@ class KubeClient:
         import requests
 
         headers = {"Authorization": f"Bearer {self.gcp.access_token()}", "Accept": "application/json"}
-        attempts = 3 if method == "GET" else 1      # a dropped connection is retried only where repeating is safe
+        # a dropped connection is retried only where repeating is safe: reads, deletes (a second answers 404) and
+        # whole-object writes (found in the A/B battle test: the cluster's DNS endpoint drops connections, and a stop
+        # left its router running)
+        attempts = 3 if method in ("GET", "DELETE", "PUT") else 1
         for attempt in range(attempts):
             try:
                 r = requests.request(method, f"{self.endpoint}{path}", json=body, params=params or None,

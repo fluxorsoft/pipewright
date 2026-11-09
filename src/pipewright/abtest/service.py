@@ -194,6 +194,15 @@ class ABTests:
         return t
 
     def set_state(self, state: str, reason: str, identity: str | None) -> dict:
+        if state == "stopped" and self.current() is None and self.online is not None:
+            # A stop or a conclusion whose removal of the serving arm failed part way (found in the battle test: the
+            # cluster's API endpoint dropped a connection and the router stayed): `ab stop` finishes it.
+            last = (self.store.pointer(self.uc.name)[0] or {}).get("last")
+            done = self.store.get(self.uc.name, last) if last else None
+            if done and done.get("state") in ("stopped", "concluded"):
+                self.log(f"test {done['name']} is {done['state']}: removing what is left of its serving arm")
+                self._remove(done)
+                return done
         t = self.get(None)
         allowed = {"paused": ("running", "decision_required"), "running": ("paused",),
                    "stopped": ACTIVE}[state]
@@ -209,8 +218,16 @@ class ABTests:
         emit(self.env, self.uc, self.gcp, {"paused": "ab_test.paused", "running": "ab_test.resumed",
                                            "stopped": "ab_test.stopped"}[state], t, reason=reason, by=identity)
         if self.online is not None:
-            (self.online.stop if state == "stopped" else self.online.apply)(t)
+            self._remove(t) if state == "stopped" else self.online.apply(t)
         return t
+
+    def _remove(self, t: dict) -> None:
+        try:
+            self.online.stop(t)
+        except Exception as e:
+            raise ConfigError(f"test {t['name']} is {t['state']}, but its serving arm was not fully removed ({e}): "
+                              f"run `pipewright ab stop --env {self.env.name} --usecase {self.uc.name}` again to "
+                              "finish") from e
 
     # ---------------------------------------------------------------------------------------- analysis --
     def analyse(self, name: str | None = None, query=None, now: datetime | None = None, write: bool = True,
@@ -379,7 +396,7 @@ class ABTests:
 
         t = self._change(t["name"], change)
         if self.online is not None:
-            self.online.stop(t)
+            self._remove(t)
         emit(self.env, self.uc, self.gcp, "ab_test.decided", t, winner=winner, reason=reason, by=identity,
              control=t["arms"]["control"]["version"], treatment=t["arms"]["treatment"]["version"],
              result={k: ((t.get("analysis") or {}).get("primary") or {}).get(k) for k in ("name", "diff", "ci", "p")})
