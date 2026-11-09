@@ -436,6 +436,8 @@ feature_contract.sources.sql_sha256: "SHA-256 of the defining SQL, whitespace no
 feature_contract.sources.schema_sha256: "SHA-256 of the schema as names, types and modes (never descriptions)."
 feature_contract.sources.schema: "The schema, one `name TYPE MODE` per column, for a readable diff."
 feature_contract.sources.sql_file: "A table built by a query: the file holding the SQL that builds it, relative to the use case folder. With policies.integrity.features built_tables on, the SQL of the job that last wrote the table must match it."
+feature_contract.sources.sql_files: "A table several jobs write (for example a backfill and a monthly append): each job's SQL file, relative to the use case folder. The first is recorded as sql_sha256, the others as also_sql_sha256; the built-table check accepts any of them (1.4.2)."
+feature_contract.sources.also_sql_sha256: "Recorded from sql_files: the SHA-256 of each SQL file after the first. Part of the contract's digest."
 feature_contract.sources.scheduled_query: "A table built by a BigQuery scheduled query: its transfer config name (projects/.../transferConfigs/...). Its SQL is fingerprinted from the config."
 feature_contract.sources.features: "The features the use case reads from the source, each with its type and an optional description (kept when the contract is updated)."
 feature_contract.sources.features.<name>.type: "The feature's BigQuery type, from the source's schema."

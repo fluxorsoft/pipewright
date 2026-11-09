@@ -76,6 +76,8 @@ def resolve(spec: dict, ml: dict, env, tenant: str, usecase: str, problems: list
         if not _IDENT.match(name) and kind == "cloudsql":
             problems.append(f"{where}: feature {name!r} is not a PostgreSQL column name (lower case, digits, _)")
     export = {"enabled": False, "keep": EXPORT_KEEP, "readers": [], **(spec.get("export") or {})}
+    # 1.4.2: a reader as an email or as a member (serviceAccount:...), as lookup.callers takes; kept as the email
+    export["readers"] = [r.removeprefix("serviceAccount:") for r in export.get("readers") or []]
     if export.get("uri"):
         mine = f"gs://{env.artifacts_bucket}/online-export/{tenant}/"
         if export["uri"].startswith(f"gs://{env.artifacts_bucket}/") and not export["uri"].startswith(mine):

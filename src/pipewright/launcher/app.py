@@ -558,6 +558,15 @@ def create_app(registry: Registry | None = None) -> Flask:
             except Exception as e:  # noqa: BLE001 - a refusal never gets better: acknowledge it
                 log.exception("lookup service of %s", contract.usecase)
                 return jsonify(status="dropped", reason=str(e)[:400]), 200
+        if body.get("kind") == "online.lookup_service.delete":     # 1.4.2, from deploy-model --undeploy
+            contract = reg().get(body.get("usecase") or "")
+            if contract is None:
+                return jsonify(status="dropped", reason=f"{body.get('usecase')}: no live release"), 200
+            try:
+                return jsonify(online_launcher.remove_lookup_service(contract, reg().manifest, Gcp())), 200
+            except Exception as e:  # noqa: BLE001 - a refusal never gets better: acknowledge it
+                log.exception("removing the lookup service of %s", contract.usecase)
+                return jsonify(status="dropped", reason=str(e)[:400]), 200
         if body.get("kind") == "ray.cluster":
             # Pub/Sub does not say who published: the message carries the runner's ID token.
             try:
@@ -588,6 +597,19 @@ def create_app(registry: Registry | None = None) -> Flask:
             return jsonify(online_launcher.ensure_lookup_service(contract, reg().manifest, Gcp(), wait=240)), 200
         except Exception as e:  # noqa: BLE001
             log.exception("lookup service of %s", contract.usecase)
+            return jsonify(status="error", reason=str(e)[:400]), 500
+
+    @app.post("/online/lookup-service/delete")
+    def lookup_service_delete():
+        """1.4.2: remove a use case's lookup service when its models are undeployed (deploy-model --undeploy)."""
+        body = request.get_json(silent=True) or {}
+        contract = reg().get(body.get("usecase") or "")
+        if contract is None:
+            return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 404
+        try:
+            return jsonify(online_launcher.remove_lookup_service(contract, reg().manifest, Gcp())), 200
+        except Exception as e:  # noqa: BLE001
+            log.exception("removing the lookup service of %s", contract.usecase)
             return jsonify(status="error", reason=str(e)[:400]), 500
 
     @app.get("/health")

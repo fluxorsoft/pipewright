@@ -263,6 +263,7 @@ def cmd_deploy_model(args) -> int:
 
         if args.undeploy:
             kserve.undeploy(uc, env, gcp)
+            _remove_lookup_service(uc, env, gcp, args)
             return 0
         if args.promote or args.undeploy_canary:
             raise ConfigError("model.serving.target kserve has no canary to promote or remove (KServe in Standard "
@@ -274,6 +275,7 @@ def cmd_deploy_model(args) -> int:
     creds = gcp.session.credentials
     if args.undeploy:
         deploy_model.undeploy(uc, env, creds)
+        _remove_lookup_service(uc, env, gcp, args)
         return 0
     if args.promote or args.undeploy_canary:
         deploy_model.check_approval(uc, gcp.identity(), args.approve)
@@ -294,6 +296,18 @@ def cmd_deploy_model(args) -> int:
     deploy_model.deploy(uc, env, creds, canary=args.canary)
     _print_how_to_call(uc, env, gcp)
     return 0
+
+
+def _remove_lookup_service(uc, env, gcp, args) -> None:
+    """1.4.2 (design item 8): undeploy also removes the lookup service, unless --keep-lookup-service."""
+    if getattr(args, "keep_lookup_service", False):
+        return
+    from pipewright.online import launcher as online_launcher
+
+    try:
+        online_launcher.remove_from_cli(uc, env, gcp=gcp)
+    except Exception as e:  # noqa: BLE001 - the models are undeployed; the service is the launcher's to remove
+        print(f"warning: the lookup service was not removed ({e}); remove it with gcloud run services delete")
 
 
 def _print_how_to_call(uc, env, gcp) -> bool:
@@ -605,9 +619,9 @@ def cmd_features_contract(args) -> int:
     for c in out["changes"]:
         print(f"  {c}")
     for s in section["sources"]:
-        if s["kind"] == "table" and not (s.get("sql_file") or s.get("scheduled_query")):
-            print(f"note: {s['name']} is a table built by a query: add its sql_file (or scheduled_query) to check "
-                  "its SQL; until then it is checked by schema only")
+        if s["kind"] == "table" and not (s.get("sql_file") or s.get("sql_files") or s.get("scheduled_query")):
+            print(f"note: {s['name']} is a table built by a query: add its sql_file (sql_files when several jobs "
+                  "write it) or scheduled_query to check its SQL; until then it is checked by schema only")
     if existing and out["level"] is None:
         print(f"{uc.name}: feature contract {existing.get('version')} matches the live sources; nothing to write")
         return 0
@@ -1400,6 +1414,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--approve", action="store_true", help="confirm a manual deploy approval")
     sp.add_argument("--dry-run", action="store_true", help="show what would be deployed")
     sp.add_argument("--undeploy", action="store_true", help="remove all models from the endpoint (stops cost)")
+    sp.add_argument("--keep-lookup-service", action="store_true",
+                    help="with --undeploy: keep the use case's lookup service (by default the launcher removes it)")
     rollout = sp.add_mutually_exclusive_group()
     rollout.add_argument("--canary", action="store_true",
                          help="give the new version model.serving.canary_percent of traffic, keep the current one")

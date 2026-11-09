@@ -93,6 +93,25 @@ and [docs/SERVING.md](docs/SERVING.md).
   `online_store.type: http` and `export.enabled` (it refused it, though that is the case the export is for). The
   gateway's error says which step failed: `the lookup at <host> failed (...)` or `the prediction failed (...)`.
 
+### Changed (1.4.2 QA design decisions)
+
+- `deploy-model --undeploy` also asks the launcher to remove the use case's lookup service (warm instances stop
+  billing); `--keep-lookup-service` keeps it. New launcher request kind `online.lookup_service.delete` and route
+  `POST /online/lookup-service/delete`.
+- A team's own store (`type: http`) with `export.enabled` may have an `online_sync` schedule: it publishes the
+  Parquet export. The platform's `online_store.yaml` `export_readers` grants each reader `storage.objectViewer` on
+  `online-export/<tenant>/` only and gives the tenant the sync job (starter and Enterprise); `validate` warns about a
+  reader the manifest says is not granted.
+- When the team's store is a Cloud Run service in the environment's project and region, the launcher lets the
+  tenant's lookup identity call it (`run.invoker`, added). The starter's `lookup.egress` (`ALL_TRAFFIC`) reaches a
+  store with internal ingress; Enterprise already used all-traffic egress.
+- `export.readers` takes `name@...` or `serviceAccount:name@...`, as `lookup.callers` does.
+- A feature source written by several jobs lists `sql_files`: the first is recorded as `sql_sha256`, the others as
+  `also_sql_sha256`, and the built-table check accepts any of them.
+- `validate` warns when `personal_data_columns` is empty but a contract or entity column usually identifies a
+  person (`customer_id`, `email`, ...).
+- The drain before an undeploy (FR-109, `model.serving.drain_seconds`, 240 s) stays on by default.
+
 ### Fixed (found re-running the book on 1.4.2)
 
 - A replay that reproduces the champion exactly is not registered (the churn example's register step): since rows

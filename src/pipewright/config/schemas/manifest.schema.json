@@ -1209,6 +1209,11 @@
           "additionalProperties": false,
           "description": "Pipewright 1.4.2 (FR-104): the online stores this environment offers and their settings",
           "properties": {
+            "export_readers": {
+              "type": "object",
+              "description": "Pipewright 1.4.2: per tenant, the identities the platform lets read its Parquet export (online-export/<tenant>/), for a team's own store",
+              "additionalProperties": {"type": "array", "items": {"type": "string"}}
+            },
             "types": {
               "type": "array",
               "items": {

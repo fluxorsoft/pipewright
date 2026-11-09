@@ -219,20 +219,32 @@ def contract_digest(section: dict) -> str:
     """What an approval and a run record: the version and each source's kind and fingerprints (not descriptions)."""
     return sha256({"version": section.get("version"),
                    "sources": sorted([[s["name"], s.get("kind"), s.get("sql_sha256"), s.get("schema_sha256")]
+                                      + ([sorted(s["also_sql_sha256"])] if s.get("also_sql_sha256") else [])
                                       for s in section.get("sources") or []])})
 
 
+def _sql_hash(root: Path, name: str, project: str) -> str:
+    try:
+        return sha256(normalise_sql((Path(root) / name).read_text(encoding="utf-8"), project))
+    except OSError as e:
+        raise ConfigError(f"feature_contract: {name} cannot be read: {e}") from None
+
+
 def _declared_sql(entry: dict, root: Path | None, project: str) -> str | None:
-    """A built table's declared SQL file (relative to the use case folder), normalised and hashed."""
-    if not entry.get("sql_file"):
+    """A built table's declared SQL file (relative to the use case folder), normalised and hashed. With sql_files
+    (1.4.2: a table written by several jobs, such as a backfill and a monthly append) the first is the recorded
+    sql_sha256 and the others go in also_sql_sha256: the job that last wrote the table may have run any of them."""
+    files = list(entry.get("sql_files") or []) or ([entry["sql_file"]] if entry.get("sql_file") else [])
+    if not files:
         return None
     if root is None:
         return entry.get("sql_sha256")          # a released contract: its recorded digest stands
-    path = Path(root) / entry["sql_file"]
-    try:
-        return sha256(normalise_sql(path.read_text(encoding="utf-8"), project))
-    except OSError as e:
-        raise ConfigError(f"feature_contract: {entry['sql_file']} cannot be read: {e}") from None
+    hashes = [_sql_hash(root, f, project) for f in files]
+    if len(hashes) > 1:
+        entry["also_sql_sha256"] = hashes[1:]
+    else:
+        entry.pop("also_sql_sha256", None)
+    return hashes[0]
 
 
 def live(gcp, features_from: dict, project: str, region: str) -> list[dict]:
@@ -261,7 +273,7 @@ def build(gcp, features_from: dict, project: str, region: str, existing: dict | 
         old = before.get(now["name"], {})
         entry = {"name": now["name"], "kind": now["kind"], "sql_sha256": now["sql_sha256"],
                  "schema_sha256": now["schema_sha256"], "schema": now["schema"]}
-        for key in ("sql_file", "scheduled_query"):
+        for key in ("sql_file", "sql_files", "scheduled_query"):
             if old.get(key):
                 entry[key] = old[key]
         if now["kind"] == "table":
@@ -317,7 +329,7 @@ def compare(expected: list[dict], now: list[dict], built: dict | None = None) ->
                              "be shown")
             elif b.get("error"):
                 problems.append(f"feature source {name}: {b['error']}")
-            elif b.get("sql_sha256") != e["sql_sha256"]:
+            elif b.get("sql_sha256") not in {e["sql_sha256"], *(e.get("also_sql_sha256") or [])}:
                 problems.append(f"feature source {name}: last built by SQL sha256 {b['sql_sha256'][:12]}"
                                 f"{' (' + b['job'] + ')' if b.get('job') else ''}, recorded "
                                 f"{e['sql_sha256'][:12]}")

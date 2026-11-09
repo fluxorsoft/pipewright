@@ -142,6 +142,8 @@
                   "schema_sha256": { "type": "string" },
                   "schema": { "type": "array", "items": { "type": "string" } },
                   "sql_file": { "type": "string", "description": "a table built by a query: the SQL that builds it, relative to the use case folder" },
+                  "sql_files": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "a table written by several jobs (for example a backfill and a monthly append): each job's SQL; the first is recorded as sql_sha256, the others as also_sql_sha256 (1.4.2)" },
+                  "also_sql_sha256": { "type": "array", "items": { "type": "string" } },
                   "scheduled_query": { "type": "string", "description": "a table built by a scheduled query: its transfer config name" },
                   "features": {
                     "type": "object",
@@ -1087,7 +1089,7 @@
                   "type": "array",
                   "items": {
                     "type": "string",
-                    "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$"
+                    "pattern": "^(serviceAccount:)?[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$"
                   }
                 }
               }

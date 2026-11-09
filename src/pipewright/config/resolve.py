@@ -94,10 +94,14 @@ def _triggers(eff: dict, resources: dict, tenant: str, pipelines: dict, problems
     for s in triggers["schedules"]:
         s.setdefault("pipeline", "training")
         if s["pipeline"] == "online_sync":       # FR-104: the launcher runs the tenant's sync job, not a pipeline
-            store = (((eff.get("model") or {}).get("serving") or {}).get("online_store") or {}).get("type")
-            if store not in ("bigquery", "cloudsql"):
+            spec = ((eff.get("model") or {}).get("serving") or {}).get("online_store") or {}
+            store = spec.get("type")
+            # 1.4.2 (design item 4): a team's own store (http) is fed by the Parquet export, so its schedule exports
+            exporting = store == "http" and (spec.get("export") or {}).get("enabled")
+            if store not in ("bigquery", "cloudsql") and not exporting:
                 problems.append(f"triggers.schedules[{s['name']}]: pipeline online_sync needs "
-                                "model.serving.online_store.type bigquery or cloudsql")
+                                "model.serving.online_store.type bigquery or cloudsql, or http with export.enabled "
+                                "(the schedule then publishes the Parquet export)")
         elif s["pipeline"] not in pipelines:
             problems.append(f"triggers.schedules[{s['name']}].pipeline {s['pipeline']!r} is not in pipelines")
         if not _CRON.match(s["cron"].strip()):
@@ -330,6 +334,17 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
             # The register step reads it: a pool model carries its settings in serving.json, never in container
             # variables (the pool's are the first model's, found live).
             ml["serving"] = {**(ml.get("serving") or {}), "pool": joined["name"]}
+    # 1.4.2 (design item 7): export readers the platform has not granted cannot read the export (a 403 at the team's
+    # store, found live). Only when the manifest says what it grants; a platform without the key is not checked.
+    export = (((eff.get("model") or {}).get("serving") or {}).get("online_store") or {}).get("export") or {}
+    granted = ((env.features or {}).get("online_store") or {}).get("export_readers")
+    if export.get("enabled") and export.get("readers") and isinstance(granted, dict):
+        mine = {r.removeprefix("serviceAccount:") for r in granted.get(tenant) or []}
+        missing = sorted({r.removeprefix("serviceAccount:") for r in export["readers"]} - mine)
+        if missing:
+            extra_warnings.append(f"model.serving.online_store.export.readers: {', '.join(missing)} not granted by "
+                                  f"the platform for tenant {tenant} (manifest features.online_store.export_readers): "
+                                  "ask the platform team to add them to online_store.yaml export_readers")
     if model["serving"]["enabled"]:
         from pipewright.serving import endpoints, prices
 
@@ -352,6 +367,22 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                                   "approval=pending: a register step from Pipewright 1.1 or earlier lets a first "
                                   "version become the default unapproved. Update it from the churn example's "
                                   "components/register.py (FR-83)")
+
+    # 1.4.2 (design item 2): a column that names a person, with no personal data declared, makes erasure find nothing.
+    # Not every *_id is a person (product_id), so only names that usually are, and only a warning.
+    import re as _re
+
+    declared = ((ml.get("data_protection") or {}).get("personal_data_columns")) or []
+    data_cfg = ml.get("data") or {}
+    seen = [c.get("name") for c in ((data_cfg.get("contract") or {}).get("columns") or []) if isinstance(c, dict)]
+    seen += list(((data_cfg.get("features_from") or {}).get("entity") or {}).get("columns") or [])
+    personal = sorted({c for c in seen if c and c not in declared and _re.fullmatch(
+        r"(customer|user|person|member|patient|client|employee|account|subscriber|citizen|student)(_?id)?|e?mail"
+        r"(_address)?", c.lower())})
+    if personal and not declared:
+        extra_warnings.append(f"data_protection.personal_data_columns is empty, but {', '.join(personal)} usually "
+                              "identif" + ("ies" if len(personal) == 1 else "y") + " a person: list it, so it is "
+                              "never a feature and `pipewright data erase` can find its rows")
 
     if problems:
         raise ConfigError(problems, source=f"{path} ({env.name})")
