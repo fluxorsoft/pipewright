@@ -81,6 +81,17 @@ def check(expected: dict | None, env_vars: dict, serving_json: dict | None, envi
                     f"model.serving.features is request in {environment}: it would read the callers' feature values "
                     "as IDs. Deploy a version trained with features request, or set model.serving.features online")
         return None
+    if expected.get("mode") == "gateway":
+        # FR-118 (1.4.2): behind the gateway the endpoint receives feature values, never IDs, and the handler ignores
+        # a gateway lookup. So a model trained for request (no lookup) or for the gateway is right, whatever store is
+        # behind the gateway; one that looks features up itself would read the gateway's values as IDs. (Requiring
+        # the gateway's own lookup forced a retrain for a store change behind it: found writing the book's Ch. 23.)
+        got, source = packaged_lookup(env_vars, serving_json)
+        if got and got.get("mode") != "gateway":
+            return (f"the model looks its features up in an online store by ID ({source}), but in {environment} the "
+                    "lookup gateway sends it feature values: deploy a version trained with features request or for "
+                    "the gateway")
+        return None
     if expected.get("type"):                  # FR-104: bigquery, cloudsql, http
         got, source = packaged_lookup(env_vars, serving_json)
         if not got:

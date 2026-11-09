@@ -1057,7 +1057,9 @@ def cmd_run(args) -> int:
                           model_version=args.model_version)
     release = launch.live_release(env, args.usecase)
     result = launch.run(env, {**payload, **({"release": release} if release else {})})
-    pipeline = result.get("pipeline") or "training"
+    # the schedule's own pipeline when a schedule is run (the launcher picks it), not "training" (seen writing Ch. 23)
+    pipeline = result.get("pipeline") or (f"schedule {args.schedule}" if args.schedule and not args.pipeline
+                                          else "training")
     if result.get("status") == "requested":
         print(f"requested: {result['usecase']} {pipeline} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")
