@@ -156,6 +156,10 @@
         "renewer_service_account": {
           "type": ["string", "null"],
           "description": "Pipewright 1.4.1: the renewer's service account (get, setRetention and update on the model folders and contracts only)"
+        },
+        "image": {
+          "type": "string",
+          "description": "the launcher image by digest; Pipewright FR-57: an A/B test's router-only gateway runs it where no online store names a lookup image"
         }
       }
     },

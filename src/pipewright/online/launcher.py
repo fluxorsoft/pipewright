@@ -124,7 +124,12 @@ def service_spec(contract, manifest: dict, online: dict, ca: str | None, gateway
                                                         **({"subnetwork": lk["subnetwork"]}
                                                            if lk.get("subnetwork") else {})}],
                                  "egress": lk.get("egress", "PRIVATE_RANGES_ONLY")}
-    return {"ingress": lk.get("ingress", "INGRESS_TRAFFIC_INTERNAL_ONLY"),
+    ingress = lk.get("ingress", "INGRESS_TRAFFIC_INTERNAL_ONLY")
+    if online.get("type") == "router" and not lk:
+        # FR-57: a router-only gateway where the environment has no online store (no network): the team's callers
+        # reach it from outside a network, so it is IAM-only (its invokers are ab_test.callers)
+        ingress = "INGRESS_TRAFFIC_ALL"
+    return {"ingress": ingress,
             "scaling": {"minInstanceCount": size.get("min_instances", 0)},     # service level (Google's advice)
             "labels": {"pipewright-usecase": contract.usecase[:63], "pipewright-tenant": contract.tenant[:63]},
             "template": template}
