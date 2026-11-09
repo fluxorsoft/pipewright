@@ -67,6 +67,9 @@ class Agg:
     def of(cls, values, denominators=None, covariates=None) -> Agg:
         """From unit-level values (tests and small checks; the analysis gets the sums from BigQuery)."""
         a = cls()
+        values = list(values)
+        denominators = None if denominators is None else list(denominators)
+        covariates = None if covariates is None else list(covariates)
         for i, v in enumerate(values):
             v = float(v)
             a.n += 1

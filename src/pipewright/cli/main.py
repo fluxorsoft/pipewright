@@ -979,6 +979,62 @@ def cmd_loop(args) -> int:
     return 1 if record.get("state") in ("failed", "validation-failed", "verification-failed") else 0
 
 
+def cmd_ab(args) -> int:
+    """FR-57: A/B tests of models."""
+    from pipewright.abtest import service as ab
+    from pipewright.gcp import Gcp
+
+    env = load_environment(Path(args.root), args.env)
+    uc = resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env)
+    gcp = Gcp()
+    tests = ab.ABTests(uc, env, gcp, online=_ab_online(uc, env, gcp))
+    c = args.ab_command
+    who = gcp.identity() if c in ("start", "set", "pause", "resume", "stop", "conclude") else None
+    if c == "plan":
+        out = tests.plan(args.baseline, args.sd, args.per_day)
+        print(json.dumps(out, indent=2) if args.json else "\n".join(f"{k}: {v}" for k, v in out.items()))
+        return 0
+    if c == "list":
+        for t in tests.store.list(uc.name):
+            print(f"{t['name']:<24} {t['state']:<18} started {t.get('started_at')} control v"
+                  f"{t['arms']['control']['version']} treatment v{t['arms']['treatment']['version']}"
+                  + (f" winner {t['decision']['winner']}" if (t.get('decision') or {}).get('winner') else ""))
+        return 0
+    if c == "status":
+        t = tests.get(args.name)
+        print(json.dumps(t, indent=2, default=str) if args.json else ab.render_test(t))
+        return 0
+    if c == "start":
+        tests.start(who, args.approve)
+    elif c == "set":
+        tests.set_allocation(args.allocation, args.reason, who)
+    elif c in ("pause", "resume", "stop"):
+        tests.set_state({"pause": "paused", "resume": "running", "stop": "stopped"}[c], args.reason, who)
+    elif c == "analyse":
+        out = tests.analyse(args.name)
+        print(json.dumps(out["result"], indent=2, default=str) if args.json else
+              ab.ab_analysis.render(out["result"], out["test"]))
+        return 1 if out["result"]["blocked"] else 0
+    elif c == "decide":
+        print(tests.decide(args.winner, args.reason, args.group))
+        return 0
+    elif c == "conclude":
+        tests.conclude(args.winner, args.reason, who, args.approve)
+    print(ab.render_test(tests.get(None) if c not in ("stop", "conclude") else tests.store.list(uc.name)[0]))
+    return 0
+
+
+def _ab_online(uc, env, gcp):
+    """Phase B: the serving arm when the use case serves online; None for batch-only use cases."""
+    if not uc.model.get("serving", {}).get("enabled"):
+        return None
+    try:
+        from pipewright.abtest import online
+    except ImportError:
+        return None
+    return online.Arms(uc, env, gcp)
+
+
 def cmd_decisions(args) -> int:
     import contextlib
 
@@ -1594,6 +1650,43 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--usecase", action="append", help="only these use cases (repeatable)")
     sp.add_argument("--json", action="store_true", help="for the generated workflows")
     sp.set_defaults(func=cmd_decisions)
+
+    sp = sub.add_parser("ab", help="A/B tests of models (FR-57): the champion against a candidate, units assigned "
+                                   "stickily, a business metric, a person decides")
+    absub = sp.add_subparsers(dest="ab_command", required=True)
+    for action, text in (
+            ("plan", "units needed per arm, how long that takes and the online arm's cost; changes nothing"),
+            ("start", "approve the treatment for the test and start it (a deploy: approvals.deploy_model)"),
+            ("status", "the test and its newest analysis"), ("list", "this use case's tests, newest first"),
+            ("set", "lower the treatment's allocation (it may only go down while a test runs)"),
+            ("pause", "send every unit to the control, keep the test"), ("resume", "resume a paused test"),
+            ("stop", "end the test, keep the champion, remove the treatment's serving arm"),
+            ("analyse", "analyse now: share checks, the metric per arm, guardrails, progress"),
+            ("decide", "an approver group's decision on the winner (sent over the group's topic)"),
+            ("conclude", "end the test with its winner; the treatment winning becomes the default")):
+        sp = absub.add_parser(action, help=text)
+        sp.add_argument("--root", default=".")
+        sp.add_argument("--env", required=True)
+        sp.add_argument("--usecase", required=True)
+        if action in ("status", "analyse"):
+            sp.add_argument("--name", help="a past test (default: the running one)")
+        if action in ("plan", "status", "analyse"):
+            sp.add_argument("--json", action="store_true", help="machine-readable output")
+        if action == "plan":
+            sp.add_argument("--baseline", type=float, help="the control's current value of the metric")
+            sp.add_argument("--sd", type=float, help="mean or ratio: the unit-level standard deviation")
+            sp.add_argument("--per-day", type=float, help="units exposed a day (scored or calling)")
+        if action in ("start", "conclude"):
+            sp.add_argument("--approve", action="store_true", help="confirm a manual approval")
+        if action == "set":
+            sp.add_argument("--allocation", type=int, required=True, help="the treatment's share in basis points")
+        if action in ("set", "pause", "resume", "stop", "decide", "conclude"):
+            sp.add_argument("--reason", required=True, help="recorded with your name")
+        if action in ("decide", "conclude"):
+            sp.add_argument("--winner", choices=("treatment", "control"), required=action == "decide")
+        if action == "decide":
+            sp.add_argument("--group", help="the approver group you act for (default: the first you belong to)")
+        sp.set_defaults(func=cmd_ab)
 
     sp = sub.add_parser("loop", help="the closed retrain loop: a production case trained in test, validated, "
                                      "promoted, approved and verified in production")

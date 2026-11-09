@@ -294,6 +294,8 @@ def create_app(registry: Registry | None = None) -> Flask:
         if contract is None:
             return jsonify(status="error", reason=f"{message.get('usecase')}: no live release"), (
                 503 if via != "direct" else 404)
+        if message.get("kind") == "ab.decision":          # FR-57: an approver group's A/B decision
+            return _ab_decision(contract, message, group, via, caller)
         try:
             result = decisions().decide(contract, message, group, via, by=caller if via == "direct" else None)
         except Exception as e:  # noqa: BLE001
@@ -301,6 +303,44 @@ def create_app(registry: Registry | None = None) -> Flask:
             return jsonify(status="error", reason=str(e)[:300]), 500
         log.info("retrain decision for %s: %s", contract.usecase, {k: v for k, v in result.items() if k != "training"})
         return jsonify(result), (409 if via == "direct" and result["status"] == "refused" else 200)
+
+    def _ab_decision(contract, message: dict, group: str | None, via: str, caller: str | None):
+        """FR-57: the group's decision on the use case's running A/B test, recorded on the test (the launcher is the
+        only writer of decisions). The person is the ID token's identity, verified as for retrain decisions."""
+        from datetime import datetime, timezone
+
+        from pipewright.abtest import decide as ab_decide
+        from pipewright.abtest.store import TestStore
+
+        if group is None:
+            return jsonify(status="refused", reason="A/B decisions come from an approver group's topic"), 409
+        try:
+            by = identity.verify(message.get("id_token") or "", audiences())
+        except identity.NotVerified as e:
+            log.warning("A/B decision dropped: %s", e)
+            return jsonify(status="dropped", reason=str(e)), 200
+        at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        held = {}
+
+        def change(t):
+            try:
+                return ab_decide.record(t, group, by, message.get("winner", ""), message.get("reason", ""), at,
+                                        message.get("approval") if isinstance(message.get("approval"), dict) else None)
+            except ab_decide.Refused as e:
+                held["refused"] = str(e)
+                return None
+
+        store = TestStore(getattr(reg(), "gcp", None), reg().manifest["artifacts_bucket"])
+        t = store.update(contract.usecase, message.get("ab_test") or "", change)
+        if t is None or "refused" in held:
+            why = held.get("refused") or f"no test {message.get('ab_test')} for {contract.usecase}"
+            log.warning("A/B decision on %s by %s refused: %s", message.get("ab_test"), by, why)
+            return jsonify(status="refused", reason=why), 200
+        _event("ab_test.decision", contract, None, ab_test=t["name"], group=group, by=by,
+               winner=message.get("winner"), reason=message.get("reason"),
+               decided=(t.get("decision") or {}).get("winner"))
+        return jsonify(status="recorded", ab_test=t["name"], group=group, by=by,
+                       winner=(t.get("decision") or {}).get("winner")), 200
 
     @app.post("/retraining/tick")
     def retraining_tick():

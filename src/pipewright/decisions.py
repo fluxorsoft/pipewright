@@ -9,6 +9,9 @@ approver group) and the pipewright command a gate job runs once that environment
     loop-advance    a running loop: no person needed, the scheduled workflow advances it (`--steps`)
     deploy-approve  approvals.deploy_model ci (Pipewright 1.2.0): the default version passes its gates and is not served
     deploy-auto     approvals.deploy_model on_register (1.2.0): the same, deployed by the scheduled workflow, no person
+    ab-decide       an A/B test waiting for a decision (FR-57), once per required approver group not yet decided; the
+                    command carries the winner the analysis supports (the reviewers approve that choice)
+    ab-conclude     an A/B test whose decision is recorded (or needs no group): end it with its winner
 """
 
 from __future__ import annotations
@@ -35,6 +38,32 @@ class Item:
 
     def to_dict(self) -> dict:
         return {"id": self.id, **asdict(self)}
+
+
+def ab_items(usecase: str, env: str, tests: list[dict]) -> list[Item]:
+    """FR-57: tests waiting for a person."""
+    out = []
+    for t in tests:
+        if t.get("state") != "decision_required":
+            continue
+        res = t.get("analysis") or {}
+        p = res.get("primary") or {}
+        winner = "treatment" if p.get("treatment_better") and not res.get("blocked") else "control"
+        summary = (f"test {t['name']}: {p.get('name')} difference {p.get('diff', 0):+.4f} (p {p.get('p', 1):.3g}); "
+                   f"{'; '.join(res.get('decision_reasons') or [])}; the analysis supports the {winner}")
+        d = t.get("decision") or {}
+        if d.get("winner") or not d.get("required"):
+            chosen = d.get("winner") or winner
+            out.append(Item("ab-conclude", usecase, env, env, t["name"],
+                            ["ab", "conclude", "--env", env, "--usecase", usecase, "--winner", chosen,
+                             "--reason", "concluded in GitHub (see the run)", "--approve"], summary))
+            continue
+        decided = {a["group"] for a in d.get("approvals") or []}
+        for g in [g for g in d["required"] if g not in decided]:
+            out.append(Item("ab-decide", usecase, env, f"{env}-{g}", f"{t['name']}-{g}",
+                            ["ab", "decide", "--env", env, "--usecase", usecase, "--winner", winner, "--group", g,
+                             "--reason", "decided in GitHub (see the run)"], summary))
+    return out
 
 
 def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
@@ -120,6 +149,11 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
         except Exception:  # noqa: BLE001 - no model yet: nothing to approve
             versions = []
         out += pending_for(name, env.name, versions, store.list(name), _launchers(root, env), _deploy(uc, env, gcp))
+        if (uc.ml or {}).get("ab_test"):                # FR-57
+            from pipewright.abtest.store import TestStore
+
+            current = TestStore(gcp, env.artifacts_bucket).current(name)
+            out += ab_items(name, env.name, [current] if current else [])
     return out
 
 

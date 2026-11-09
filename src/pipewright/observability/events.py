@@ -63,7 +63,7 @@ def approval() -> dict:
 
 def event(event_type: str, usecase: str | None, environment: str | None, tenant: str | None = None,
           release: str | None = None, run_id: str | None = None, **data) -> dict:
-    if (event_type in DECISIONS or event_type.startswith("loop.")) and "approval" not in data:
+    if (event_type in DECISIONS or event_type.startswith(("loop.", "ab_test."))) and "approval" not in data:
         data["approval"] = approval()
     return {"event_type": event_type, "time": datetime.now(timezone.utc).isoformat(), "usecase": usecase,
             "environment": environment, "tenant": tenant, "release": release, "run_id": run_id, "data": data}

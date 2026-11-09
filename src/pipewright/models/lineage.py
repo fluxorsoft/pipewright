@@ -244,6 +244,7 @@ def fingerprints(gcp, env: Environment, run_id: str | None, replay_of: str | Non
 # Decisions about a version (Pipewright 1.2.0, FR-84): who approved, promoted, deployed or rolled it back, and how each
 # was approved, from the environment's event log (manifest observability.evidence_dataset, table `events`).
 VERSION_EVENTS = ("model.approved", "model.deployed", "model.undeployed")
+AB_EVENTS = ("ab_test.started", "ab_test.decided")     # FR-57: a test names its control and treatment versions
 RELEASE_EVENTS = ("release.live", "release.promoted", "release.rolled_back")
 
 
@@ -262,6 +263,8 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
            "WHERE JSON_VALUE(data, '$.usecase') = @usecase AND JSON_VALUE(data, '$.environment') = @env AND ("
            f"(JSON_VALUE(data, '$.event_type') IN UNNEST({list(VERSION_EVENTS)}) "
            "AND JSON_VALUE(data, '$.data.version') = @version) OR "
+           f"(JSON_VALUE(data, '$.event_type') IN UNNEST({list(AB_EVENTS)}) AND @version IN "
+           "(JSON_VALUE(data, '$.data.control'), JSON_VALUE(data, '$.data.treatment'))) OR "
            f"(JSON_VALUE(data, '$.event_type') IN UNNEST({list(RELEASE_EVENTS)}) AND JSON_VALUE(data, '$.release') = "
            "@release)) ORDER BY publish_time LIMIT 100")
     try:
@@ -279,6 +282,7 @@ def decisions(gcp, env: Environment, usecase: str, version: str, release: str | 
                     "release": event.get("release"), "endpoint": data.get("endpoint"),
                     **({"contract_sha256": data["contract_sha256"]} if data.get("contract_sha256") else {}),
                     "traffic_percent": data.get("traffic_percent"),
+                    **({k: data[k] for k in ("ab_test", "control", "treatment", "winner") if data.get(k)}),
                     **({"source_environment": data["source_environment"]} if data.get("source_environment") else {}),
                     # Pipewright 1.3.1: the evaluation record an approval was judged on, by digest
                     **({"evaluation": data["evaluation"]} if isinstance(data.get("evaluation"), dict) else {})})
@@ -395,7 +399,12 @@ def _render_decisions(info: dict, lines: list[str]) -> None:
     if info.get("decisions_note"):
         lines.append(f"  decided  {info['decisions_note']}")
     for i, d in enumerate(info.get("decisions") or []):
-        what = {"model.approved": f"v{d.get('version')} made the champion",
+        what = {"model.approved": (f"v{d.get('version')} approved for A/B test {d['ab_test']} (the default "
+                                   "unchanged)" if d.get("ab_test") else f"v{d.get('version')} made the champion"),
+                "ab_test.started": f"A/B test {d.get('ab_test')} started: v{d.get('control')} (control) against "
+                                   f"v{d.get('treatment')} (treatment)",
+                "ab_test.decided": f"A/B test {d.get('ab_test')} decided: the {d.get('winner')} won "
+                                   f"(v{d.get('control')} against v{d.get('treatment')})",
                 "model.deployed": f"v{d.get('version')} deployed to {d.get('endpoint')} "
                                   f"({d.get('traffic_percent')}% of traffic)",
                 "model.undeployed": f"v{d.get('version')} undeployed",
