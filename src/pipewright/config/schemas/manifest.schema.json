@@ -755,6 +755,11 @@
           "pattern": "^gs://[^/]+/.*/$",
           "description": "write-once location for evidence packs (ends with /)"
         },
+        "log_bucket": {
+          "type": ["string", "null"],
+          "pattern": "^projects/[^/]+/locations/[^/]+/buckets/[^/]+$",
+          "description": "Pipewright FR-57: the Cloud Logging bucket the platform routes the project's logs into (instead of _Default); the launcher reads the A/B gateway's lines there"
+        },
         "audit_log_bucket": {
           "type": ["string", "null"],
           "pattern": "^projects/[^/]+/locations/[^/]+/buckets/[^/]+$",

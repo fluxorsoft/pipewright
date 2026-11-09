@@ -175,14 +175,18 @@ def ingest(gcp, manifest: dict, contract, test: dict, tests) -> list[str]:
 
 # -- serving: the gateway's lines and the treatment's endpoint ----------------------------------------------------
 
-def log_lines(gcp, project: str, test: str, since: datetime, until: datetime, events: tuple[str, ...]) -> list:
-    """The gateway's lines of these events for the test, oldest first (the launcher reads logs: logging.viewer)."""
+def log_lines(gcp, project: str, test: str, since: datetime, until: datetime, events: tuple[str, ...],
+              bucket: str | None = None) -> list:
+    """The gateway's lines of these events for the test, oldest first (the launcher reads logs: logging.viewer).
+    bucket (manifest observability.log_bucket): where the platform keeps the project's logs instead of _Default
+    (found in the battle test: Enterprise routes them all to its own bucket, so the project's view had none)."""
     flt = (f'logName="projects/{project}/logs/pipewright_ab_exposure" AND jsonPayload.ab_test="{test}" AND '
            f'({" OR ".join(f"jsonPayload.event={json.dumps(e)}" for e in events)}) AND '
            f'timestamp>="{_z(since)}" AND timestamp<="{_z(until)}"')
     out, token = [], None
     for _ in range(20):                              # 20 pages of 1,000: a day of counts from about 14 instances
-        body = {"resourceNames": [f"projects/{project}"], "filter": flt, "orderBy": "timestamp asc",
+        body = {"resourceNames": [f"{bucket}/views/_AllLogs" if bucket else f"projects/{project}"],
+                "filter": flt, "orderBy": "timestamp asc",
                 "pageSize": 1000, **({"pageToken": token} if token else {})}
         r = gcp.post(LOG_API, body)
         if not r.ok:
@@ -244,8 +248,9 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
     watched = _dt(test.get("watched_at"))
     since = _dt(test.get("pending_trip")) or (watched - LAG if watched else None) or \
         _dt(test.get("started_at")) or start
-    trips = log_lines(gcp, project, test["name"], since, now, ("breaker_tripped",))
-    counts = log_lines(gcp, project, test["name"], start - timedelta(minutes=3), end, ("counts",))
+    bucket = (manifest.get("observability") or {}).get("log_bucket")
+    trips = log_lines(gcp, project, test["name"], since, now, ("breaker_tripped",), bucket)
+    counts = log_lines(gcp, project, test["name"], start - timedelta(minutes=3), end, ("counts",), bucket)
     sent, loss = router_calls(counts, start)
     endpoint = (test["arms"]["treatment"] or {}).get("endpoint") or ""
     kserve = endpoint.startswith("kserve:")

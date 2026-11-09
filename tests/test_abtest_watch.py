@@ -309,3 +309,16 @@ def test_errors_the_router_saw_count_when_monitoring_has_none(monkeypatch):
     counts = [_line(65, "a"), _line(11, "a", treatment_calls=400, treatment_errors=40)]
     out = watch.check_serving(Gcp(counts), MANIFEST, _test(), _section(), NOW)
     assert out["answered"] == 400 and out["errors"] == 40 and "40 error(s)" in out["breach"]
+
+
+def test_the_tick_reads_the_platforms_log_bucket_when_it_has_one(monkeypatch):
+    """Found in the battle test: Enterprise routes every log out of _Default, so the tick saw no trip."""
+    _metrics(monkeypatch, 0, 0)
+    gcp = Gcp([])
+    bucket = "projects/p/locations/r/buckets/pipewright"
+    watch.check_serving(gcp, {**MANIFEST, "observability": {"log_bucket": bucket}}, _test(), _section(), NOW)
+    names = {n for url, body in gcp.posts if url == watch.LOG_API for n in body["resourceNames"]}
+    assert names == {f"{bucket}/views/_AllLogs"}
+    gcp = Gcp([])
+    watch.check_serving(gcp, MANIFEST, _test(), _section(), NOW)
+    assert {n for url, body in gcp.posts if url == watch.LOG_API for n in body["resourceNames"]} == {"projects/p"}
