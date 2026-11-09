@@ -579,9 +579,15 @@ def how_to_call(uc: ResolvedUseCase, env: Environment, endpoint_resource: str) -
     online = uc.ml.get("online_features") or {}
     if online.get("mode") == "gateway":        # FR-106: callers call the gateway, never the endpoint
         callers = ", ".join((online.get("gateway") or {}).get("callers") or []) or "the callers the use case names"
+        # what the environment set, not always "internal" (the starter's default is all, IAM-only: book Chapter 24)
+        ingress = ((((getattr(env, "features", None) or {}).get("online_store") or {}).get("lookup") or {})
+                   .get("ingress") or "INGRESS_TRAFFIC_INTERNAL_ONLY")
+        inside = ingress == "INGRESS_TRAFFIC_INTERNAL_ONLY"
         return "\n".join([
-            "How to call it (through the lookup gateway, from inside the network):",
-            f"  service       {online.get('service')} (Cloud Run, internal), its URL in `pipewright doctor`",
+            "How to call it (through the lookup gateway" + (", from inside the network):" if inside else "):"),
+            f"  service       {online.get('service')} (Cloud Run, "
+            + ("internal" if inside else "reachable from any network; IAM decides who may call")
+            + "), its URL in `pipewright doctor`",
             "  predict URL   <service URL>/predict",
             f"  caller needs  run.invoker on {online.get('service')} (granted to {callers}), an ID token for it",
             "  request       POST, Authorization: Bearer <ID token>, a JSON body like:",
