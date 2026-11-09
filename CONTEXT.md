@@ -167,7 +167,7 @@ requirements named).
 | FR-54 | **Approved image allow-list:** the platform lists, per environment, the base images and package indexes a use case's images may be built from (component, Ray and synthetic images); `validate` and `release` refuse anything else, and the release contract records the base images by digest. Declared in the manifest like other platform policy (D-81); Pipewright Enterprise sets it in the platform file. Raised with the forecasting route of the BigQuery ML design (approved libraries such as statsmodels and Prophet) | Released: 1.1.0 (2026-10-26) | manifest `policies`, `build/images.py` |
 | FR-55 | **Lineage per run:** a model version leads to its run, the release it ran (commit, images, templates, `ml_config` with its SQL digests), the exact rows it trained on (the run's snapshot or BigQuery ML rows), the sources those came from (entity table, feature tables or groups and their read time, the label table and window) and its evaluation and approvals: one `lineage.json` per run with the evaluation record, and a lineage section in Fleet View. Upstream lineage of the sources (Data Lineage API) later | Released: 1.1.0 (2026-10-26) | runtime, bqml steps, Enterprise Fleet View |
 | FR-56 | **Approval gates in CI:** every human decision (model approval, deployment, promotion, retrain decisions, the closed loop's steps, synthetic data releases) can be a GitHub Actions job that waits for its environment's required reviewers, then runs the `pipewright` command; a scheduled workflow lists what needs a decision and opens one gated job per item. Pipewright records the GitHub reviewer, the approval time and comment and the workflow run next to the CI identity | Released: 1.1.0 (2026-10-26) | `pipewright ci init`, events, evidence, Enterprise Fleet View |
-| FR-57 | **A/B testing of models (section 8.16):** a controlled experiment between the champion and a candidate, with sticky assignment by a unit key, a business metric and guardrails fixed in advance, a minimum sample and duration, analysis per arm, and a person deciding the winner through a decision case; recorded in the winning version's lineage. Batch first, then online | Phase 10, after FR-92 (user, 2026-11-05); the user reviews the design before it is built |
+| FR-57 | **A/B testing of models (section 8.16):** a controlled test between the champion and a candidate: sticky assignment by a unit key, the same in batch and online; the gateway routes to an endpoint per arm; a business metric and guardrails fixed in advance; share checks, a planned sample and a minimum duration; a person decides through a decision case; recorded in both versions' lineage. Batch first | SETTLED 2026-11-09 after spikes S1, S3 to S7 (user accepted D1 to D8); next after 1.4.2, phase by phase (A batch, B online, C Enterprise, D advanced); not built |
 | FR-58 | **GPU limits for pipeline steps:** the platform lists, per environment, the accelerator types (and the most per step) that `steps.<name>.gpu` may ask for, as it already can for Ray clusters (`ray.accelerators`); `validate` and `release` refuse anything else. Today a plain step may ask for any GPU the project's quota allows, so quota is the only limit. Off unless the manifest sets the list | Done: 1.2.0 (2026-10-31), tested by unit tests only (no GPU quota) | manifest `policies`, `config/ml.py`, `checks/doctor.py` |
 | FR-59 | **A base image per use case:** `components.base_image` (for example a CUDA image for GPU training) instead of the environment's `images.default_base_image` for every use case; checked against the approved image allow-list (`images.base_images`) and recorded by digest in the release contract like today's base. Today a team needing its own base passes a pre-built image with `release --component-image`. Off unless set | Done: 1.2.0 (2026-10-31) | `build/images.py`, `release/service.py`, usecase schema |
 | FR-60 | **How to call a deployed model:** `pipewright deploy-model` (and `--promote`) ends by printing the endpoint ID, the full predict URL (`https://<region>-aiplatform.googleapis.com/v1/projects/.../endpoints/<id>:predict`), the role a caller needs (`aiplatform.endpoints.predict`) and a sample request built from the model's features (feature values, or entity IDs with `model.serving.features: online`); the same from a read-only `pipewright model endpoint`. Today it prints only the endpoint's display name, so developers look the ID up and build the URL by hand | Done: 1.2.0 (2026-10-31) | `models/deploy.py`, `cli/main.py` |
@@ -1018,54 +1018,128 @@ a named image user Kubernetes cannot verify as non-root (now numeric); release r
 wins). The platform side (the cluster, Kubeflow and KubeRay from mirrored images, KServe, finished pods deleted a
 minute after they succeed so the logging agent keeps up) is the platform's, not this repository's.
 
-### 8.16 A/B testing of models (FR-57, design note 2026-10-26; roadmap phase 10, user 2026-11-05)
+### 8.16 A/B testing of models (FR-57; settled 2026-11-09 after spikes)
 
-Four ways of comparing models answer four different questions; Pipewright 1.1 has the first three, A/B testing is new:
+Four ways of comparing models answer four questions; Pipewright has the first three, A/B testing is new:
 
 | | Question | Mechanism | Today |
 |---|---|---|---|
-| Offline comparison | Better on held-out history? | Candidate and champion score the same test rows | Built: every training run (the champion comparison and margin) |
-| Shadow | Sensible on live data? | The candidate scores live data, nothing acts on it | Batch only, by hand (`run --model-version`); no online shadow |
-| Canary | Safe to switch? | A share of live requests goes to the candidate, watched, promoted or rolled back | Built on Agent Platform endpoints (`deploy-model --canary`, FR-15); not on KServe |
-| A/B test | Better for the business? | Units randomly and stickily assigned to arms; a business outcome measured per arm; a person decides | Not built (this note) |
+| Offline comparison | Better on held-out history? | Candidate and champion score the same test rows | Built: every training run |
+| Shadow | Sensible on live data? | The candidate scores live data, nothing acts on it | Batch only, by hand (`run --model-version`); online shadow is phase D |
+| Canary | Safe to switch? | A share of live requests goes to the candidate, watched, promoted or rolled back | Built on Agent Platform endpoints (`deploy-model --canary`, `loop.canary`) |
+| A/B test | Better for the business? | Units randomly and stickily assigned to arms; a business outcome measured per arm; a person decides | This section |
 
 A canary splits per request (one customer can see both models) and checks safety; it is not an A/B test.
 
-**Shape (additive, off by default).** A use case gains an optional `experiment` section:
+**Why the routing is Pipewright's (found in research, 2026-11-09).** No serving platform assigns stickily: Agent
+Platform splits traffic at random per request and `predict` cannot target a deployed model (only `explain` takes a
+`deployedModelId`); KServe in Standard mode has no split; Seldon, SageMaker and Databricks route per request or per
+session. ZenML delegates to those deployers. So each arm is its own serving target (an Agent Platform endpoint, a KServe
+InferenceService, or in batch a model version in the scoring run), and Pipewright's lookup gateway (FR-106) routes by
+hash. The same code works on every provider.
+
+**Configuration (additive, off by default).** An optional `ab_test` section; nothing changes without it:
 
 ```yaml
-experiment:
-  name: offer-v7-vs-v5                  # salts the assignment; a new name re-randomises
+ab_test:
+  name: lapse-v7-vs-v5                 # salts the hash; a new name re-randomises
+  unit: customer_id                    # a data contract column
   arms: { control: champion, treatment: { model_version: 7 } }
-  allocation: { treatment: 0.1 }        # the rest is control
-  unit: customer_id                     # a data contract column; assignment is sticky per unit
-  metric: { name: orders_30d, source: <outcomes table>, window_days: 30, direction: higher }
-  guardrails: [{ name: basket_value, max_drop: 0.02 }]
-  minimum: { units_per_arm: 2000, days: 21 }
+  allocation: { treatment_bp: 2000 }   # basis points (20%); may only go down while running
+  metric:                              # fixed before start (the config digest is recorded)
+    name: renewed_90d
+    source: bq://${project}.retail.renewals
+    key: customer_id
+    time_column: renewed_at
+    window_days: 90                    # after a unit's first exposure; counted only once closed
+    type: proportion                   # proportion | mean | ratio (delta method)
+    direction: higher
+    minimum_effect: 0.01               # sizes the test
+  guardrails:
+    technical: { max_error_rate_increase: 0.01, max_latency_increase: 0.2, min_requests: 200 }
+    business: [{ name: basket_value, source: ..., max_drop: 0.02 }]
+  duration: { min_days: 14, max_days: 60 }
+  analysis: { method: fixed, alpha: 0.05, power: 0.8 }
+  decision: { approvals: { required: [ml-leads, model-risk] } }
 ```
 
-- **Assignment** is deterministic: `hash(experiment.name, unit) < allocation` puts a unit in the treatment arm,
-  with no lookup table, the same in batch and online, repeatable for an audit.
-- **Batch use cases:** scoring scores each unit with its arm's model and writes `experiment` and `arm` beside the
-  score (the scoring table gains two nullable columns, additive). Outcomes arrive through the label window
-  mechanism (D-111) the retraining path already uses.
-- **Online use cases:** the serving handler routes by the same hash (both versions deployed on the endpoint); this
-  works on Agent Platform and KServe alike, unlike a per-request traffic split. Responses carry the arm.
-- **Analysis:** a scheduled step computes the metric and guardrails per arm with confidence intervals. When the
-  minimum sample and duration are reached, or a guardrail fails, it opens a decision case (the retrain decision
-  machinery: named approvers, quorum, recorded reasons). Approve = the treatment version becomes the default; any
-  other outcome ends the experiment and leaves the champion.
-- **Events and lineage:** `experiment.started`, `experiment.guardrail_failed`, `experiment.decided`; the decided
-  experiment (arms, sample, result, decision) is recorded in the winning version's lineage. Enterprise adds an
-  evidence control and a Fleet View page.
-- **Refusals:** an experiment needs a candidate that passed its gates; one experiment per use case at a time; not
-  during a closed retrain loop on the same use case; forecasts and unsupervised models have no unit outcome and
-  are refused.
+**Decisions (user, 2026-11-09: "accept all eight").**
 
-**Delivery, when started:** phase 5a batch A/B (assignment in scoring, analysis, decision case), on `lapse-risk`
-in the book's example; phase 5b online sticky routing and a KServe canary; phase 5c online shadow and stopping
-rules (sequential testing). Open decisions: the default statistical test and interval method; whether a
-guardrail failure stops the experiment automatically or only opens a case; per-segment analysis.
+| | Decision |
+|---|---|
+| D1 | The section is `ab_test:` and the commands `pipewright ab ...` (`experiment` already means Vertex AI Experiments in `training.experiment`) |
+| D2 | The treatment arm runs on dedicated machines by default, on the shared pool (FR-105) when the use case is already on one; `ab start` and `ab stop` announce the pool's restart as pool changes do |
+| D3 | Use cases whose callers send features route through the gateway too, in a router-only mode (no lookup); there is no client library, so assignment, exposure and guardrails stay in one place |
+| D4 | Technical guardrails stop the treatment automatically; business guardrails open a decision case |
+| D5 | Fixed-sample statistics first; sequential testing later (phase D) |
+| D6 | Starting a test is a deploy: judged by `approvals.deploy_model` and the integrity checks (the treatment needs its gates passed and an approval record of its files) |
+| D7 | Batch first (phase A, on the book's lapse-risk), then online (phase B) |
+| D8 | Everything that runs an A/B test is open source, statistics included; Enterprise adds platform policy, cross-team overlap detection, Fleet View pages and an evidence control |
+
+**Assignment.** `bucket = int(first 7 bytes of SHA-256(name + ":" + unit), big endian)`; treatment iff
+`bucket < treatment_bp * 2^56 // 10000`. Seven bytes because BigQuery has no unsigned 64-bit integer; an integer
+threshold so Python and SQL compare exactly. Spike S3: identical in Python and BigQuery on 1,000,004 keys and five
+allocations. A unit with no key is served by control and counted as unassigned.
+
+**Online.** `pipewright ab start` deploys the treatment on its own endpoint (`<usecase>-ab-<name>`) or InferenceService;
+control stays where it is. The gateway assigns, calls the arm, returns `ab_test` and `arm`, and writes one exposure log
+line per call (test, arm, unit, release, the answering `deployedModelId`) off the request path. Spike S1: 4,000 calls,
+each arm answered only by its own model, router overhead about 30 microseconds. A mismatch between the answering model
+and the arm's approved deployment is counted (an integrity check per call). Arm endpoints admit only the gateway's
+identity, so callers cannot bypass the assignment.
+
+**Exposures.** Log lines from the gateway, copied by a per-tenant log sink into the tenant's dataset (the platform's
+Terraform makes the sink and its grant). Spike S4: 4,000 of 4,000 delivered, no duplicates, within about 5 minutes;
+routing logs is free, BigQuery storage applies. The analysis keeps each unit's first exposure. In batch, being scored
+is the exposure: the scores table gains nullable `ab_test` and `arm` (spike S5: one `ML.PREDICT` statement per arm,
+4,276 customers each scored once by its own model).
+
+**Analysis** (a scheduled step, results as aggregates in `ab_test_results`, event `ab_test.analysed`):
+
+- **Integrity first:** the share per arm against the plan (chi-square, p < 0.001) and, because that test is weak at
+  small samples (spike S6: a 4% loss in one arm was flagged in 2.6% of tests at n = 4,276), a direct check of the
+  observed share against a binomial bound and the router's counts of unassigned and dropped units. Either blocks a
+  decision and alerts.
+- **The metric:** per arm on exposed units, outcomes within `window_days` of first exposure, only for units whose window
+  has closed; difference and relative lift with a 95% interval: two-proportion z-test, Welch t-test for means, the
+  delta method for ratios. Spike S6: equal to statsmodels; 2,000 A/A splits gave 4.8% false positives at alpha 0.05.
+- **The sample:** `pipewright ab plan` computes it from `minimum_effect`, alpha, power and the baseline, and says (or
+  refuses) when the population cannot reach it before `max_days` (spike S6: a 3-point effect needs 4,120 per arm; one
+  monthly cohort of the book's retailer has 2,138). A decision before `min_days` and the sample is refused.
+- **Technical guardrails:** the gateway keeps a breaker per arm (error rate over the last N calls); tripped, it sends
+  the arm's units to control at once and records `ab_test.guardrail_breached`. The launcher's tick confirms from Cloud
+  Monitoring per endpoint (spike S7: per-arm calls and errors matched the router exactly, complete in about 3 minutes)
+  and opens the case.
+- **CUPED** (phase D): a pre-period covariate per unit from the feature tables as of the test's start (spike S6: 15.4%
+  variance reduction with recency, orders and spend).
+
+**Lifecycle and decisions.** `running` -> `decision_required` -> `concluded` or `stopped`, and `paused` (allocation 0,
+arms kept). A case opens when `min_days` and the sample are reached, at `max_days`, on a business guardrail or on an
+integrity failure, with a decision pack (lift and interval, guardrails, the share checks, sample, duration, cost so far).
+Decisions reuse the retrain decision machinery (approver groups, quorum, reasons, GitHub gates; `decisions pending`
+lists `ab-decide`). `ab conclude --winner treatment` makes the treatment the default through the normal approval (files
+checked against its approval), moves routing to it and drains the old arm; any other outcome removes the treatment.
+
+**Commands.** `pipewright ab plan | start | status | set --allocation <bp> | pause | resume | stop | conclude`.
+
+**Events and lineage.** `ab_test.started`, `ab_test.allocation_changed`, `ab_test.guardrail_breached`,
+`ab_test.analysed`, `ab_test.decided`, `ab_test.stopped`; the concluded test (config digest, arms, allocation history,
+sample, result, decision) goes into both versions' lineage.
+
+**Refused.** A treatment without passed gates or an approval of its files; two tests on one use case; a test during a
+closed retrain loop on the same use case; forecasts and unsupervised models; a `unit` that is not a contract column;
+changing `name`, `unit`, `metric` or `guardrails` while running; raising the allocation while running.
+
+**Cost** (list prices, before the build confirms them per region): a dedicated treatment arm about $80 a month per
+n1-standard-2 replica, none extra on a pool; the gateway about $0.40 per million calls plus CPU time; exposures and the
+analysis pennies (log routing free, BigQuery storage and one query a run).
+
+**Delivery.** Phase A batch (assignment, scoring per arm for containers and BigQuery ML, analysis with the share checks,
+decision case, events, lineage, `ab plan`, `start`, `status`, `conclude`), on the book's lapse-risk. Phase B online (arm
+endpoints and InferenceServices, the gateway as router and router-only mode, the breaker, exposure logs and the sink,
+Monitoring guardrails, pools). Phase C Enterprise (`policies.ab_test`, overlap detection across use cases that share a
+unit, Fleet View experiment pages, the evidence control). Phase D CUPED, sequential testing, online shadow, per-segment
+analysis. Spike evidence: the vertexai-poc workspace `spikes/ab/` and `pipewright_ab_testing_design.md`.
 
 ---
 
@@ -2112,7 +2186,7 @@ deprecations page and the SDK 2.0.1 migration guide:
 | Approval and deploy judge by the released rules, not the local checkout (FR-96) | Released: 1.4.0 (2026-11-06) |
 | A decision trail that cannot be forged or quietly rewritten (FR-97) | Released: 1.4.0 (2026-11-06) |
 | Model serving observability: operational and model signals per version (FR-98) | Phase 11: to be reviewed and prioritised (user, 2026-11-05) |
-| A/B testing of models (FR-57, section 8.16): sticky assignment, business metric and guardrails, analysis per arm, a person decides | Next after the 1.4.2 release (user, 2026-11-09), after spikes; design proposal under review (D1 to D8), not built |
+| A/B testing of models (FR-57, section 8.16): sticky assignment, business metric and guardrails, analysis per arm, a person decides | Settled 2026-11-09 after spikes; build next, phase A (batch) first |
 | Promotion of a release (and its approved model) between environments by digest (FR-29, section 8.12) | Built 2026-10-11 |
 | The closed retrain loop across environments (FR-48, section 8.13): phase 1 to 3 deliveries | Phases 1 to 3 released: 1.1.0 (2026-10-26). Phase 6 (user, 2026-11-05): the items section 8.13 lists as not yet done, each behind a toggle: BigQuery ML use cases in the loop (D-115), the online canary path with automatic rollback live (D-108), the loop's data grants (test reading a file landed in production; production's features and label window) and monitoring-driven retraining (delivery phase 4) |
 | `kfp` adapter for Kubeflow Pipelines on GKE, with KubeRay, KServe, CronJobs, the pull launcher and the read-only UI (FR-30, sections 8.14 and 8.15) | Built 2026-10-17 |
