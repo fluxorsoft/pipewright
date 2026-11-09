@@ -10,6 +10,7 @@
 #   config/evaluation.yaml  metrics, gates, champion, slices, explainability, model card
 #   config/operations.yaml  inference, monitoring, retraining
 #   config/synthetic.yaml   synthetic data (off until your team needs it)
+#   config/ab_test.yaml     an A/B test of a candidate against the champion (off until you run one)
 #   environments/<env>.yaml per-environment overrides
 # `pipewright resolve --env <env>` shows the merged result.
 apiVersion: pipewright/v1

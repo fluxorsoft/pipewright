@@ -5,6 +5,30 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
+A/B testing of models (FR-57), off until `ab_test.enabled`: a use case that sets none of it scores and serves exactly
+as in 1.4.2. The guide is [docs/AB_TESTING.md](docs/AB_TESTING.md).
+
+- `ab_test` in the use case YAML and `pipewright ab plan | start | status | list | set | pause | resume | stop |
+  analyse | decide | conclude`: sticky assignment by a hash of the test's name and the unit, the same in batch scoring,
+  BigQuery ML SQL and the online gateway; the configuration fixed at the start (its digest); the treatment approved for
+  the test (released gates, files checked) without becoming the default.
+- Batch: scoring runs score each unit with its arm's model and record `ab_test` and `arm` beside each score (containers
+  and BigQuery ML); a treatment whose files cannot be checked scores nobody.
+- Online: the treatment on `<usecase>-ab-endpoint` (dedicated or a shared pool), the lookup gateway as the router (and
+  router-only for callers that send features), exposure lines to Cloud Logging, a breaker, and a shadow mode.
+- The analysis, scheduled as the tenant's runner or run at once: share checks (chi-square and a binomial bound, the
+  gateway's losses, calls that bypassed the router), the metric per arm with 95% intervals (proportion, mean, ratio),
+  the planned sample, CUPED, sequential testing (mSPRT), segments, business guardrails; a results table of aggregates.
+- The launcher's tick: technical guardrails from the gateway's lines and Cloud Monitoring (the arms compared as the
+  canary is) stop the treatment and open the decision.
+- Decisions through approver groups (one person, one voice), `decisions pending` items, events (`ab_test.*`) and
+  lineage for both versions; a feed topic per tenant for the team's own tools (events, and pseudonymised exposures
+  where the platform allows).
+- Platform rules in the manifest (`policies.ab_test`: allowed, required approvers, the largest share, the shortest
+  test, required guardrails, overlap with another test on the same unit, feed exposures); `launcher.image`.
+- The starter: `tenants.<t>.ab_test` (the exposure sink, the gateway's identity, the job, the launcher's reads, the
+  feed); `serving.yaml` documents the arm endpoint.
+
 ## [1.4.2] - 2026-11-09
 
 Phase 9: choosing the online feature store (FR-104); endpoints in Terraform and private endpoints (FR-92); model

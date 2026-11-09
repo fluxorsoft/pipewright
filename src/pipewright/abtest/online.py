@@ -30,6 +30,14 @@ class Arms:
     def __init__(self, uc, env, gcp, log=print):
         self.uc, self.env, self.gcp, self.log = uc, env, gcp, log
 
+    def check(self) -> None:
+        """Before anything is approved or deployed: an online arm Pipewright can make here."""
+        target = (self.uc.model.get("serving") or {}).get("target", "vertex")
+        if target != "vertex":
+            raise ConfigError(f"an online A/B test needs model.serving.target vertex: the gateway routes to Agent "
+                              f"Platform endpoints, and {target} has no gateway yet. A batch test works here: set "
+                              "model.serving.enabled false for the test's environment, or score in batch only")
+
     def _ai(self):
         from pipewright.models import deploy
 

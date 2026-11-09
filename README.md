@@ -881,7 +881,7 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
-| A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner | Designed and settled after spikes (FR-57); next, batch first |
+| A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner ([docs/AB_TESTING.md](docs/AB_TESTING.md)) | Built on a branch (FR-57), being battle-tested |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
 | PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |

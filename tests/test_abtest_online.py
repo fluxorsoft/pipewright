@@ -312,3 +312,12 @@ def test_a_failed_gateway_stops_the_test_and_removes_the_arm(monkeypatch):
         s.start("a@example.com", True)
     assert calls == ["start", ("apply", "e"), ("stop", "stopped")]
     assert s.store.get("churn", "lapse-v7")["state"] == "stopped" and s.current() is None
+
+
+def test_an_online_arm_on_kserve_is_refused_before_anything_happens(monkeypatch):
+    arms, _ = _arms(monkeypatch)
+    arms.uc.model["serving"]["target"] = "kserve"
+    with pytest.raises(ConfigError, match="needs model.serving.target vertex"):
+        arms.check()
+    arms.uc.model["serving"]["target"] = "vertex"
+    arms.check()

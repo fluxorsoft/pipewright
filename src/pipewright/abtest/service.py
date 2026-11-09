@@ -90,6 +90,8 @@ class ABTests:
         from pipewright.runs import launch
 
         section = section_of(self.uc)
+        if self.online is not None and hasattr(self.online, "check"):
+            self.online.check()                                         # an arm Pipewright can make here
         deploy_model.check_approval(self.uc, identity, approved)        # D6: starting a test is a deploy
         case = CaseStore(self.gcp, self.env.artifacts_bucket).current(self.uc.name)   # not during a closed loop
         loop = (case or {}).get("loop")

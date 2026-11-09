@@ -1,0 +1,51 @@
+# A/B test of a candidate model against the champion (Pipewright FR-57): off until your team runs one. With it off,
+# nothing changes: scoring and serving use the champion, as always.
+#
+# A test assigns each unit (here a customer) to the control (the champion) or the treatment (a candidate version) by
+# a hash of the test's name and the unit, the same in batch scoring, in SQL and in the online gateway, so a customer
+# keeps its arm. A business metric decides, against a plan fixed at the start; a person concludes. Usually switched
+# on in the environment file of the environment that runs it (environments/<env>.yaml), not here.
+#
+#   pipewright ab plan --env <env> --usecase <name> --baseline 0.30    how many customers, how many days
+#   pipewright ab start | status | analyse | decide | conclude | stop  the test (docs/AB_TESTING.md)
+#
+# Lines starting `# default` show what Pipewright fills in when a key is left out. The others are examples to
+# replace. `pipewright explain ab_test` describes every key.
+ab_test:
+  enabled: false
+  # name: lapse-v7                       # once per use case and environment; part of the assignment hash
+  # unit: customer_id                    # a column of the data contract: who is assigned
+  # default ab_test.mode: ab  # ab: each unit sees its arm's model | shadow: the treatment scores copies of online calls
+  # default ab_test.arms.control: champion  # the default version when the test starts
+  # arms:
+  #   treatment: { model_version: "7" }  # the candidate; approved for the test (its gates and files) at start
+  # default ab_test.allocation.treatment_bp: 1000  # the treatment's share in basis points (1000 = 10%); only lowered
+  # metric:                              # the business outcome that decides
+  #   name: renewed
+  #   source: bq://${project}.${resources.bigquery_dataset}.renewals   # outcomes, one row per event
+  #   time_column: renewed_at            # an outcome counts within window_days after the unit's first exposure
+  #   minimum_effect: 0.03               # the smallest difference worth finding (sizes the test)
+  # default ab_test.metric.type: proportion  # proportion (did it happen), mean (value_column), ratio (+ denominator_column)
+  # default ab_test.metric.window_days: 30
+  # default ab_test.metric.direction: higher  # higher or lower is better
+  # default ab_test.metric.key: null  # the outcome table's unit column (default: the unit)
+  # default ab_test.metric.where: null  # a SQL filter on the outcome rows
+  # default ab_test.guardrails.technical.max_error_rate_increase: 0.01  # online: against the control's endpoint
+  # default ab_test.guardrails.technical.max_latency_increase: 0.2  # online: median latency, 20% slower at most
+  # default ab_test.guardrails.technical.min_requests: 200  # online: compared once the treatment answered this many
+  # default ab_test.guardrails.technical.breaker.window: 200  # the gateway's last calls to the treatment
+  # default ab_test.guardrails.technical.breaker.max_error_rate: 0.05  # tripped: its units go to the control at once
+  # default ab_test.guardrails.business: []  # metrics that must not get worse, such as complaints (same keys as metric)
+  # default ab_test.duration.min_days: 14  # no decision before (whatever the numbers say)
+  # default ab_test.duration.max_days: 60  # a decision is due at the latest
+  # default ab_test.analysis.method: fixed  # fixed (decide at the planned sample) or sequential (look daily, mSPRT)
+  # default ab_test.analysis.alpha: 0.05
+  # default ab_test.analysis.power: 0.8
+  # default ab_test.analysis.schedule: "0 6 * * *"  # the scheduled analysis (UTC), as the tenant's runner
+  # default ab_test.analysis.cuped.enabled: false  # a pre-period covariate per unit, as of the start, cuts variance
+  # default ab_test.analysis.segments: []  # contract columns to break the result down by (batch tests)
+  # default ab_test.decision.approvals.required: []  # approver groups that must agree on the winner (the platform may add)
+  # default ab_test.publish.events: false  # copy the test's events to the tenant's feed topic
+  # default ab_test.publish.exposures: false  # per-unit lines, pseudonymised, where the platform allows
+  # default ab_test.results_table: null  # the analysis's table (default: <usecase>_ab_results)
+  # default ab_test.callers: []  # who may call a router-only gateway (callers that send features)
