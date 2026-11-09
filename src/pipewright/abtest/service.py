@@ -230,8 +230,11 @@ class ABTests:
         kms = (self.env.security or {}).get("bigquery_kms_key")
         if query is None:
             def query(sql):
+                # BigQuery refuses a job-level key on DDL and DML (found in the battle test, CMEK in Enterprise):
+                # the results table carries its key in its options instead
+                write = sql.lstrip().upper().startswith(("CREATE", "INSERT"))
                 return bigquery.rows(bigquery.query(self.gcp, self.env.project, sql, location=self.env.region,
-                                                    kms_key=kms))
+                                                    kms_key=None if write else kms))
         output = (self.uc.ml.get("inference") or {}).get("output_table") if "inference" in self.uc.pipelines else None
         online = bool(self.uc.model.get("serving", {}).get("enabled"))
         result = ab_analysis.run(t, section, self.env.project, dataset, output, online and self._has_online(query),
@@ -258,7 +261,9 @@ class ABTests:
         ref = f"`{self.env.project}.{dataset}.{self.results_table()}`"
         cols = ", ".join(f"{c['name']} {c['type'].replace('FLOAT', 'FLOAT64').replace('INTEGER', 'INT64')}"
                          for c in ab_analysis.RESULTS_SCHEMA)
-        query(f"CREATE TABLE IF NOT EXISTS {ref} ({cols})")
+        kms = (self.env.security or {}).get("bigquery_kms_key")
+        options = f" OPTIONS(kms_key_name='{kms}')" if kms else ""
+        query(f"CREATE TABLE IF NOT EXISTS {ref} ({cols}){options}")
         row = ab_analysis.results_row(t, result, t.get("release"))
 
         def lit(v):

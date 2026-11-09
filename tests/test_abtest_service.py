@@ -197,3 +197,23 @@ def test_the_platform_may_require_business_guardrails():
     problems = []
     abc.apply_policy(t, {"required_guardrails": ["complaints"]}, "prod", problems)
     assert problems == []
+
+
+def test_with_cmek_the_results_table_carries_its_key_in_its_options(monkeypatch):
+    """Found in the battle test: BigQuery refuses a job-level key on CREATE TABLE (Enterprise, CMEK)."""
+    from pipewright.gcp import bigquery
+
+    s = _svc(monkeypatch, _test(digest="d"))
+    s.env.security = {"bigquery_kms_key": "projects/p/locations/r/keyRings/k/cryptoKeys/bq"}
+    jobs = []
+    monkeypatch.setattr(bigquery, "query",
+                        lambda gcp, project, sql, location=None, kms_key=None: jobs.append((sql, kms_key)) or [])
+    monkeypatch.setattr(bigquery, "rows", lambda job: [])
+    monkeypatch.setattr(svc.ab_config, "digest", lambda section: "d")
+    nobody = {"control": 0, "treatment": 0}
+    monkeypatch.setattr(svc.ab_analysis, "run", lambda *a, **k: {
+        "at": "t", "status": "continue", "exposed": nobody, "matured": nobody, "decision_reasons": [], "blocked": []})
+    s.analyse()
+    create = next((sql, k) for sql, k in jobs if sql.startswith("CREATE"))
+    assert "OPTIONS(kms_key_name='projects/p/locations/r/keyRings/k/cryptoKeys/bq')" in create[0] and create[1] is None
+    assert all(k is None for sql, k in jobs if sql.startswith("INSERT"))
