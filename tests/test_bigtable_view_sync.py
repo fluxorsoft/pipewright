@@ -16,7 +16,8 @@ class Gcp:
 
     def post(self, url, body):
         self.posted.append(url)
-        return SimpleNamespace(ok=True, body={"featureViewSync": f"{STORE}/featureViews/customer_activity/featureViewSyncs/1"})
+        sync = f"{STORE}/featureViews/customer_activity/featureViewSyncs/1"
+        return SimpleNamespace(ok=True, body={"featureViewSync": sync})
 
     def get(self, url, **_):
         return SimpleNamespace(ok=True, body=self.polls.pop(0))
@@ -24,7 +25,8 @@ class Gcp:
 
 def test_starts_and_waits_for_each_view():
     gcp = Gcp([{"runTime": {"startTime": "t"}},
-               {"runTime": {"startTime": "t", "endTime": "u"}, "finalStatus": {}, "syncSummary": {"rowSynced": "4298"}}])
+               {"runTime": {"startTime": "t", "endTime": "u"}, "finalStatus": {},
+                "syncSummary": {"rowSynced": "4298"}}])
     said = []
     out = sync.sync_bigtable_views(ONLINE, gcp, said.append, sleep=lambda _: None)
     assert gcp.posted == [f"https://europe-west2-aiplatform.googleapis.com/v1/{STORE}/featureViews/customer_activity:sync"]

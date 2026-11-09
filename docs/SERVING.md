@@ -128,6 +128,24 @@ Your service answers `POST /lookup {"entity_ids": [...]}` with `{"features": {id
 as `type: http`), and the gateway calls it with an ID token for `audience`. You build the store; Pipewright brings
 the private path, the caller log, the retries and the canary.
 
+Reaching your store (1.4.2):
+
+- **A store on Cloud Run with internal ingress:** the gateway must send its traffic through the network. Enterprise
+  does already (all-traffic egress); in the starter set `lookup.egress: ALL_TRAFFIC` in `online_store.yaml`. The
+  default, `PRIVATE_RANGES_ONLY`, reaches a `*.run.app` address over the internet, which internal ingress answers with
+  404 (found live).
+- **Permission to call it:** when your store is a Cloud Run service in the environment's project and region, the
+  launcher adds the tenant's lookup identity as `run.invoker` on it, changing nothing else in its policy. A store
+  anywhere else is yours to open to that identity.
+- **Feeding it:** the Parquet export on a schedule, with readers the platform grants
+  ([ONLINE_STORES.md](ONLINE_STORES.md)). In the starter a tenant behind the gateway also needs a Cloud SQL tenancy
+  (`cloudsql.tenants`): its network and lookup identity come from there.
+
+**The service's life.** `deploy-model` asks the launcher to create or update the gateway; `deploy-model --undeploy`
+asks it to remove the service (`--keep-lookup-service` keeps it). Before a replaced, promoted-over or abandoned
+version is undeployed, Pipewright waits `model.serving.drain_seconds` (240 by default; 0 undeploys at once, as before
+1.4.2) so calls in flight finish.
+
 ## Private endpoints (FR-92)
 
 The platform lists the use cases whose endpoint Terraform creates:

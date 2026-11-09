@@ -794,7 +794,7 @@ def performance_cutoffs_sql(ml_config: dict, project: str, model_version: str) -
     """Pipewright 1.4.2: outcomes per cut-off that the performance value measures, with labels.time_column and
     bqml.performance_cutoff; None without them. A run scoring a month whose outcomes are not known yet still reports
     the version's performance on earlier months, so the monitoring row says which (found re-running the book)."""
-    data, perf = ml_config["data"], ml_config["monitoring"]["performance"]
+    perf = ml_config["monitoring"]["performance"]
     source, cutoff = perf["labels"], ml_config["bqml"].get("performance_cutoff")
     if not (cutoff and source.get("time_column")):
         return None

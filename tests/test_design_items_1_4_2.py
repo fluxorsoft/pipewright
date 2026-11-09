@@ -8,9 +8,9 @@ import pytest
 from pipewright.errors import ConfigError
 from pipewright.models import definitions as d
 from pipewright.online import launcher as ol
+from tests.test_bqml_config import bqml_repo, resolve
 from tests.test_definitions import SCHEMA, VIEW_SQL, FakeGcp
 from tests.test_entity_columns_not_features import with_entity
-from tests.test_bqml_config import bqml_repo, resolve
 from tests.test_online_launcher import MANIFEST, ONLINE, Gcp, contract
 from tests.test_online_store_types import store_repo
 

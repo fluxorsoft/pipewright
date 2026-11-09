@@ -5,10 +5,23 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-09
+
 Phase 9: choosing the online feature store (FR-104); endpoints in Terraform and private endpoints (FR-92); model
 co-hosting on shared pools (FR-105); the lookup gateway (FR-106). Everything is off until it is set: a use case that
 sets none of it deploys and serves exactly as in 1.4.1. The guides are [docs/ONLINE_STORES.md](docs/ONLINE_STORES.md)
 and [docs/SERVING.md](docs/SERVING.md).
+
+### Upgrading
+
+Nothing to change in a use case. Online stores, the lookup gateway, private endpoints and shared pools are off until
+the platform and the team set them; the platform updates the launcher image for them (it carries the lookup service,
+the gateway and the sync, with the `online` extra). Two defaults change what an undeploy does: before a version is
+undeployed `deploy-model` now waits `model.serving.drain_seconds` (240) for calls in flight (0 restores the old
+behaviour), and `deploy-model --undeploy` asks the launcher to remove the use case's lookup service when it has one
+(`--keep-lookup-service` keeps it; a launcher older than 1.4.2 cannot, and the service stays until it is updated). `validate` may print new warnings (personal
+data not declared, export readers not granted); they refuse nothing. Run `pipewright schemas` to refresh the editor
+schemas.
 
 ### Added
 

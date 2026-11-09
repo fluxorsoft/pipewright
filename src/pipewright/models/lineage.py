@@ -376,9 +376,12 @@ def _render_integrity(info: dict, lines: list[str]) -> None:
                      "Admin Activity audit log)" if made.get("principal") else f"           {made.get('note')}")
     p = i.get("protection")
     if p:
-        now = (f"{p['protected']} of {p['files']} approved files protected now"
-               + (f", until {p['until']} UTC" if p.get("until") else "")
-               + (f", {p['holds']} by a temporary hold" if p.get("holds") else "")) if p.get("protected")             else f"none of the {p['files']} approved files is protected now (no retention or hold)"
+        if p.get("protected"):
+            now = (f"{p['protected']} of {p['files']} approved files protected now"
+                   + (f", until {p['until']} UTC" if p.get("until") else "")
+                   + (f", {p['holds']} by a temporary hold" if p.get("holds") else ""))
+        else:
+            now = f"none of the {p['files']} approved files is protected now (no retention or hold)"
         lines.append(f"           {now}")
     if i.get("lock"):
         lk = i["lock"]

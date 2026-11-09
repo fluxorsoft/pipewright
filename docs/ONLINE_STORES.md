@@ -58,7 +58,7 @@ spec:
           enabled: false               # publish Parquet with a manifest, for a store you build
           # uri: gs://<bucket>/<prefix>  # default gs://<artifacts bucket>/online-export/<tenant>/<usecase>
           keep: 3
-          readers: []
+          readers: []                  # who loads it: name@... or serviceAccount:name@... (1.4.2); the platform grants them
         # bigquery: { table: pw_online_<usecase>, timeout_ms: 1000 }
         # http: { url: https://..., audience: https://..., timeout_ms: 1000 }
   triggers:
@@ -138,15 +138,16 @@ What Pipewright sets up and keeps safe:
 - **The lookup service** (when `provider: pipewright`): one Cloud Run service per use case and environment, named
   `pwl-<tenant>-<usecase>`, created by the launcher when you run `deploy-model` and updated each time. It runs as your
   tenant's lookup identity, internal ingress, egress into the environment's network only, a bounded connection pool.
-  Your endpoint's identity is its only caller.
+  Your endpoint's identity is its only caller. `deploy-model --undeploy` asks the launcher to remove it (1.4.2), so
+  warm instances stop billing and the network can be torn down; `--keep-lookup-service` keeps it.
 - **Cold starts.** `min_instances: 1` keeps one instance warm (about $14 a month at 1 vCPU, 512Mi); Google may still
   restart it, so `2` keeps a spare (about $28). `cpu_boost` shortens the starts that remain. In our test the tail grew
   only while new instances started.
 - **Where endpoints can reach it.** Agent Platform's public endpoints call from Google's network, outside yours. The
   starter lets them in (ingress all, still IAM-only: the endpoint's identity is the one caller). Enterprise's
-  guardrails allow Cloud Run internal ingress only, so there Agent Platform endpoints cannot reach Cloud SQL until
-  private endpoints over Private Service Connect (FR-92); until then choose BigQuery with BI Engine for Agent Platform
-  endpoints in Enterprise, or put your own service in front of Cloud SQL inside the network (`lookup.provider: own`).
+  guardrails allow Cloud Run internal ingress only, so there an endpoint cannot call the lookup service; use the
+  lookup gateway instead (`lookup.mode: gateway`, [SERVING.md](SERVING.md)): callers reach Pipewright's service inside
+  the network, which reads Cloud SQL and calls the endpoint (public or private) itself.
   Inside the network the lookup service answered 50 of 50 calls at a p50 of 39 ms in our test.
 - **Sizing.** `pool_size x max_instances` must fit the database's connection limit (100 on the default tier), shared
   with other use cases and the sync.
@@ -205,8 +206,17 @@ gs://<artifacts bucket>/online-export/<tenant>/<usecase>/g20261107T171653Z/
  "feature_contract": {"version": "1.1.0", "sha256": "..."}}
 ```
 
-A generation is never rewritten, and the last `keep` are kept. Give the job that loads your store read access with
-`export.readers`. The pattern we recommend, taken from what our own sync does:
+A generation is never rewritten, and the last `keep` are kept.
+
+**Publishing on a schedule, and who may read it (1.4.2).** With `type: http` and the export on, a schedule with
+`pipeline: online_sync` publishes a new generation (nothing is loaded into a Pipewright store). Name the identities
+that load your store in `export.readers` (`name@...` or `serviceAccount:name@...`); the platform grants them in its
+`online_store.yaml` (`export_readers`, per tenant), which gives each reader `storage.objectViewer` on
+`online-export/<tenant>/` only (listing by prefix) and gives the tenant the sync job the schedule runs. `validate` warns
+about a reader the manifest says the platform has not granted. In Enterprise, a reader outside the perimeter also needs
+an ingress rule.
+
+The pattern we recommend for the loader, taken from what our own sync does:
 
 - **Check before you load.** Compare each file's SHA-256 with the manifest, and the rows you loaded with `rows`.
 - **Load beside, then swap.** Load into a staging table or collection, check it, then switch in one step: a rename, a

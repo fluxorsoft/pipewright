@@ -38,6 +38,12 @@ These may change in any release:
   `until`, `lock.renew`, `features`; the `feature_contract` section; `integrity check`, `features contract`), so a
   configuration that worked on 1.4.0 works unchanged. With `pin` (on by default), scoring loads the approved file
   generations it already had to match.
+- **1.4.2 adds keys and commands in a patch version** too, for the same reason: online stores
+  (`model.serving.online_store`), the lookup gateway, private endpoints and shared pools (`model.serving.pool`),
+  `features sync`, `features export`, `serving pools`, all off until set. Two defaults change what an undeploy does:
+  `model.serving.drain_seconds` (240) waits for calls in flight before a version is undeployed (0 restores the old
+  behaviour), and `deploy-model --undeploy` also removes the use case's lookup service when it has one
+  (`--keep-lookup-service` keeps it).
 - **Deprecations:** anything on the stable surface that is going away first warns (in `validate`, `doctor` and the
   command's output) for at least one minor version, with the replacement named, before a major version removes it.
 - **Upgrades are per environment:** a platform runs one launcher version per environment, pinned by digest; app

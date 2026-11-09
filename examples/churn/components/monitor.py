@@ -95,7 +95,8 @@ def check_batch(
             # Pipewright 1.4.2: which cut-offs the value measures. A run scoring a month whose outcomes are not known
             # yet still reports the version's performance on the earlier months it scored; say which, so the row is
             # not read as this month's (found re-running the book's Chapter 14).
-            result["performance_cutoffs"] = {str(k): int(v) for k, v in labelled["cutoff"].value_counts().sort_index().items()}
+            counts = labelled["cutoff"].value_counts().sort_index()
+            result["performance_cutoffs"] = {str(k): int(v) for k, v in counts.items()}
             result["notes"].append("performance measured on cut-offs " + ", ".join(
                 f"{k} ({v} outcomes)" for k, v in result["performance_cutoffs"].items()))
         if len(labelled) >= 50:

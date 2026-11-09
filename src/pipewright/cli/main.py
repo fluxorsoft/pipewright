@@ -1459,7 +1459,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_features_contract)
     for name, func, text in (
             ("sync", cmd_features_sync, "the latest feature values per entity into the use case's online store "
-                                        "(bigquery or cloudsql, FR-104); for the Bigtable store, starts each view's sync and waits (FR-110)"),
+                                        "(bigquery or cloudsql, FR-104); for the Bigtable store, starts each "
+                                        "view's sync and waits (FR-110)"),
             ("export", cmd_features_export, "the latest feature values per entity as Parquet with a manifest, for a "
                                             "store the team builds (FR-104)")):
         sp = fsub.add_parser(name, help=text)

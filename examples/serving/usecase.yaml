@@ -27,6 +27,7 @@ spec:
       # default model.serving.machine: n1-standard-2     # not with a pool: the pool sets the machines
       # default model.serving.canary_percent: 10         # deploy-model --canary
       # default model.serving.pool: null                 # TOGGLE: a shared pool for co-hosting (see README)
+      # default model.serving.drain_seconds: 240         # the old version keeps serving this long after traffic moves
       online_store:                      # without it: the tenant's Bigtable online store (1.1)
         type: cloudsql                   # bigtable (the default) | bigquery | cloudsql | http
         cloudsql:
@@ -49,6 +50,7 @@ spec:
           # default model.serving.online_store.lookup.billing: request
         # default model.serving.online_store.sync.mode: full              # changed: only rows that changed
         # default model.serving.online_store.export.enabled: false        # TOGGLE: Parquet for your own store
+        # default model.serving.online_store.export.readers: []           # who loads it; the platform grants them (export_readers)
 
   triggers:
     api: true                            # `pipewright run --source-uri bq://<dataset>.my_churn_serving_entities`

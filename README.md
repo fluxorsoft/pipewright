@@ -6,10 +6,12 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.4.1.** What runs is what was approved, and you know when that changes: approvals fingerprint the model
-> files, serving image, rules and (new) the feature definitions; deploy, promote and scoring refuse anything that
-> changed since, scoring and KServe load exactly the approved bytes, and a watch tells you when an approved model or
-> feature changes between deploys (see [What runs is what was approved](#what-runs-is-what-was-approved)).
+> **Status: 1.4.2.** Choose the online feature store by cost and speed (Bigtable, Cloud SQL, BigQuery with BI Engine,
+> or your own fed by a Parquet export), serve inside your network through the lookup gateway, private endpoints in
+> Terraform, and several models on shared machines (see [Choosing the online store](#choosing-the-online-store) and
+> [Private endpoints, co-hosting and the lookup gateway](#private-endpoints-co-hosting-and-the-lookup-gateway-142)).
+> All of it is off until set. What runs is still what was approved: approvals fingerprint the model files, serving
+> image, rules and feature definitions, and deploy, promote and scoring refuse anything that changed since.
 > Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
@@ -772,11 +774,11 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.4.1"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp]==1.4.2"     # the command is `pipewright`
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.4.1 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.4.2 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -879,9 +881,9 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
-| A/B testing of models: sticky assignment by customer, a business metric and guardrails, a person decides the winner | Planned |
+| A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner | Designed (FR-57); next after 1.4.2, after spikes |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
@@ -892,6 +894,8 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | The closed retrain loop's safeguards, online canary with automatic rollback, production data for training, BigQuery ML in the loop | Released in 1.4.0; used end to end, test to production |
 | Serving the approved bytes (scoring and KServe), the watch with alerts and a heartbeat, `integrity check`, `restore-files`, lock renewal by a separate identity, audit logs that last | Released in 1.4.1; used end to end on Agent Platform and private GKE (CMEK, VPC), QA round on both |
 | Feature contracts: definitions fingerprinted and checked from training to scoring, tables built by a query, Feature Store sync health, what scoring read | Released in 1.4.1; used end to end, test to production across projects and under CMEK |
+| Online stores by cost and speed: Cloud SQL with Pipewright's lookup service, BigQuery with BI Engine, your own store fed by the Parquet export; the sync, its checks and staleness alerts | Released in 1.4.2; used end to end in the starter and in a private environment (CMEK, VPC Service Controls) |
+| Private endpoints in Terraform, the lookup gateway (also in front of your own store), co-hosting on shared pools, the drain before undeploy | Released in 1.4.2; used end to end in the starter and on private GKE |
 | Fairness gates, approved images, approvals in GitHub, lineage per run | Built (1.1) |
 | Standing Ray clusters, one per team (private GKE; workers scale to zero) | Built; a cluster per run stays the default |
 | Synthetic data (learned inside the environment and gated, or from the data contract alone) | Released in 1.0.0; used end to end on Agent Platform Pipelines and on Kubeflow in private GKE, inside an enforced perimeter |

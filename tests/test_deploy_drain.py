@@ -1,4 +1,5 @@
-"""FR-109: a version that no longer takes traffic keeps serving for model.serving.drain_seconds before it is undeployed."""
+"""FR-109: a version that no longer takes traffic keeps serving for model.serving.drain_seconds before it is
+undeployed."""
 from types import SimpleNamespace
 
 from pipewright.models import deploy

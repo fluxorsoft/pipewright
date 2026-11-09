@@ -227,7 +227,9 @@ is major, changed SQL or an added column minor, descriptions a patch). `--check`
 same, 1 different, 2 cannot check, for CI.
 
 **Where the SQL comes from.** A view or materialized view carries its SQL. A table built by a query (a pipeline,
-dbt, Dataform, `CREATE TABLE ... AS`) does not: give its `sql_file` (the query, kept with the use case) or its
+dbt, Dataform, `CREATE TABLE ... AS`) does not: give its `sql_file` (the query, kept with the use case), or
+`sql_files` for a table several jobs write, such as a backfill and a monthly append (1.4.2: the check accepts any of
+them; the first is recorded as `sql_sha256`, the others as `also_sql_sha256`), or its
 `scheduled_query` (the transfer config name). With `policies.integrity.features.built_tables: true` the SQL of the
 job that last wrote the table must match; without it such a table is checked by schema only. The fingerprint ignores
 whitespace, leading comments, the `CREATE TABLE ... AS` prefix and the source's own project (so test and prod

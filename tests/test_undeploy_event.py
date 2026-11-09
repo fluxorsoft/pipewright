@@ -73,7 +73,8 @@ def test_lineage_reads_how_approved_files_are_protected_now():
                                              {"file": "serving.json", "generation": 2},
                                              {"file": "card.md", "generation": 3}]}
     got = protection.current(Gcp(), files)
-    assert got["files"] == 3 and got["protected"] == 2 and got["holds"] == 1 and got["until"] == later[:16].replace("T", " ")
+    assert got["files"] == 3 and got["protected"] == 2 and got["holds"] == 1
+    assert got["until"] == later[:16].replace("T", " ")
     assert protection.current(Gcp(), None) is None
 
 
