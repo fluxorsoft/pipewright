@@ -182,8 +182,11 @@ def handler_for(lookup, gateway=None):
                 print(json.dumps({"severity": "ERROR", "message": "predict failed", "caller": caller,
                                   "usecase": gateway.usecase, "error": type(e).__name__, "status": status}),
                       flush=True)
+                # which step failed: the team's store (`lookup at <host>`) or the endpoint (found writing the
+                # book's Chapter 23, where a store's 404 read "the prediction failed")
+                stage = getattr(e, "stage", "prediction")
                 return self._send(503 if status in (None, 429, 503) else 502,
-                                  {"error": "the prediction failed ("
+                                  {"error": f"the {stage} failed ("
                                             + type(e).__name__ + (f" {status}" if status else "") + ")"})
             print(json.dumps({"severity": "INFO", "message": "predict", "caller": caller, "usecase": gateway.usecase,
                               **fields, "ms": round((time.perf_counter() - t) * 1000, 1)}), flush=True)

@@ -73,8 +73,12 @@ class HttpSource:
         request = urllib.request.Request(self.url, method="POST", data=json.dumps({"entity_ids": ids}).encode(),
                                          headers={"Authorization": "Bearer " + self.tokens.get(self.audience),
                                                   "Content-Type": "application/json"})
-        with self._open(request, timeout=self.timeout) as r:
-            return (json.loads(r.read() or b"{}").get("features")) or {}
+        try:
+            with self._open(request, timeout=self.timeout) as r:
+                return (json.loads(r.read() or b"{}").get("features")) or {}
+        except Exception as e:  # noqa: BLE001 - re-raised, marked: the store failed, not the model (1.4.2)
+            e.stage = f"lookup at {urllib.parse.urlsplit(self.url).netloc}"
+            raise
 
 
 def caller_of(header: str | None) -> str:

@@ -75,3 +75,14 @@ def test_lineage_reads_how_approved_files_are_protected_now():
     got = protection.current(Gcp(), files)
     assert got["files"] == 3 and got["protected"] == 2 and got["holds"] == 1 and got["until"] == later[:16].replace("T", " ")
     assert protection.current(Gcp(), None) is None
+
+
+def test_behind_the_gateway_a_request_model_is_right_and_a_lookup_model_is_not():
+    """FR-118: the gateway sends values; any store may be behind it without a retrain."""
+    from pipewright.models import online
+
+    gw = {"type": "http", "mode": "gateway", "url": "https://x"}
+    assert online.check(gw, {}, None, "test") is None                                         # request-trained
+    assert online.check(gw, {}, {"online_features": {"type": "cloudsql", "mode": "gateway"}}, "test") is None
+    own = {"store": "projects/p/locations/r/featureOnlineStores/s", "views": []}
+    assert "sends it feature values" in online.check(gw, {}, {"online_features": own}, "test")

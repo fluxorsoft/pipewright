@@ -448,9 +448,13 @@ def run(ml_config: dict, env, tenant: str, usecase: str, gcp, connect=None, now:
     from pipewright.observability import events
     online = ml_config.get("online_features") or {}
     kind = online.get("type")
-    if kind not in ("bigquery", "cloudsql"):
+    # 1.4.2: an export needs no store of Pipewright's: a team's own store (type http) is fed by it (found writing the
+    # book's Chapter 23, where `features export` refused the very case ONLINE_STORES.md describes)
+    export_only = not load or kind not in ("bigquery", "cloudsql")
+    if kind not in ("bigquery", "cloudsql") and not (online.get("export") and kind == "http"):
         raise ConfigError(f"{usecase} has no online store Pipewright syncs (model.serving.online_store.type is "
-                          f"{kind or 'bigtable'}; bigquery and cloudsql are synced)")
+                          f"{kind or 'bigtable'}; bigquery and cloudsql are synced, and an http store's Parquet "
+                          "export with export.enabled)")
     now = now or datetime.now(timezone.utc)
     gen, as_of = generation_id(now), now.strftime("%Y-%m-%d %H:%M:%S+00")
     project, location = env.project, env.region
@@ -459,7 +463,10 @@ def run(ml_config: dict, env, tenant: str, usecase: str, gcp, connect=None, now:
     timings, t0 = {}, time.perf_counter()
     ff = resolve_feature_groups(ml_config["data"]["features_from"], project, location, gcp.session)
     sql = latest_query(ff, online["features"], online["key"], project, as_of)
-    latest = online["table"] if kind == "bigquery" else f"{project}.{dataset}.{online['table']}__latest"
+    from pipewright.online.config import table_name
+
+    table = online.get("table") or table_name(usecase)
+    latest = table if kind == "bigquery" else f"{project}.{dataset}.{table}__latest"
     t = time.perf_counter()
     job = run_query_to_table(gcp, project, location, sql, latest, kms)
     timings["latest_s"] = round(time.perf_counter() - t, 1)
@@ -496,7 +503,7 @@ def run(ml_config: dict, env, tenant: str, usecase: str, gcp, connect=None, now:
                    manifest_sha256=manifest_sha256(m))
         log(f"extract: {len(files)} Parquet files, {out['bytes'] / 2**20:.1f} MiB, "
             f"manifest {out['manifest_sha256'][:12]}")
-        if kind == "cloudsql" and load:
+        if kind == "cloudsql" and load and not export_only:
             readers = []
             if online.get("provider") == "own" and online.get("reader"):
                 readers.append(online["reader"].removesuffix(".gserviceaccount.com"))

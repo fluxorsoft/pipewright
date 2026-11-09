@@ -85,6 +85,13 @@ and [docs/SERVING.md](docs/SERVING.md).
 - **Who changed an approved model file** (FR-117): lineage shows who wrote or deleted a changed model file after the
   approval, from Cloud Storage Data Access audit logs, as it already did for the evaluation record. A refusal for a
   changed file now says to restore it (`pipewright model restore-files`) before re-approving.
+- **Any store behind the gateway, no retrain** (FR-118): with `lookup.mode: gateway` the endpoint receives feature
+  values, so `deploy-model` accepts a version trained for request (or for the gateway) whatever store is behind it,
+  and refuses only one that looks features up itself. It required the gateway's own lookup, so a store change
+  behind the gateway needed a retrain.
+- **The Parquet export for a team's own store** (FR-119): `pipewright features export` works with
+  `online_store.type: http` and `export.enabled` (it refused it, though that is the case the export is for). The
+  gateway's error says which step failed: `the lookup at <host> failed (...)` or `the prediction failed (...)`.
 
 ### Fixed (found re-running the book on 1.4.2)
 
