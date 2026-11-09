@@ -146,7 +146,7 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
         blocked.append(f"the treatment share {share:.4f} is outside its expected range {lo:.4f} to {hi:.4f}")
     if primary["switched"]:
         blocked.append(f"{primary['switched']} unit(s) were exposed to both arms: the assignment was broken")
-    for k in ("unassigned", "dropped", "mismatched_model"):
+    for k in ("unassigned", "dropped", "mismatched_model", "bypassed"):
         if (test.get("router") or {}).get(k):
             blocked.append(f"the gateway counted {test['router'][k]} {k.replace('_', ' ')} call(s)")
     out["blocked"] = blocked

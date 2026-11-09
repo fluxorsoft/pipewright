@@ -362,7 +362,17 @@ def create_app(registry: Registry | None = None) -> Flask:
         except Exception as e:  # noqa: BLE001
             log.exception("online store health not checked")
             online = {"status": "error", "reason": str(e)[:300]}
-        return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched, online=online), 200
+        try:                                  # FR-57: results in, the serving guardrails, the scheduled analysis
+            from pipewright.abtest import watch as ab_watch
+            from pipewright.online import launcher as online_launcher
+
+            ab = ab_watch.tick(Gcp(), m, reg().live(), refresh=lambda c: online_launcher.ensure_lookup_service(
+                c, reg().manifest, Gcp(), wait=240))
+        except Exception as e:  # noqa: BLE001
+            log.exception("A/B tests not checked")
+            ab = {"status": "error", "reason": str(e)[:300]}
+        return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched, online=online,
+                       ab=ab), 200
 
     @app.post("/integrity/tick")
     def integrity_tick():

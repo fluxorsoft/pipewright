@@ -15,6 +15,11 @@ the feed, a second line (`pipewright_ab_feed`) carries a keyed hash of the unit 
 The breaker: the treatment's last `window` calls; more than `max_error_rate` failed and the treatment's units go to
 the control at once (this process), a `ab_breaker_tripped` line is logged, and the launcher's tick stops the test.
 An answer from a model other than the arm's deployment is counted (`mismatched_model`) and logged.
+
+Counts: once a minute each instance logs its totals since it started (`event: counts`: calls and instances sent to
+each arm, unassigned units, mismatched answers, exposure lines dropped or not written). The launcher's tick reads
+them: the share checks block a decision on any loss, and the treatment's calls are compared with what its endpoint
+answered (Cloud Monitoring), which shows calls that bypassed the router.
 """
 
 from __future__ import annotations
@@ -137,6 +142,26 @@ class ABRouter:
         key = feed.get("key") or (os.environ.get(feed["key_env"]) if feed.get("key_env") else None)
         self._feed_key = key.encode() if key and (cfg.get("feed") or {}).get("exposures") else None
         self.usecase = getattr(control, "usecase", cfg.get("usecase", ""))
+        self.instance = os.environ.get("K_REVISION", "local") + "-" + os.urandom(4).hex()
+        self._beat_every = float(cfg.get("counts_every", 60))
+        if self.log is not None and self._beat_every > 0:
+            threading.Thread(target=self._beats, daemon=True).start()
+
+    def _beats(self):
+        while True:
+            time.sleep(self._beat_every)
+            self.beat()
+
+    def beat(self) -> None:
+        """The instance's totals since it started, one line (the tick takes differences between lines)."""
+        if self.log is None:
+            return
+        self.log.put("pipewright_ab_exposure", {
+            "ab_test": self.cfg["name"], "event": "counts", "usecase": self.usecase, "instance": self.instance,
+            **{k: self.counts.get(k, 0) for k in ("control_calls", "treatment_calls", "control_instances",
+                                                  "treatment_instances", "unassigned", "mismatched_model")},
+            "dropped": getattr(self.log, "dropped", 0) + getattr(self.log, "failed", 0),
+            "breaker_tripped": self.breaker.tripped_at is not None, "at": time.time()})
 
     # --------------------------------------------------------------------------------------------- assignment --
     def _bp(self) -> int:
@@ -149,12 +174,12 @@ class ABRouter:
         return {u: arm(self.cfg["name"], u, bp) for u in units}
 
     def _exposures(self, arms: dict[str, str], deployed: dict[str, str | None]) -> None:
-        if self.log is None:
-            return
         now = time.time()
         for unit, a in arms.items():
-            if not unit:
+            if not unit or unit == "None":
                 self.counts["unassigned"] += 1
+                continue
+            if self.log is None:
                 continue
             self.log.put("pipewright_ab_exposure", {
                 "ab_test": self.cfg["name"], "arm": a, "unit": unit, "deployed_model": deployed.get(a),
@@ -165,9 +190,14 @@ class ABRouter:
                                                     "usecase": self.usecase, "tenant": self.cfg.get("tenant"),
                                                     "at": now})
 
+    def _sent(self, a: str, n: int) -> None:
+        self.counts[f"{a}_calls"] += 1
+        self.counts[f"{a}_instances"] += n
+
     def _treatment_call(self, fn, *args):
         """The treatment's answer, recorded by the breaker; a failure is raised so the caller gets the error (the
         units in the treatment are not silently scored by the control mid-call)."""
+        self._sent("treatment", len(args[0]) if args else 0)
         try:
             out = fn(*args)
         except Exception:
@@ -210,6 +240,8 @@ class ABRouter:
             if not groups[a]:
                 continue
             g = self.control if a == "control" else self.treatment
+            if a == "control":
+                self._sent("control", len(groups[a]))
             out, f = (self._treatment_call(g.predict, groups[a]) if a == "treatment" else g.predict(groups[a]))
             body["predictions"].update(out["predictions"])
             body["not_found"] += out["not_found"]
@@ -255,6 +287,8 @@ class ABRouter:
                 continue
             g = self.control if a == "control" else self.treatment
             batch = [instances[k] for k in idx]
+            if a == "control":
+                self._sent("control", len(batch))
             out = self._treatment_call(g.call, batch) if a == "treatment" else g.call(batch)
             deployed[a] = out.get("deployedModelId")
             self._check_model(a, deployed[a])

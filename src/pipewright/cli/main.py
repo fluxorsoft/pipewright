@@ -984,6 +984,14 @@ def cmd_ab(args) -> int:
     from pipewright.abtest import service as ab
     from pipewright.gcp import Gcp
 
+    if getattr(args, "request", None):            # the tenant's scheduled job, from the launcher's tick
+        from pipewright.abtest import watch
+
+        out = watch.run_request(Gcp(), args.request, args.usecase)
+        print(json.dumps(out, indent=2, default=str))
+        return 0
+    if not args.env:
+        raise ConfigError("give --env (or --request: the launcher's analysis request)")
     env = load_environment(Path(args.root), args.env)
     uc = resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env)
     gcp = Gcp()
@@ -1664,10 +1672,13 @@ def build_parser() -> argparse.ArgumentParser:
             ("conclude", "end the test with its winner; the treatment winning becomes the default")):
         sp = absub.add_parser(action, help=text)
         sp.add_argument("--root", default=".")
-        sp.add_argument("--env", required=True)
+        sp.add_argument("--env", required=action != "analyse")
         sp.add_argument("--usecase", required=True)
         if action in ("status", "analyse"):
             sp.add_argument("--name", help="a past test (default: the running one)")
+        if action == "analyse":
+            sp.add_argument("--request", help="gs:// analysis request the launcher wrote (the tenant's scheduled "
+                                              "job; no checkout needed)")
         if action in ("plan", "status", "analyse"):
             sp.add_argument("--json", action="store_true", help="machine-readable output")
         if action == "plan":

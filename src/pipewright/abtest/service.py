@@ -177,12 +177,14 @@ class ABTests:
         return t
 
     # ---------------------------------------------------------------------------------------- analysis --
-    def analyse(self, name: str | None = None, query=None, now: datetime | None = None, write: bool = True) -> dict:
+    def analyse(self, name: str | None = None, query=None, now: datetime | None = None, write: bool = True,
+                test: dict | None = None, record: bool = True) -> dict:
         """The analysis now, as the person running it (their BigQuery access); written to the record and the
-        results table, and ab_test.analysed emitted. query: (sql) -> rows, for tests."""
+        results table, and ab_test.analysed emitted. query: (sql) -> rows, for tests. The tenant's scheduled job
+        passes the test it was handed and record=False: the launcher records its result (watch.ingest)."""
         from pipewright.gcp import bigquery
 
-        t = self.get(name)
+        t = test or self.get(name)
         section = section_of(self.uc)
         if ab_config.digest(section) != t.get("digest"):
             raise ConfigError(f"the ab_test section differs from what test {t['name']} promised at its start "
@@ -200,6 +202,7 @@ class ABTests:
                                  query, now, previous=t.get("analysis"))
         if write:
             self._write_result(t, result, query)
+        if write and record:
             t = self.record_result(t["name"], result)
         return {"test": t, "result": result}
 
@@ -233,11 +236,13 @@ class ABTests:
         values = ", ".join(f"TIMESTAMP({lit(row[n])})" if n == "analysed_at" else lit(row[n]) for n in names)
         query(f"INSERT INTO {ref} ({', '.join(names)}) VALUES ({values})")
 
-    def record_result(self, name: str, result: dict) -> dict:
+    def record_result(self, name: str, result: dict, ingested: str | None = None) -> dict:
         """The result into the record (the newest, and the looks for a sequential test), the state moved to
         decision_required when it says so, and ab_test.analysed emitted; guardrail breaches are events of their own."""
         def change(t):
             t["analysis"] = result
+            if ingested:
+                t["ingested"] = ingested
             p = (result.get("primary") or {}).get("p_sequential")
             if p is not None:
                 t["looks"] = (t.get("looks") or []) + [{"at": result["at"], "p": p}]
