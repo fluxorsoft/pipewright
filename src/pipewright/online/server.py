@@ -140,8 +140,9 @@ def handler_for(lookup, gateway=None):
             t = time.perf_counter()
             if self.path == "/predict" and gateway is not None:
                 return self._predict(t)
-            if self.path != "/lookup":
-                return self._send(404, {"error": "POST /lookup" + (" or POST /predict" if gateway else "")})
+            if self.path != "/lookup" or lookup is None:
+                return self._send(404, {"error": ("POST /lookup" if lookup is not None else "no lookup here")
+                                        + (" or POST /predict" if gateway else "")})
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
                 ids = body.get("entity_ids")
@@ -169,6 +170,18 @@ def handler_for(lookup, gateway=None):
             caller = caller_of(self.headers.get("Authorization"))
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                if "instances" in body and hasattr(gateway, "predict_instances"):
+                    # FR-57 router-only: callers send the features and each instance's unit
+                    instances, units = body.get("instances"), body.get("units")
+                    if not isinstance(instances, list) or not isinstance(units, list) or not instances:
+                        return self._send(400, {"error": "instances and units: lists of the same length"})
+                    if len(instances) > MAX_IDS:
+                        return self._send(400, {"error": f"instances: at most {MAX_IDS} at once"})
+                    out, fields = gateway.predict_instances(instances, [str(u) for u in units])
+                    print(json.dumps({"severity": "INFO", "message": "predict", "caller": caller,
+                                      "usecase": gateway.usecase, **fields,
+                                      "ms": round((time.perf_counter() - t) * 1000, 1)}), flush=True)
+                    return self._send(200, out)
                 ids = body.get("entity_ids")
                 if not isinstance(ids, list) or not all(isinstance(i, (str, int)) for i in ids) or not ids:
                     return self._send(400, {"error": "entity_ids: a list of IDs"})
@@ -195,19 +208,32 @@ def handler_for(lookup, gateway=None):
     return Handler
 
 
-def build(cfg: dict):
-    """(lookup, gateway or None) for a configuration."""
+def build(cfg: dict, log=None):
+    """(lookup, gateway or None) for a configuration. With ab_test (FR-57) the gateway is the A/B router; with
+    source none it is a router only (callers send features: no lookup)."""
     if cfg.get("source") == "http":
         from pipewright.online.gateway import HttpSource
 
         lookup = HttpSource(cfg)
+    elif cfg.get("source") == "none":
+        lookup = None
     else:
         lookup = Lookup(cfg)
     gateway = None
     if cfg.get("gateway"):
         from pipewright.online.gateway import Gateway
 
-        gateway = Gateway(cfg, lookup, tokens=lookup.tokens if isinstance(lookup, Lookup) else Tokens())
+        tokens = lookup.tokens if isinstance(lookup, Lookup) else Tokens()
+        gateway = Gateway(cfg, lookup, tokens=tokens)
+        ab = cfg.get("ab_test")
+        if ab:
+            from pipewright.online.abrouter import ABRouter, ExposureLog
+
+            treatment = Gateway({**cfg, "gateway": {**cfg["gateway"], **ab["treatment"]}}, lookup, tokens=tokens)
+            exposure = log if log is not None else ExposureLog(
+                ab["project"], tokens.get, {"pipewright-usecase": cfg.get("usecase", ""),
+                                            "pipewright-tenant": ab.get("tenant", "")})
+            gateway = ABRouter(ab, gateway, treatment, exposure)
     return lookup, gateway
 
 
@@ -216,9 +242,11 @@ def main():
     lookup, gateway = build(cfg)
     server = ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), handler_for(lookup, gateway))
     server.daemon_threads = True
-    where = cfg["url"] if cfg.get("source") == "http" else f"{cfg['schema']}.{cfg['table']}"
+    where = (cfg["url"] if cfg.get("source") == "http" else "router only" if cfg.get("source") == "none"
+             else f"{cfg['schema']}.{cfg['table']}")
     print(json.dumps({"severity": "INFO", "message": "lookup service ready", "source": cfg.get("source", "cloudsql"),
-                      "table": where, "features": len(cfg["features"]), "gateway": bool(gateway),
+                      "table": where, "features": len(cfg.get("features") or []), "gateway": bool(gateway),
+                      "ab_test": (cfg.get("ab_test") or {}).get("name"),
                       "pool_size": cfg.get("pool_size", 8)}), flush=True)
     server.serve_forever()
 

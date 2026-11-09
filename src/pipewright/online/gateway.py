@@ -213,6 +213,10 @@ class Gateway:
             self._sleep(min(0.25 * 2 ** attempt, 2.0))
         raise RuntimeError("unreachable")
 
+    def call(self, instances: list) -> dict:
+        """The endpoint's answer to instances as they are (the A/B router-only mode, FR-57), with the retries."""
+        return self._call(instances)[0]
+
     def predict(self, ids: list[str]) -> tuple[dict, dict]:
         """(response body, log fields). Entities without features are listed in not_found, never scored."""
         found = self.source.fetch(ids)

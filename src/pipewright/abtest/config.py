@@ -33,6 +33,7 @@ DEFAULTS = {
     "decision": {"approvals": {"required": []}},
     "publish": {"events": False, "exposures": False},
     "results_table": None,
+    "callers": [],
 }
 METRIC_TYPES = ("proportion", "mean", "ratio")
 # Tasks with a unit-level outcome. Forecasts and unsupervised models have none (CONTEXT 8.16: refused).

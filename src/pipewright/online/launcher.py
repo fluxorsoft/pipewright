@@ -87,7 +87,9 @@ def service_spec(contract, manifest: dict, online: dict, ca: str | None, gateway
         raise ConfigError(f"tenant {contract.tenant} has no lookup identity "
                           "(manifest tenants.<t>.features.lookup_service_account)")
     size = online.get("lookup") or {}
-    if online.get("type") == "http":           # the Pipewright custom solution: the team's store behind the gateway
+    if online.get("type") == "router":         # FR-57 D3: a router only, callers send features
+        config = {"source": "none", "features": [], "key": None}
+    elif online.get("type") == "http":         # the Pipewright custom solution: the team's store behind the gateway
         config = {"source": "http", "url": online["url"], "audience": online.get("audience") or online["url"],
                   "timeout_ms": online.get("timeout_ms", 1000), "key": online["key"], "features": online["features"]}
     else:
@@ -138,14 +140,16 @@ def has_service(online: dict) -> bool:
 AIP = "https://{region}-aiplatform.googleapis.com/v1"
 
 
-def gateway_target(contract, manifest: dict, online: dict, gcp) -> dict:
+def gateway_target(contract, manifest: dict, online: dict, gcp, arm: str = "") -> dict:
     """FR-106: the endpoint the gateway calls, from the manifest (a Terraform endpoint) or found by its name, and
-    where to call it: the private endpoint's DNS name inside the network, or the regional API."""
+    where to call it: the private endpoint's DNS name inside the network, or the regional API. arm "ab" (FR-57): the
+    A/B treatment's endpoint, listed as `<usecase>-ab` (named `<usecase>-ab-endpoint`, as Terraform names it)."""
     region = manifest["region"]
-    entry = ((manifest.get("serving") or {}).get("endpoints") or {}).get(contract.usecase) or {}
+    key = f"{contract.usecase}-{arm}" if arm else contract.usecase
+    entry = ((manifest.get("serving") or {}).get("endpoints") or {}).get(key) or {}
     resource = entry.get("resource")
     if not resource:
-        name = entry.get("name") or f"{contract.usecase}-endpoint"
+        name = entry.get("name") or f"{key}-endpoint"
         r = gcp.get(f"{AIP.format(region=region)}/projects/{manifest['project']}/locations/{region}/endpoints",
                     filter=f'display_name="{name}"')
         found = ((r.body or {}).get("endpoints") or []) if r.ok else []
@@ -166,9 +170,63 @@ def gateway_target(contract, manifest: dict, online: dict, gcp) -> dict:
             "region": region}
 
 
+def ab_of(contract) -> dict:
+    ml = contract.pipeline("training").static_parameters.get("ml_config") or {}
+    return ml.get("ab_test") or {}
+
+
+def running_ab(contract, manifest: dict, gcp) -> dict | None:
+    """FR-57: the use case's active A/B test that has a serving arm (its treatment endpoint), or None."""
+    if not ab_of(contract):
+        return None
+    from pipewright.abtest.store import ACTIVE, TestStore
+
+    test = TestStore(gcp, manifest["artifacts_bucket"]).current(contract.usecase)
+    if not test or test.get("state") not in ACTIVE or not (test.get("arms") or {}).get("treatment", {}).get("endpoint"):
+        return None
+    return test
+
+
+def router_online(contract) -> dict:
+    """D3: a use case whose callers send features gets the gateway as a router only (no lookup) during a test."""
+    from pipewright.online.config import service_name
+
+    return {"service": service_name(contract.tenant, contract.usecase), "mode": "gateway", "type": "router",
+            "features": [], "gateway": {"retries": 3}}
+
+
+def ab_gateway(contract, manifest: dict, online: dict, gcp, test: dict) -> tuple[dict, list]:
+    """The gateway's A/B configuration (the treatment's target, the allocation, the breaker, the feed) and the
+    secret environment entries it needs."""
+    from pipewright.abtest.scoring import current_bp
+
+    section = ab_of(contract)
+    treatment = gateway_target(contract, manifest, online, gcp, arm="ab")
+    state = "running" if test["state"] in ("running", "decision_required") else "paused"
+    feed_cfg, env = {}, []
+    policy = ((manifest.get("policies") or {}).get("ab_test") or {})
+    feed = ((manifest.get("tenants") or {}).get(contract.tenant) or {}).get("ab_test_feed") or {}
+    if (section.get("publish") or {}).get("exposures") and policy.get("feed_exposures") and feed.get("key_secret"):
+        feed_cfg = {"exposures": True, "key_env": "PIPEWRIGHT_AB_FEED_KEY"}
+        env = [{"name": "PIPEWRIGHT_AB_FEED_KEY",
+                "valueSource": {"secretKeyRef": {"secret": feed["key_secret"], "version": "latest"}}}]
+    cfg = {"name": test["name"], "mode": test.get("mode", "ab"), "state": state, "treatment_bp": current_bp(test),
+           "release": contract.release_id, "usecase": contract.usecase, "tenant": contract.tenant,
+           "project": manifest["project"], "unit": test["unit"],
+           "treatment": {k: treatment[k] for k in ("predict_url", "endpoint", "private", "region")},
+           "treatment_deployed_model": (test["arms"]["treatment"] or {}).get("deployed_model"),
+           "breaker": ((section.get("guardrails") or {}).get("technical") or {}).get("breaker") or {},
+           "feed": feed_cfg}
+    return cfg, env
+
+
 def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, sleep=time.sleep) -> dict:
     online = online_of(contract)
-    if not has_service(online):
+    test = running_ab(contract, manifest, gcp)
+    if not has_service(online) and test:
+        online = router_online(contract)            # D3: router only while the test runs
+        online["gateway"]["callers"] = list(ab_of(contract).get("callers") or [])
+    if not has_service(online) and online.get("type") != "router":
         raise ConfigError(f"{contract.usecase}'s release has no Pipewright lookup service (online_store cloudsql "
                           "with lookup.provider pipewright, or lookup.mode gateway)")
     project, region = manifest["project"], manifest["region"]
@@ -180,6 +238,13 @@ def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, slee
                               "cloudsql.instances.get (roles/cloudsql.viewer)")
     gateway = gateway_target(contract, manifest, online, gcp) if online.get("mode") == "gateway" else None
     spec = service_spec(contract, manifest, online, ca, gateway)
+    if test and gateway:                              # FR-57: the gateway routes the test's units
+        ab_cfg, secret_env = ab_gateway(contract, manifest, online, gcp, test)
+        c = spec["template"]["containers"][0]
+        config = json.loads(c["env"][0]["value"])
+        config["ab_test"] = ab_cfg
+        c["env"][0]["value"] = json.dumps(config, separators=(",", ":"))
+        c["env"] += secret_env
     # The gateway's identity predicts with the platform's grant (a predict-only role on the project, in Terraform):
     # found live, a private endpoint checks predict on the project, so an endpoint-level grant is refused.
     base = f"{RUN}/projects/{project}/locations/{region}/services"
@@ -268,7 +333,9 @@ def grant_store_invoker(gcp, base: str, url: str, member: str) -> str | None:
 def remove_lookup_service(contract, manifest: dict, gcp) -> dict:
     """1.4.2 (design item 8): undeploy removes the use case's lookup service, so warm instances stop billing."""
     online = online_of(contract)
-    if not has_service(online):
+    if not has_service(online) and ab_of(contract) and running_ab(contract, manifest, gcp) is None:
+        online = router_online(contract)            # FR-57 D3: the test's router-only service, once it has ended
+    if not has_service(online) and online.get("type") != "router":
         return {"usecase": contract.usecase, "status": "none"}
     name = online["service"]
     if not name.startswith(f"pwl-{contract.tenant}-".lower()[:49]):
@@ -281,11 +348,26 @@ def remove_lookup_service(contract, manifest: dict, gcp) -> dict:
     return {"usecase": contract.usecase, "service": name, "status": "removed"}
 
 
-def remove_from_cli(uc, env, log=print, gcp=None) -> dict | None:
-    """deploy-model --undeploy's part: ask the launcher to remove the lookup service (it holds run.admin)."""
+def _cli_service(uc, ab: bool) -> str | None:
+    """The service the CLI asks the launcher about: the lookup service, or (FR-57 D3, `ab`) the A/B router-only
+    gateway of a use case whose callers send features."""
     online = (getattr(uc, "ml", None) or {}).get("online_features") or {}
-    if not has_service(online):
+    if has_service(online):
+        return online["service"]
+    if ab:
+        from pipewright.online.config import service_name
+
+        return service_name(uc.tenant, uc.name)
+    return None
+
+
+def remove_from_cli(uc, env, log=print, gcp=None, ab: bool = False) -> dict | None:
+    """deploy-model --undeploy's part: ask the launcher to remove the lookup service (it holds run.admin). With `ab`,
+    an A/B test's router-only service too."""
+    service = _cli_service(uc, ab)
+    if not service:
         return None
+    online = {"service": service}
     import os
 
     from pipewright.runs import launch
@@ -300,13 +382,16 @@ def remove_from_cli(uc, env, log=print, gcp=None) -> dict | None:
     return {"service": online["service"], "status": "requested"}
 
 
-def request_from_cli(uc, env, log=print, gcp=None, wait: float = 900, sleep=time.sleep) -> dict | None:
+def request_from_cli(uc, env, log=print, gcp=None, wait: float = 900, sleep=time.sleep,
+                     ab: bool = False) -> dict | None:
     """deploy-model's part: before a model with Pipewright's Cloud SQL lookup is deployed, the launcher creates or
     updates its lookup service from the live release. Directly, or over the run requests topic in a private
-    environment (then deploy-model waits until the service is ready)."""
-    online = (getattr(uc, "ml", None) or {}).get("online_features") or {}
-    if not has_service(online):
+    environment (then deploy-model waits until the service is ready). With `ab` (FR-57), the A/B gateway is brought
+    up to date from the test's record, a router-only one for a use case without a lookup."""
+    service = _cli_service(uc, ab)
+    if not service:
         return None
+    online = {"service": service}
     from pipewright.runs import launch
 
     payload = {"usecase": uc.name, "kind": "online.lookup_service"}

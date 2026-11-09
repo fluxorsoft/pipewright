@@ -1028,10 +1028,8 @@ def _ab_online(uc, env, gcp):
     """Phase B: the serving arm when the use case serves online; None for batch-only use cases."""
     if not uc.model.get("serving", {}).get("enabled"):
         return None
-    try:
-        from pipewright.abtest import online
-    except ImportError:
-        return None
+    from pipewright.abtest import online
+
     return online.Arms(uc, env, gcp)
 
 

@@ -510,3 +510,4 @@ ab_test.publish: "A copy of the test for the team's own tools, over the Pub/Sub 
 ab_test.publish.events: "The test's events: started, analysed, guardrail breached, decided (aggregates only)."
 ab_test.publish.exposures: "Per-unit exposure lines with a pseudonymised unit (a keyed hash), only where the platform allows it (policies.ab_test.feed_exposures)."
 ab_test.results_table: "The table the analysis writes its results to, in the use case's dataset. Left out: <usecase>_ab_results, created by the analysis."
+ab_test.callers: "Online, for use cases whose callers send features: who may call the router the test runs behind (members such as serviceAccount:checkout@p.iam.gserviceaccount.com). With online features the gateway's callers apply (model.serving.online_store.lookup.callers)."

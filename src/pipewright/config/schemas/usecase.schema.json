@@ -773,7 +773,8 @@
             "exposures": { "type": "boolean" }
           }
         },
-        "results_table": { "type": ["string", "null"] }
+        "results_table": { "type": ["string", "null"] },
+        "callers": { "type": "array", "items": { "type": "string", "pattern": "^(serviceAccount|user|group):.+@.+$" } }
       }
     },
     "synthetic": {

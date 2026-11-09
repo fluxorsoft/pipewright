@@ -119,13 +119,20 @@ class ABTests:
         self._history(test, "start", identity)
         self.store.create(test)
         if self.online is not None:
+            arms = {}
             try:
-                arms = self.online.start(test)
+                arms = self.online.start(test)                # the arm first: the gateway routes to what is stored
+                test = self._change(test["name"], lambda t: {**t, "arms": {**t["arms"], **arms}})
+                self.online.apply(test)
             except Exception:
-                self._change(test["name"], lambda t: self._history({**t, "state": "stopped"}, "stop", identity,
-                                                                   reason="the serving arm could not start"))
+                stopped = self._change(test["name"], lambda t: self._history(
+                    {**t, "state": "stopped"}, "stop", identity, reason="the serving arm could not start"))
+                if arms:
+                    try:
+                        self.online.stop(stopped)
+                    except Exception as e:  # noqa: BLE001 - the first failure is the one to report
+                        self.log(f"the treatment's arm was not removed ({e}): run pipewright ab stop again")
                 raise
-            test = self._change(test["name"], lambda t: {**t, "arms": {**t["arms"], **arms}})
         emit(self.env, self.uc, self.gcp, "ab_test.started", test, control=default.version_id, treatment=treatment,
              treatment_bp=section["allocation"]["treatment_bp"], mode=section["mode"], digest=test["digest"])
         self.log(f"started {test['name']}: v{treatment} against the default v{default.version_id}, "
