@@ -1255,9 +1255,10 @@
         "ab_test": {
           "type": "object",
           "additionalProperties": false,
-          "description": "per environment: whether the test runs there, its allocation, duration, feed and approvers",
+          "description": "per environment: whether the test runs there, the treatment (version numbers differ between environments), its allocation, duration, feed and approvers",
           "properties": {
             "enabled": { "type": "boolean" },
+            "arms": { "$ref": "#/$defs/ab_test/properties/arms" },
             "allocation": { "$ref": "#/$defs/ab_test/properties/allocation" },
             "duration": { "$ref": "#/$defs/ab_test/properties/duration" },
             "publish": { "$ref": "#/$defs/ab_test/properties/publish" },

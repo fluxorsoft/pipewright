@@ -37,15 +37,13 @@ test next, or deploy the candidate as usual.
 
 ## Turn it on
 
-In the environment file of the environment that runs the test (`environments/prod.yaml`):
+The test is part of the use case, reviewed and released like the rest: define it in `config/ab_test.yaml`.
 
 ```yaml
 ab_test:
-  enabled: true
+  enabled: false                       # on per environment, below
   name: lapse-v7                       # once per use case and environment
   unit: customer_id
-  arms:
-    treatment: { model_version: "7" }
   allocation: { treatment_bp: 1000 }   # 10% of customers
   metric:
     name: renewed
@@ -55,14 +53,25 @@ ab_test:
     minimum_effect: 0.03
   guardrails:
     business:
-      - { name: complaints, source: bq://my-project.my_dataset.complaints, time_column: raised_at, direction: lower }
+      - { name: complaints, source: bq://my-project.my_dataset.complaints, time_column: raised_at, direction: lower,
+          max_drop: 0.05 }                     # breached when 5% worse and significant
   decision:
     approvals: { required: [model-risk] }
 ```
 
-The churn example's `config/ab_test.yaml` shows every key with its default; `pipewright explain ab_test` describes
-each. For a batch test, add `ab_test` and `arm` (STRING, NULLABLE) to the predictions table's schema: `validate` says
-so when they are missing.
+Switch it on in the environment that runs it, with that environment's candidate (version numbers differ between
+environments), in `environments/prod.yaml`:
+
+```yaml
+ab_test:
+  enabled: true
+  arms: { treatment: { model_version: "7" } }
+```
+
+Only `enabled`, `arms`, `allocation`, `duration`, `publish` and `decision` may differ per environment; the rest is the
+same everywhere. The churn example's `config/ab_test.yaml` shows every key with its default; `pipewright explain
+ab_test` describes each. For a batch test, add `ab_test` and `arm` (STRING, NULLABLE) to the predictions table's
+schema: `validate` says so when they are missing.
 
 ## Run a test
 
@@ -112,7 +121,9 @@ median latency against the control's endpoint, once the treatment has answered `
 sets the allocation to 0 on every instance, opens the decision and emits `ab_test.guardrail_breached`. The arm is kept
 for diagnosis until someone concludes or stops the test.
 
-**Business.** Each `guardrails.business` metric is analysed like the primary one; a breach opens the decision.
+**Business.** Each `guardrails.business` metric is analysed like the primary one. It is breached when the treatment
+is worse by more than `max_drop` (relative) and the harm is significant (one-sided at `analysis.alpha`); a breach
+opens the decision.
 
 ## Decisions
 

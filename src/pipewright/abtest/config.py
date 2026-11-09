@@ -86,7 +86,7 @@ def check(ml: dict, columns: set, label: str | None, known, problems: list[str],
     if t["mode"] == "ab":
         _metric(t["metric"], f"{where}.metric", problems, required=True)
         for i, g in enumerate(t["guardrails"].get("business") or []):
-            g.setdefault("type", "mean")
+            g.setdefault("type", "proportion")            # as the metric: did it happen to the unit
             g.setdefault("direction", "higher")
             g.setdefault("window_days", t["metric"].get("window_days", 30))
             _metric(g, f"{where}.guardrails.business[{i}]", problems, required=False)
@@ -158,6 +158,10 @@ def check_tables(ml: dict, tables: dict, has_inference: bool, serving: bool, pro
         if missing:
             problems.append(f"ab_test: add {' and '.join(missing)} (STRING, NULLABLE) to {output}'s schema: scoring "
                             "records each unit's arm there, and the analysis reads it")
+        segs = [s for s in (t.get("analysis") or {}).get("segments") or [] if s not in have]
+        if segs:
+            problems.append(f"ab_test.analysis.segments: add {', '.join(segs)} to {output}'s schema and write "
+                            "it beside each score: a batch test's result is broken down by the scored rows")
     if t.get("results_table") and t["results_table"] in tables:
         problems.append("ab_test.results_table: the analysis creates and owns it; leave it out of "
                         "outputs.bigquery.tables")

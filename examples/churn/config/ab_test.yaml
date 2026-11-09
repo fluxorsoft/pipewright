@@ -35,7 +35,7 @@ ab_test:
   # default ab_test.guardrails.technical.min_requests: 200  # online: compared once the treatment answered this many
   # default ab_test.guardrails.technical.breaker.window: 200  # the gateway's last calls to the treatment
   # default ab_test.guardrails.technical.breaker.max_error_rate: 0.05  # tripped: its units go to the control at once
-  # default ab_test.guardrails.business: []  # metrics that must not get worse, such as complaints (same keys as metric)
+  # default ab_test.guardrails.business: []  # metrics that must not get worse (metric's keys plus max_drop, required)
   # default ab_test.duration.min_days: 14  # no decision before (whatever the numbers say)
   # default ab_test.duration.max_days: 60  # a decision is due at the latest
   # default ab_test.analysis.method: fixed  # fixed (decide at the planned sample) or sequential (look daily, mSPRT)

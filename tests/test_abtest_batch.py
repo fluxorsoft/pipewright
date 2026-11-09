@@ -1,5 +1,6 @@
 """FR-57 phase A: what a scoring run gets while a test runs, the predictions table's columns, the platform policy,
 and the component runtime's copy of the assignment."""
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -103,6 +104,11 @@ def test_the_predictions_table_must_carry_the_arm():
     problems = []
     abc.check_tables(_ml(), {}, False, False, problems)
     assert any("scores nothing" in p for p in problems)
+    problems = []
+    ml = copy.deepcopy(_ml())
+    ml["ab_test"]["analysis"]["segments"] = ["country"]
+    abc.check_tables(ml, {"preds": _table("customer_id", "ab_test", "arm")}, True, False, problems)
+    assert any("add country to preds" in p for p in problems)
 
 
 def test_the_platform_policy():

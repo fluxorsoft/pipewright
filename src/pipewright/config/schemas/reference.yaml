@@ -486,7 +486,7 @@ ab_test.guardrails.business.value_column: "mean and ratio: the value summed per 
 ab_test.guardrails.business.denominator_column: "ratio: the denominator summed per unit."
 ab_test.guardrails.business.where: "A SQL condition on the source's rows."
 ab_test.guardrails.business.window_days: "Days after first exposure (default: the metric's)."
-ab_test.guardrails.business.type: "proportion, mean (the default) or ratio."
+ab_test.guardrails.business.type: "proportion (the default, as for the metric), mean or ratio."
 ab_test.guardrails.business.direction: "higher or lower: which way is better (default higher)."
 ab_test.guardrails.business.max_drop: "The largest relative drop tolerated, such as 0.02. Breached when the drop is larger and significant (one-sided at analysis.alpha)."
 ab_test.duration: "How long the test may run."
