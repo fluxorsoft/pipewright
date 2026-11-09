@@ -317,7 +317,9 @@ class ABTests:
         if winner not in ("treatment", "control"):
             raise ConfigError("--winner treatment or control")
         if winner == "treatment" and t.get("mode") == "shadow":
-            raise ConfigError("a shadow test shows how the candidate behaves on live calls, not that it is better for the business: conclude it with the control, then start an A/B test (or deploy the candidate as usual)")
+            from pipewright.abtest.decide import SHADOW
+
+            raise ConfigError(SHADOW)
         if not (reason or "").strip():
             raise ConfigError("give --reason: it is recorded with your name")
         if winner == "treatment" and t["state"] != "decision_required" and not t["decision"]["required"]:

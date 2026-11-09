@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from pipewright.abtest.store import ACTIVE
 
+SHADOW = ("a shadow test shows how the candidate behaves on live calls, not that it is better for the business: "
+          "conclude it with the control, then start an A/B test (or deploy the candidate as usual)")
+
 
 class Refused(Exception):
     pass
@@ -21,7 +24,7 @@ def record(test: dict, group: str, by: str, winner: str, reason: str, at: str, a
     if winner not in ("treatment", "control"):
         raise Refused("winner must be treatment or control")
     if winner == "treatment" and test.get("mode") == "shadow":
-        raise Refused("a shadow test shows how the candidate behaves on live calls, not that it is better for the business: conclude it with the control, then start an A/B test (or deploy the candidate as usual)")
+        raise Refused(SHADOW)
     if not (reason or "").strip():
         raise Refused("a reason is required")
     d = test.setdefault("decision", {"required": [], "approvals": []})
