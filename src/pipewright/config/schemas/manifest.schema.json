@@ -19,31 +19,38 @@
   ],
   "properties": {
     "apiVersion": {
+      "description": "The manifest format: always pipewright/v1",
       "const": "pipewright/v1"
     },
     "environment": {
+      "description": "The environment's name, as `--env` names it (for example dev or prod)",
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{0,30}$"
     },
     "blueprint": {
+      "description": "The platform blueprint that wrote this manifest, optionally with its version (poc is the starter; private-managed and private-gke are Pipewright Enterprise)",
       "type": "string",
       "pattern": "^(poc|private-managed|private-gke)(@[0-9]+\\.[0-9]+\\.[0-9]+)?$"
     },
     "orchestrator": {
+      "description": "Where pipelines run: vertex (Vertex AI Pipelines, the default) or kfp (Kubeflow Pipelines on the environment's GKE cluster)",
       "enum": [
         "vertex",
         "kfp"
       ]
     },
     "project": {
+      "description": "The Google Cloud project the environment's resources live in",
       "type": "string",
       "minLength": 1
     },
     "region": {
+      "description": "The region pipelines, models, endpoints and buckets use",
       "type": "string",
       "minLength": 1
     },
     "artifact_registry": {
+      "description": "The Artifact Registry repositories release pushes to",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -52,27 +59,33 @@
       ],
       "properties": {
         "docker": {
+          "description": "The Docker repository for component, Ray and serving images (<region>-docker.pkg.dev/<project>/<repo>)",
           "type": "string",
           "minLength": 1
         },
         "kfp": {
+          "description": "The Kubeflow Pipelines repository for compiled pipeline templates (https://<region>-kfp.pkg.dev/<project>/<repo>)",
           "type": "string",
           "minLength": 1
         },
         "python": {
+          "description": "A Python package repository, when the platform offers one for the use cases' requirements",
           "type": "string"
         }
       }
     },
     "artifacts_bucket": {
+      "description": "The bucket for pipeline roots, release contracts, approved model files and online store exports, with a prefix per tenant",
       "type": "string",
       "minLength": 1
     },
     "landing_bucket": {
+      "description": "The bucket data files land in; a file under a tenant's landing prefix starts the use case's landing trigger",
       "type": "string",
       "minLength": 1
     },
     "launcher": {
+      "description": "The launcher: the platform's service that starts runs from landing files, schedules and requests, as the tenant's runner",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -80,22 +93,26 @@
       ],
       "properties": {
         "url": {
+          "description": "The launcher's URL, for direct requests (`pipewright run` without a run requests topic) and for `doctor` to check the subscription",
           "type": [
             "string",
             "null"
           ]
         },
         "service": {
+          "description": "The launcher's Cloud Run service name, checked by `doctor`",
           "type": [
             "string",
             "null"
           ]
         },
         "service_account": {
+          "description": "The identity the launcher runs as; it submits each run as the tenant's runner",
           "type": "string",
           "minLength": 1
         },
         "subscription": {
+          "description": "The Pub/Sub subscription that delivers landing and run events to the launcher, checked by `doctor`",
           "type": [
             "string",
             "null"
@@ -170,7 +187,7 @@
               "additionalProperties": false,
               "description": "Aggregates (counts per value, null rates, min and max) for the `profile` tool; served only by Enterprise's hosted tool server.",
               "properties": {
-                "allowed": {"type": "boolean"},
+                "allowed": {"description": "Whether the tool server may return aggregates; false (the default) refuses them", "type": "boolean"},
                 "min_group_size": {"type": "integer", "minimum": 1, "description": "Groups smaller than this are suppressed."}
               }
             }
@@ -189,6 +206,7 @@
       }
     },
     "policies": {
+      "description": "The platform's rules for every use case in this environment; `validate`, `release` and the commands that act on models enforce them",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -201,6 +219,7 @@
               "type": "object",
               "description": "The least each metric's gate may ask, by metric: a number (a minimum) or {min, max}. A use case without such a gate, or with a weaker one, is refused.",
               "additionalProperties": {
+                "description": "A metric every use case must gate on: a number is the least it may be set to (a floor for a higher-is-better metric), or {min, max} bounds for the gate's threshold",
                 "oneOf": [
                   {"type": "number"},
                   {"type": "object", "additionalProperties": false, "properties": {"min": {"type": "number"}, "max": {"type": "number"}}}
@@ -218,6 +237,7 @@
           "description": "manual: use cases may not deploy without a person (auto and on_register refused); ci (Pipewright 1.2.0): only through a GitHub-approved gate (approvals.deploy_model ci)"
         },
         "promote_model": {
+          "description": "Whether a model promoted into this environment needs a person to approve it there (manual, the default) or becomes the default as it arrives (auto)",
           "enum": [
             "manual",
             "auto"
@@ -229,6 +249,7 @@
           "description": "platform limits on retrain decisions in this environment",
           "properties": {
             "allowed_modes": {
+              "description": "The retraining.mode values use cases may set here (off, candidate, deploy, ...); others are refused by validate",
               "type": "array",
               "minItems": 1,
               "items": {
@@ -248,6 +269,7 @@
               "description": "approver groups every use case must include (e.g. model risk)"
             },
             "max_snooze_days": {
+              "description": "The longest a retrain proposal may be snoozed; retraining.snooze.max_days above it is refused",
               "type": "integer",
               "minimum": 1
             }
@@ -264,6 +286,7 @@
               "description": "the most bytes one BigQuery ML job may bill; the default limit when a use case sets none"
             },
             "allowed_model_types": {
+              "description": "The BigQuery ML model types use cases may train here (for example LOGISTIC_REG, BOOSTED_TREE_CLASSIFIER, KMEANS, ARIMA_PLUS)",
               "type": "array",
               "minItems": 1,
               "items": {
@@ -305,19 +328,21 @@
           "description": "accelerators use cases may ask for (Pipewright 1.2.0): steps (steps.<name>.gpu; without it any, as in 1.x) and serving (model.serving.accelerator; without it none)",
           "properties": {
             "steps": {
+              "description": "GPUs pipeline steps may ask for (steps.<name>.gpu)",
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                "max_count": { "type": "integer", "minimum": 1 }
+                "types": {"description": "The accelerator types allowed for steps (for example NVIDIA_TESLA_T4, NVIDIA_L4)", "type": "array", "items": { "type": "string", "minLength": 1 }},
+                "max_count": {"description": "The most accelerators one step may ask for", "type": "integer", "minimum": 1}
               }
             },
             "serving": {
+              "description": "GPUs a serving deployment may ask for (model.serving.accelerator)",
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                "max_count": { "type": "integer", "minimum": 1 }
+                "types": {"description": "The accelerator types allowed for serving", "type": "array", "items": { "type": "string", "minLength": 1 }},
+                "max_count": {"description": "The most accelerators one serving replica may ask for", "type": "integer", "minimum": 1}
               }
             }
           }
@@ -332,11 +357,13 @@
               "description": "false: no use case may switch synthetic data on here"
             },
             "allowed_purposes": {
+              "description": "The synthetic.purpose values use cases may declare here",
               "type": "array",
               "minItems": 1,
               "items": { "enum": ["test-data", "sharing"] }
             },
             "allowed_engines": {
+              "description": "The synthetic data engines use cases may use here",
               "type": "array",
               "minItems": 1,
               "items": { "enum": ["mostlyai", "sdv"] }
@@ -350,11 +377,12 @@
               "type": "object",
               "description": "floors: a use case's gate is raised to this when it is looser (quality gates too)",
               "additionalProperties": {
+                "description": "A gate every synthetic data run must pass here, by metric name: one bound, min or max",
                 "type": "object",
                 "additionalProperties": false,
                 "minProperties": 1,
                 "maxProperties": 1,
-                "properties": { "min": { "type": "number" }, "max": { "type": "number" } }
+                "properties": { "min": {"description": "The least the metric may be", "type": "number"}, "max": {"description": "The most the metric may be", "type": "number"} }
               }
             },
             "required_approvers": {
@@ -376,6 +404,7 @@
           "description": "Pipewright 1.4.2: rules for shared serving pools in this environment",
           "properties": {
             "pools": {
+              "description": "Rules for shared deployment resource pools: in production at least two machines (min_replicas) and no Preview serving images unless allow_preview",
               "type": [
                 "object",
                 "null"
@@ -428,6 +457,7 @@
               "description": "Lock the approved files with Cloud Storage object retention (the artifacts bucket needs object retention enabled).",
               "properties": {
                 "days": {
+                  "description": "How many days each approved file is retained (0, the default, locks nothing); the renewer extends it while the version is live",
                   "type": "integer",
                   "minimum": 0,
                   "default": 0
@@ -504,12 +534,14 @@
       }
     },
     "tenants": {
+      "description": "The teams that use this environment, by tenant name: each has its own runner identity, BigQuery dataset, landing prefix and artifact prefixes",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
         "pattern": "^[a-z][a-z0-9-]{0,30}$"
       },
       "additionalProperties": {
+        "description": "One tenant's resources; a use case names its tenant in spec.tenant",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -527,31 +559,36 @@
             "required": ["url", "runtime"],
             "description": "AI build assistance: the tenant's hosted tool server (Pipewright Enterprise), reached through `gcloud run services proxy` or `kubectl port-forward`; `pipewright mcp --print-config` prints the settings.",
             "properties": {
-              "url": {"type": "string", "minLength": 1},
-              "runtime": {"enum": ["cloud_run", "gke"]},
-              "service": {"type": "string", "minLength": 1},
-              "namespace": {"type": "string", "minLength": 1},
+              "url": {"description": "The tool server's URL", "type": "string", "minLength": 1},
+              "runtime": {"description": "Where it runs: cloud_run or gke", "enum": ["cloud_run", "gke"]},
+              "service": {"description": "Its Cloud Run service or Kubernetes service name", "type": "string", "minLength": 1},
+              "namespace": {"description": "Its Kubernetes namespace (runtime gke)", "type": "string", "minLength": 1},
               "service_account": {"type": "string", "minLength": 1, "description": "The server's own identity (metadata only; writes the audit)."}
             }
           },
           "runner_service_account": {
+            "description": "The identity the tenant's pipeline runs, scoring and syncs run as; it reads only the tenant's own data and prefixes",
             "type": "string",
             "minLength": 1
           },
           "bigquery_dataset": {
+            "description": "The tenant's BigQuery dataset for its use cases' tables, predictions and BigQuery ML models",
             "type": "string",
             "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,1023}$"
           },
           "landing_prefix": {
+            "description": "The tenant's prefix in the landing bucket; files under it start its use cases' landing triggers",
             "type": [
               "string",
               "null"
             ]
           },
           "online_serving": {
+            "description": "Whether the tenant may serve with online features (model.serving.features online): the platform has granted its runner the online store's read access",
             "type": "boolean"
           },
           "namespace": {
+            "description": "The tenant's Kubernetes namespace for pipelines on GKE (orchestrator kfp)",
             "type": [
               "string",
               "null"
@@ -611,6 +648,7 @@
       }
     },
     "observability": {
+      "description": "Where Pipewright's events and evidence go: the events topic, the evidence dataset and location, log sinks",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -630,6 +668,7 @@
           "description": "informational: where the platform routes logs (e.g. dynatrace)"
         },
         "otlp_endpoint": {
+          "description": "Reserved for an OpenTelemetry collector; not read by this version",
           "type": [
             "string",
             "null"
@@ -723,6 +762,7 @@
         "pattern": "^[a-z][a-z0-9-]{0,30}$"
       },
       "additionalProperties": {
+        "description": "One approver group, by the name use cases list in their required approvers",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -731,6 +771,7 @@
         ],
         "properties": {
           "topic": {
+            "description": "The group's Pub/Sub topic: whoever may publish to it is a member",
             "type": "string",
             "pattern": "^projects/[^/]+/topics/[^/]+$"
           },
@@ -740,12 +781,14 @@
             "description": "push subscription to the launcher's /retraining/decide"
           },
           "description": {
+            "description": "What the group is for, shown to approvers",
             "type": "string"
           }
         }
       }
     },
     "ray": {
+      "description": "Ray on Vertex AI for use cases with Ray steps: the clusters' network, images and limits",
       "anyOf": [
         {
           "$ref": "#/$defs/ray"
@@ -756,6 +799,7 @@
       ]
     },
     "features": {
+      "description": "Feature tables and the online stores this environment offers",
       "anyOf": [
         {
           "$ref": "#/$defs/features"
@@ -781,6 +825,7 @@
       "description": "orchestrator kfp (private-gke): the GKE cluster's Kubernetes API, called as the caller's Google identity",
       "properties": {
         "endpoint": {
+          "description": "The cluster's Kubernetes API address (https://...)",
           "type": "string",
           "pattern": "^https://"
         },
@@ -876,6 +921,7 @@
           ],
           "description": "use case -> its endpoint, created by Terraform (public or private); deploy-model deploys onto it and never creates one for a use case listed here",
           "additionalProperties": {
+            "description": "One use case's endpoint, by use case name",
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -938,6 +984,7 @@
           ],
           "description": "pool name -> a shared deployment resource pool; a use case joins one with model.serving.pool",
           "additionalProperties": {
+            "description": "One shared pool: the tenant it belongs to, its machine and replicas, and the one serving image every model on it uses",
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -961,6 +1008,7 @@
                 "description": "the machine type, for example n1-standard-4"
               },
               "accelerator": {
+                "description": "A GPU on each of the pool's machines",
                 "type": [
                   "object",
                   "null"
@@ -968,9 +1016,11 @@
                 "additionalProperties": false,
                 "properties": {
                   "type": {
+                    "description": "The accelerator type (for example NVIDIA_L4)",
                     "type": "string"
                   },
                   "count": {
+                    "description": "How many on each machine",
                     "type": "integer",
                     "minimum": 1
                   }
@@ -1068,6 +1118,7 @@
         "namespaces": {
           "type": "object",
           "additionalProperties": {
+            "description": "The Kubernetes namespace of the tenant's InferenceServices",
             "type": "string",
             "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
           },

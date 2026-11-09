@@ -311,6 +311,7 @@ synthetic.candidates.sampling_temperature: As synthetic.engine.sampling_temperat
 synthetic.candidates.rare_categories: As synthetic.engine.rare_categories, for this candidate.
 synthetic.candidates.epochs: As synthetic.engine.epochs, for this candidate.
 synthetic.columns: "Columns decided by rules instead of learned: keys, personal data, time grids. Personal-data columns without a rule become new keys (if unique) or nulls; they are never learned."
+synthetic.columns.<name>: "One column decided by a rule instead of learned, by its name in the source table."
 synthetic.columns.<name>.rule: key (new unique keys), fake (made-up personal data), constant, drop (null), time (dates on a grid), values (a categorical with chosen frequencies) or range (uniform between min and max).
 synthetic.columns.<name>.prefix: "rule key: the text before the number (default SYN-)."
 synthetic.columns.<name>.provider: "rule fake: email, name, phone, uuid or text. Emails use example.com and phone numbers the reserved drama range."
@@ -345,6 +346,7 @@ synthetic.evaluation.attacks: Anonymeter attacks per risk (default 1000). Fewer 
 synthetic.requirements: A requirements file of extra packages for the synthetic image, for example SDV (installed by your team, which accepts its licence directly).
 synthetic.mode: "flat (default): one table, the source as training reads it. relational: the entity table and its child tables learned together in one model, the feature tables of data.features_from (history per entity) and synthetic.sequences (events per entity); keys stay consistent and history keeps its timing against each cut-off."
 synthetic.output_tables: "relational: the output table (in outputs.bigquery.tables) of each child table, by its name: a feature table by its feature group or table name, a sequence by its name. Each holds the child's columns and run_id."
+synthetic.output_tables.<name>: "The output table of one child table, by the child table's name."
 synthetic.sequences: "relational: event tables per entity, beyond the feature tables (for example transactions or sessions), generated in order with the entity table."
 synthetic.sequences.name: The child table's name (output_tables uses it).
 synthetic.sequences.source_uri: The event table, bq://project.dataset.table. Only rows of the source's entities are read.
@@ -440,5 +442,6 @@ feature_contract.sources.sql_files: "A table several jobs write (for example a b
 feature_contract.sources.also_sql_sha256: "Recorded from sql_files: the SHA-256 of each SQL file after the first. Part of the contract's digest."
 feature_contract.sources.scheduled_query: "A table built by a BigQuery scheduled query: its transfer config name (projects/.../transferConfigs/...). Its SQL is fingerprinted from the config."
 feature_contract.sources.features: "The features the use case reads from the source, each with its type and an optional description (kept when the contract is updated)."
+feature_contract.sources.features.<name>: "One feature the use case reads from the source, by its column name."
 feature_contract.sources.features.<name>.type: "The feature's BigQuery type, from the source's schema."
 feature_contract.sources.features.<name>.description: "What the feature means, in business terms (yours to write; kept on updates)."
