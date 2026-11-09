@@ -142,7 +142,8 @@ class ABTests:
                     except Exception as e:  # noqa: BLE001 - the first failure is the one to report
                         self.log(f"the treatment's arm was not removed ({e}): run pipewright ab stop again")
                 raise
-        emit(self.env, self.uc, self.gcp, "ab_test.started", test, control=default.version_id, treatment=treatment,
+        emit(self.env, self.uc, self.gcp, "ab_test.started", test, by=identity, control=default.version_id,
+             treatment=treatment,
              treatment_bp=section["allocation"]["treatment_bp"], mode=section["mode"], digest=test["digest"])
         self.log(f"started {test['name']}: v{treatment} against the default v{default.version_id}, "
                  f"{section['allocation']['treatment_bp'] / 100:g}% of units to the treatment (mode {section['mode']})")
