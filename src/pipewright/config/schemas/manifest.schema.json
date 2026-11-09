@@ -210,6 +210,39 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "ab_test": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Pipewright FR-57: the platform's rules for A/B tests in this environment",
+          "properties": {
+            "allowed": {
+              "type": "boolean",
+              "description": "false refuses every A/B test here (default allowed)"
+            },
+            "required_approvers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "approver groups every test's decision needs, such as model-risk"
+            },
+            "max_treatment_bp": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9999,
+              "description": "the largest treatment share a test may have, in basis points"
+            },
+            "min_days": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "the shortest ab_test.duration.min_days a test may set"
+            },
+            "feed_exposures": {
+              "type": "boolean",
+              "description": "true lets ab_test.publish.exposures copy per-unit lines (pseudonymised) to the tenant's feed; default false"
+            }
+          }
+        },
         "evaluation": {
           "type": "object",
           "additionalProperties": false,
@@ -549,6 +582,25 @@
           "bigquery_dataset"
         ],
         "properties": {
+          "ab_test_feed": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Pipewright FR-57: the tenant's A/B feed for its own tools (ab_test.publish)",
+            "properties": {
+              "topic": {
+                "type": "string",
+                "pattern": "^projects/[^/]+/topics/[^/]+$",
+                "description": "the Pub/Sub topic the test's events (and allowed exposures) are copied to"
+              },
+              "key_secret": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "the Secret Manager secret (projects/<p>/secrets/<s>) whose value keys the pseudonymised unit in feed exposures"
+              }
+            }
+          },
           "agent_service_account": {
             "type": "string",
             "description": "AI build assistance (Pipewright 1.3.0): the service account a coding agent and `pipewright mcp` act as for this tenant, impersonated by the team's engineers, with metadata-only roles. Left out, the tools use the person's own credentials."

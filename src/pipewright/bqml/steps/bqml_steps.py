@@ -336,12 +336,15 @@ def bqml_champion(project: str, region: str, ml_config: dict, model_version: str
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
 def bqml_score(project: str, rows_table: str, model: str, model_version: str, run_id: str,
-               ml_config: dict) -> NamedTuple("Scores", [("scored_table", str), ("rows", int)]):
-    """ML.PREDICT with the champion on the run's rows, into inference.output_table."""
+               ml_config: dict, region: str = "", ab_test: str = "") -> NamedTuple(
+        "Scores", [("scored_table", str), ("rows", int)]):
+    """ML.PREDICT with the champion on the run's rows, into inference.output_table. While an A/B test runs (ab_test,
+    from the launcher), the treatment's BigQuery model scores its units and the champion the rest, with ab_test and
+    arm beside each score (FR-57)."""
     from collections import namedtuple
 
     import bqml_runtime as rt
-    from pipewright_runtime import labels
+    from pipewright_runtime import ab_spec, ab_sql_arm, labels
 
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-score"}))
     scored = rt.table_ref(project, ml_config, run_id, "scored")
@@ -358,7 +361,27 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
                                                                    settings["horizon"]), scored, jobs.labels),
                  "forecast")
         rt.forecast_failures(jobs, scored)
-    else:
+    test = None if ml_config["bqml"].get("forecast") else ab_spec(ab_test)
+    treatment_version = ""
+    if test:
+        tv = rt.default_version(project, region, ml_config["bqml"]["registry_id"],
+                                version=str(test["treatment"]["version"])) or {}
+        tlabel = (tv.get("labels") or {}).get("pipewright-bq-model")
+        if not tlabel:
+            raise ValueError(f"treatment v{test['treatment']['version']} has no BigQuery model (its registry labels "
+                             "name none): it cannot be scored")
+        treatment_version = str(tv["versionId"])
+        tmodel = f"{project}.{ml_config['platform']['bigquery_dataset']}.{tlabel}"
+        arm = ab_sql_arm(test["name"], rt.q(test["unit"]), int(test["treatment_bp"]))
+        parts = {}
+        for name, which in (("control", model), ("treatment", tmodel)):
+            parts[name] = rt.table_ref(project, ml_config, run_id, f"scored_{name}")
+            jobs.run(rt.predict_sql(ml_config, which, rows_table, parts[name], f"{arm} = '{name}'", jobs.labels,
+                                    False, parts=rt.model_parts(jobs, which)), f"predictions ({name})")
+        jobs.run(rt.render("ab_union.sql", out_table=scored, labels=rt.label_pairs(jobs.labels),
+                           keep_days=rt.KEEP_DAYS, control=parts["control"], treatment=parts["treatment"]),
+                 "predictions per arm")
+    elif not ml_config["bqml"].get("forecast"):
         jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False,
                                 parts=rt.model_parts(jobs, model)), "predictions")
     output = ml_config["inference"]["output_table"]
@@ -368,6 +391,10 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
     fixed = {"run_id": rt.string(run_id), "model_version_id": rt.string(model_version),
              "scored_at": "CURRENT_TIMESTAMP()", "predicted_label": "_pw_label", "score": "_pw_score",
              "prediction": "_pw_prediction"}
+    if test:
+        fixed.update({"model_version_id": f"IF(_pw_arm = 'treatment', {rt.string(treatment_version)}, "
+                                          f"{rt.string(model_version)})",
+                      "ab_test": rt.string(test["name"]), "arm": "_pw_arm"})
     chosen = [(c, fixed[c]) for c in table_columns
               if c in fixed and (not fixed[c].startswith("_pw") or fixed[c] in have)]
     chosen += [(c, rt.q(c)) for c in table_columns if c not in fixed and c in have]

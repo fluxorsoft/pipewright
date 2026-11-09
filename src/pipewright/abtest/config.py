@@ -139,6 +139,49 @@ def _metric(m: dict, where: str, problems: list[str], required: bool) -> None:
                         "detecting; it sizes the test)")
 
 
+def check_tables(ml: dict, tables: dict, has_inference: bool, serving: bool, problems: list[str]) -> None:
+    """Where the arms are recorded: a batch test writes ab_test and arm beside each score in inference.output_table
+    (nullable STRING columns the team adds to its schema); an online test needs model.serving."""
+    t = ml["ab_test"]
+    if not has_inference and not serving:
+        problems.append("ab_test: the use case scores nothing (no inference pipeline, model.serving off): a test "
+                        "needs batch scoring, online serving or both")
+    output = (ml.get("inference") or {}).get("output_table")
+    table = tables.get(output) if output else None
+    if has_inference and table is not None and table.fields:
+        have = {f["name"]: str(f.get("type", "")).upper() for f in table.fields}
+        missing = [c for c in ("ab_test", "arm") if c not in have]
+        if missing:
+            problems.append(f"ab_test: add {' and '.join(missing)} (STRING, NULLABLE) to {output}'s schema: scoring "
+                            "records each unit's arm there, and the analysis reads it")
+    if t.get("results_table") and t["results_table"] in tables:
+        problems.append("ab_test.results_table: the analysis creates and owns it; leave it out of "
+                        "outputs.bigquery.tables")
+
+
+def apply_policy(t: dict, policy: dict, env_name: str, problems: list[str]) -> None:
+    """The platform's rules (manifest policies.ab_test): allowed, required approver groups, the most a treatment may
+    get, a minimum duration, whether per-unit exposures may leave in the feed."""
+    if t["publish"].get("exposures") and not (policy or {}).get("feed_exposures"):
+        problems.append(f"ab_test.publish.exposures: per-unit exposures may not leave the tenant's dataset in "
+                        f"{env_name} (the platform has not set policies.ab_test.feed_exposures: true)")
+    if not policy:
+        return
+    if policy.get("allowed") is False:
+        problems.append(f"ab_test: A/B tests are not allowed in {env_name} (platform policy policies.ab_test.allowed)")
+    cap = policy.get("max_treatment_bp")
+    if cap is not None and (t.get("allocation") or {}).get("treatment_bp", 0) > cap:
+        problems.append(f"ab_test.allocation.treatment_bp {t['allocation']['treatment_bp']} is above {env_name}'s "
+                        f"limit of {cap} (policies.ab_test.max_treatment_bp)")
+    floor = policy.get("min_days")
+    if floor is not None and t["duration"]["min_days"] < floor:
+        problems.append(f"ab_test.duration.min_days {t['duration']['min_days']} is below {env_name}'s minimum of "
+                        f"{floor} (policies.ab_test.min_days)")
+    required = list(dict.fromkeys([*(policy.get("required_approvers") or []),
+                                   *t["decision"]["approvals"]["required"]]))
+    t["decision"]["approvals"]["required"] = required
+
+
 def resolved(ml: dict) -> dict | None:
     """The section when on, else None."""
     t = ml.get("ab_test")

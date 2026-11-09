@@ -1121,5 +1121,36 @@ def approved_download(approved_files: str | dict, dest: str, project: str, only:
     return got
 
 
+# ---------------------------------------------------------------------------------- A/B tests (FR-57) --
+# The same assignment as pipewright.abtest.assign (a test keeps them equal): the component image has no pipewright
+# package, so the few lines live here too.
+
+def ab_spec(ab_test: str | dict | None) -> dict | None:
+    """The run's ab_test parameter (JSON from the launcher), or None when no test is running."""
+    if not ab_test:
+        return None
+    spec = json.loads(ab_test) if isinstance(ab_test, str) else ab_test
+    return spec if spec.get("name") else None
+
+
+def ab_arm(name: str, unit, treatment_bp: int) -> str:
+    """control or treatment: first 7 bytes of SHA-256(name:unit) below treatment_bp * 2^56 // 10000."""
+    import hashlib
+
+    if unit is None or unit == "":
+        return "control"
+    bucket = int.from_bytes(hashlib.sha256(f"{name}:{unit}".encode()).digest()[:7], "big")
+    return "treatment" if bucket < int(treatment_bp) * 2**56 // 10000 else "control"
+
+
+def ab_sql_arm(name: str, unit_sql: str, treatment_bp: int) -> str:
+    """The same arm in BigQuery SQL."""
+    quoted = name.replace("\\", "\\\\").replace("'", "\\'")
+    b = (f"CAST(CONCAT('0x', TO_HEX(SUBSTR(SHA256(CONCAT('{quoted}', ':', CAST({unit_sql} AS STRING))), 1, 7))) "
+         f"AS INT64)")
+    return (f"IF({unit_sql} IS NULL OR CAST({unit_sql} AS STRING) = '', 'control', "
+            f"IF({b} < {int(treatment_bp) * 2**56 // 10000}, 'treatment', 'control'))")
+
+
 if __name__ == "__main__":       # `python pipewright_runtime.py` prints the format version (image smoke test)
     print(GCS_FORMAT_VERSION, file=sys.stdout)

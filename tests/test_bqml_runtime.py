@@ -152,7 +152,7 @@ def test_both_pipelines_compile_on_one_image(repo, tmp_path):
         assert info.images == {image}
     base = {"project", "region", "source_uri", "run_id", "ml_config"}
     assert set(infos["training"].parameters) == base | {"champion_version"}      # a closed retrain loop sets them
-    assert set(infos["inference"].parameters) == base | {"model_version"}
+    assert set(infos["inference"].parameters) == base | {"model_version", "ab_test"}   # ab_test: FR-57
 
 
 def test_performance_joins_this_versions_latest_scores_with_outcomes(cfg):

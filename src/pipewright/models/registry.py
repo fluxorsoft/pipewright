@@ -337,6 +337,51 @@ def _approve_first_version(uc: ResolvedUseCase, env: Environment, creds, resourc
         + (f" by {identity}" if identity else ""))
 
 
+AB_LABEL = "pipewright-ab"
+
+
+def approve_for_test(uc: ResolvedUseCase, env: Environment, creds, version: str, test: str, identity: str | None,
+                     approved: bool, log=print) -> dict:
+    """FR-57: approve a candidate for an A/B test without making it the default. Judged as `approve` judges a version
+    (the released rules and approvers, the gates recomputed from its evaluation record), its files locked like an
+    approval's, a label set on the version (the Admin Activity entry the approval cross-check reads) and
+    `model.approved` recorded with `ab_test`, so deploy, scoring and the watch check the treatment's bytes as they
+    check the champion's. The default does not move. Returns the approval record (its files)."""
+    from google.cloud.aiplatform.models import ModelRegistry
+
+    from pipewright.gcp import Gcp
+    from pipewright.models import integrity
+
+    resource = _resource(uc, env, creds)
+    registry = ModelRegistry(model=resource)
+    known = {str(v.version_id): v for v in registry.list_versions()}
+    version = str(version).removeprefix("v")
+    if version not in known:
+        raise ConfigError(f"{uc.model['name']} has no version {version} (versions: {', '.join(sorted(known))})")
+    if "default" in (known[version].version_aliases or []):
+        raise ConfigError(f"v{version} is already the default (the control): an A/B test needs another version")
+    rules, record, folder = _judged(uc, env, creds, resource, version, log)
+    released = _check_rules(uc, env, rules, identity, approved, version, log)
+    earlier = any(_number(k) < _number(version) for k in known)
+    problems = gates.verify(Gcp(creds), folder, released.ml["evaluation"], earlier)
+    if problems:
+        raise ConfigError(problems, source=f"v{version} of {uc.model['name']} cannot be tested: it does not pass "
+                                           f"{uc.name}'s evaluation gates (release {rules.release or '?'})")
+    gcp = Gcp(creds)
+    url = f"https://{env.region}-aiplatform.googleapis.com/v1/{resource}@{version}"
+    current = gcp.get(url)
+    labels = {**((current.body or {}).get("labels") or {}), AB_LABEL: test[:63]}
+    resp = gcp.patch(url, {"labels": labels}, updateMask="labels")
+    if not resp.ok:
+        raise ConfigError(f"recording the approval of v{version} for the test: HTTP {resp.status}")
+    locked = integrity.lock(gcp, env, record.get("files"), log)
+    _emit_approval(uc, env, creds, version, identity, {**record, **({"lock": locked} if locked else {})},
+                   previous=None, ab_test=test)
+    log(f"{uc.model['name']}: v{version} approved for A/B test {test}" + (f" by {identity}" if identity else "")
+        + "; the default is unchanged")
+    return record
+
+
 def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity: str | None, approved: bool,
             log=print) -> None:
     from google.cloud.aiplatform.models import ModelRegistry

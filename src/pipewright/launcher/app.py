@@ -117,6 +117,21 @@ def create_app(registry: Registry | None = None) -> Flask:
                 log.warning("integrity: %s %s does not declare approved_files, so it loads the live model folder: "
                             "rebuild the release with Pipewright 1.4.1 to pin the approved files",
                             contract.usecase, pipeline)
+            # FR-57: a running A/B test scores each unit with its arm's model (pipelines that declare ab_test).
+            if "ab_test" in target.parameters and not (extra or {}).get("model_version"):
+                from pipewright.abtest import scoring as ab_scoring
+
+                try:
+                    ab_param, ab_record = ab_scoring.param(getattr(reg(), "gcp", None), reg().manifest, contract)
+                except Exception as e:  # noqa: BLE001 - a test that cannot be read scores everyone with the control
+                    ab_param, ab_record = None, {"problem": f"the A/B test cannot be read: {str(e)[:200]}"}
+                if ab_param:
+                    params_extra["ab_test"] = ab_param
+                if ab_record:
+                    recorded = {**(recorded or {}), "ab_test": ab_record}
+                    if ab_record.get("problem"):
+                        _event("run.integrity", contract, rid, pipeline=pipeline, trigger=trigger,
+                               mode="refuse" if not ab_param else "warn", problem=ab_record["problem"], check="ab_test")
         # 1.4.1 (FR-103): with a feature contract, a training run's definitions are checked first (features check
         # on), and run.submitted records the contract and, for scoring with record_reads, what the run reads.
         from pipewright.models import integrity as _integrity

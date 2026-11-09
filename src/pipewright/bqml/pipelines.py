@@ -65,6 +65,7 @@ def bqml_scoring_pipeline(
     run_id: str,
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
     model_version: str = "",       # a closed retrain loop validates its candidate before it is the default
+    ab_test: str = "",             # FR-57: set by the launcher while an A/B test runs: the treatment and its share
 ):
     champion = bqml_champion(project=project, region=region, ml_config=ml_config, model_version=model_version)
     champion.set_display_name("load-champion").set_caching_options(False)
@@ -74,7 +75,8 @@ def bqml_scoring_pipeline(
                              ml_config=ml_config)
     validate.set_display_name("validate-data").set_caching_options(False)
     score = bqml_score(project=project, rows_table=rows.outputs["rows_table"], model=champion.outputs["model"],
-                       model_version=champion.outputs["version"], run_id=run_id, ml_config=ml_config).after(validate)
+                       model_version=champion.outputs["version"], run_id=run_id, ml_config=ml_config,
+                       region=region, ab_test=ab_test).after(validate)
     score.set_display_name("score-to-bigquery").set_caching_options(False)
     monitor = bqml_monitor(project=project, rows_table=rows.outputs["rows_table"],
                            scored_table=score.outputs["scored_table"], rows=score.outputs["rows"],

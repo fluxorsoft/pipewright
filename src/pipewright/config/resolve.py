@@ -230,6 +230,12 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                 problems.append(f"triggers.schedules[{s['name']}].source_uri: {sources.problem(s['source_uri'])}")
     ml_spec = interpolate_tree({k: eff[k] for k in eff if k in _ml_keys()}, ctx, "spec", problems)
     ml = resolve_ml(ml_spec, meta["name"], "inference" in pipelines, set(tables), problems)
+    if "ab_test" in ml:                       # FR-57: the predictions carry the arm; the platform's policy
+        from pipewright.abtest import config as ab_config
+
+        ab_config.check_tables(ml, tables, "inference" in pipelines, bool(model.get("serving", {}).get("enabled")),
+                               problems)
+        ab_config.apply_policy(ml["ab_test"], env.policies.get("ab_test") or {}, env.name, problems)
     retrain_source = ml["retraining"].get("source_uri")
     if retrain_source and "${" not in retrain_source and sources.problem(retrain_source):
         problems.append(f"retraining.source_uri: {sources.problem(retrain_source)}")

@@ -6,5 +6,7 @@
   {"name": "model_version_id", "type": "STRING", "mode": "NULLABLE"},
   {"name": "run_id", "type": "STRING", "mode": "REQUIRED"},
   {"name": "scored_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
-  {"name": "scored_for", "type": "DATE", "mode": "NULLABLE"}
+  {"name": "scored_for", "type": "DATE", "mode": "NULLABLE"},
+  {"name": "ab_test", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "arm", "type": "STRING", "mode": "NULLABLE"}
 ]

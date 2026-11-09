@@ -31,6 +31,7 @@ def churn_inference_pipeline(
     ml_config: dict = {},  # noqa: B006 - KFP needs a literal default; Pipewright always passes it
     model_version: str = "",       # a closed retrain loop validates its candidate before it is the default
     approved_files: str = "",      # 1.4.1: set by the launcher (pin): load exactly the approved generations
+    ab_test: str = "",             # FR-57: set by the launcher while an A/B test runs: the treatment and its share
 ):
     data = load_data(project=project, source_uri=source_uri, ml_config=ml_config,
                      run_id=run_id).set_display_name("load-data")
@@ -44,7 +45,8 @@ def churn_inference_pipeline(
 
     score = score_batch(project=project, bq_dataset=bq_dataset, run_id=run_id, data=data.outputs["data"],
                         model=champion.outputs["model"], model_version=champion.outputs["version"],
-                        model_resource_name=champion.outputs["resource_name"], ml_config=ml_config).after(validate)
+                        model_resource_name=champion.outputs["resource_name"], ml_config=ml_config,
+                        ab_test=ab_test).after(validate)
     score.set_display_name("score-to-bigquery").set_caching_options(False)
 
     check = check_batch(project=project, bq_dataset=bq_dataset, scored=score.outputs["scored"],

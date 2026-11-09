@@ -27,6 +27,8 @@ ML_CONFIG_PARAMETER = "ml_config"
 # Optional parameter (Pipewright 1.4.1, FR-101): the launcher passes the approved files of the version a scoring run
 # uses (policies.integrity.pin), so the run loads exactly those generations.
 PINNED_PARAMETER = "approved_files"
+# Optional parameter (FR-57): while an A/B test runs, the launcher passes a scoring run the test and its treatment.
+AB_TEST_PARAMETER = "ab_test"
 PLACEHOLDER_IMAGE = "pipewright.invalid/compile-check@sha256:" + "0" * 64
 
 
@@ -157,7 +159,8 @@ def check_parameters(uc: ResolvedUseCase, infos) -> tuple[list[str], list[str]]:
         for p in LAUNCHER_PARAMETERS:
             if p not in info.parameters:
                 problems.append(f"{prefix}template has no parameter {p!r}; the launcher always passes it")
-        supplied = set(LAUNCHER_PARAMETERS) | set(RUN_OVERRIDES) | {PINNED_PARAMETER} | set(static_parameters(uc, info))
+        supplied = (set(LAUNCHER_PARAMETERS) | set(RUN_OVERRIDES) | {PINNED_PARAMETER, AB_TEST_PARAMETER}
+                    | set(static_parameters(uc, info)))
         for pname, p in info.parameters.items():
             if pname not in supplied and not p["optional"]:
                 problems.append(f"{prefix}template parameter {pname!r} has no default and nothing supplies it")
