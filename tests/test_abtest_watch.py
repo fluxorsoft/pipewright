@@ -231,3 +231,23 @@ def test_shadow_needs_online_serving():
     problems = []
     abc.check_tables({"ab_test": _section(mode="shadow")}, {}, True, False, problems)
     assert any("mode shadow" in p for p in problems)
+
+
+def test_the_arms_are_compared_as_the_canary_is(monkeypatch):
+    from pipewright.loop import canary
+
+    def fake(gcp, project, endpoint_id, start, end):
+        if endpoint_id == "42":                            # the treatment: 2% errors, twice as slow
+            return {"t": {"predictions": 500, "errors": 10, "latency_ms": 80.0}}
+        return {"c1": {"predictions": 1500, "errors": 3, "latency_ms": 40.0},
+                "c2": {"predictions": 500, "errors": 1, "latency_ms": 40.0}}
+
+    monkeypatch.setattr(canary, "endpoint_metrics", fake)
+    counts = [_line(65, "a", treatment_calls=0), _line(11, "a", treatment_calls=500)]
+    out = watch.check_serving(Gcp(counts), MANIFEST, _test(), _section(), NOW, control_endpoint="projects/1/e/7")
+    assert out["breach"].startswith("against the control") and "error rate" in out["breach"]
+    assert out["compared"]["control"]["predictions"] == 2000
+    loose = _section()
+    loose["guardrails"]["technical"].update(max_error_rate_increase=0.05, max_latency_increase=1.5)
+    assert watch.check_serving(Gcp(counts), MANIFEST, _test(), loose, NOW,
+                               control_endpoint="projects/1/e/7")["breach"] is None

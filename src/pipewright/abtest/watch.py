@@ -216,8 +216,19 @@ def router_calls(lines: list, start: datetime) -> tuple[dict, dict]:
     return sent, loss
 
 
-def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime) -> dict:
-    """{breach: why or None, router: loss totals, bypassed: n, note}."""
+def _total(metrics: dict) -> dict:
+    """One endpoint's calls, errors and median latency (weighted by calls) over its deployed models."""
+    calls = sum(int(m.get("predictions") or 0) for m in metrics.values())
+    lat = [(m["latency_ms"], int(m.get("predictions") or 0)) for m in metrics.values() if m.get("latency_ms")]
+    w = sum(n for _, n in lat)
+    return {"predictions": calls, "errors": sum(int(m.get("errors") or 0) for m in metrics.values()),
+            "latency_ms": (sum(v * n for v, n in lat) / w) if w else None}
+
+
+def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime,
+                  control_endpoint: str | None = None) -> dict:
+    """{breach: why or None, router: loss totals, bypassed: n, note}. With the control's endpoint, the arms are
+    also compared as the canary is (guardrails.technical: error rate and median latency against the control's)."""
     from pipewright.loop import canary
 
     project = manifest["project"]
@@ -238,6 +249,17 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime)
     rate = errors / answered if answered else 0.0
     out = {"router": loss, "answered": answered, "errors": errors, "sent": sent, "breach": None, "bypassed": 0,
            "window": [_z(start), _z(end)]}
+    technical = (section.get("guardrails") or {}).get("technical") or {}
+    compared = None
+    if control_endpoint and answered >= int(technical.get("min_requests", 200)):
+        control = _total(canary.endpoint_metrics(gcp, project, control_endpoint.rsplit("/", 1)[-1], _z(start),
+                                                 _z(end)))
+        cfg = {"max_error_rate_increase": float(technical.get("max_error_rate_increase", 0.01)),
+               "max_latency_increase": float(technical.get("max_latency_increase", 0.2)),
+               "min_requests": int(technical.get("min_requests", 200))}
+        healthy, why = canary.judge(_total(metrics), control, cfg, None)
+        out["compared"] = {"healthy": healthy, "why": why, "control": control}
+        compared = None if healthy else f"against the control: {why}"
     if answered >= minimum and rate > limit:
         out["breach"] = (f"the treatment's endpoint answered {answered} call(s) with {errors} error(s) "
                          f"({rate:.2%}, more than {limit:.0%})"
@@ -246,6 +268,8 @@ def check_serving(gcp, manifest: dict, test: dict, section: dict, now: datetime)
         out["note"] = "the gateway's breaker tripped; its endpoint's errors are not in Cloud Monitoring yet"
         if any(_ts(t) < now - 2 * LAG for t in trips):     # waited two settling periods: trust the gateway
             out["breach"] = "the gateway's breaker tripped (the treatment's error rate over its last calls)"
+    if out["breach"] is None and compared:
+        out["breach"] = compared
     # Calls the router did not send: the endpoint answered more than either measure of what was sent explains.
     expected = max(sent["treatment_calls"], sent["treatment_instances"])
     if counts and answered > expected * 1.1 + 10:
@@ -307,7 +331,14 @@ def tick(gcp, manifest: dict, live, emit_fn=None, refresh=None, now: datetime | 
 def _serving(gcp, manifest, contract, test, section, tests, refresh, now) -> dict:
     from pipewright.abtest import service
 
-    seen = check_serving(gcp, manifest, test, section, now)
+    control = None
+    try:                                      # the control's endpoint, for the comparison of the arms
+        from pipewright.online import launcher as online_launcher
+
+        control = online_launcher.gateway_target(contract, manifest, {}, gcp)["endpoint"]
+    except Exception:  # noqa: BLE001 - without it, the breaker's limit alone
+        control = None
+    seen = check_serving(gcp, manifest, test, section, now, control_endpoint=control)
     breach = seen["breach"] if test.get("state") != "paused" and test["allocation"][-1]["treatment_bp"] else None
 
     def change(t):
