@@ -87,6 +87,37 @@ def _number(version_id) -> int:
     return int(version_id) if str(version_id).isdigit() else 0
 
 
+def champion_expected(env: Environment, creds, resource: str, version: str, known) -> bool:
+    """Whether a champion existed when this version was trained, so its record must hold a comparison: a version
+    registered before this version's training run started (FR-124, found in the QA battle test: two runs trained in
+    parallel, neither had a champion, and the second to register was refused for not comparing with the first).
+    Where the run's start cannot be found (a Kubeflow run, a version without a run label), any lower-numbered version
+    counts, as before."""
+    from pipewright.gcp import Gcp
+
+    earlier = [k for k in known if _number(k) < _number(version)]
+    if not earlier:
+        return False
+    try:
+        gcp = Gcp(creds)
+        api = f"https://{env.region}-aiplatform.googleapis.com/v1"
+        listed = gcp.get(f"{api}/{resource}:listVersions", pageSize=100)
+        rows = {str(v.get("versionId")): v for v in ((listed.body or {}).get("models") or [])} if listed.ok else {}
+        labels = (rows.get(str(version)) or {}).get("labels") or {}
+        run = labels.get("pipewright-run") or str(labels.get("run_id") or "").removeprefix("run-")
+        if not run:
+            return True
+        jobs = gcp.get(f"{api}/projects/{env.project}/locations/{env.region}/pipelineJobs",
+                       filter=f'labels."run-id"="{run}"', pageSize=5)
+        found = ((jobs.body or {}).get("pipelineJobs") or []) if jobs.ok else []
+        started = min((j.get("createTime") or "" for j in found), default="")
+        if not started:
+            return True
+        return any(str((rows.get(k) or {}).get("versionCreateTime") or "") < started for k in earlier)
+    except Exception:  # noqa: BLE001 - the stricter rule when the run cannot be read
+        return True
+
+
 def versions(uc: ResolvedUseCase, env: Environment, creds, check_gates: bool = True, limit: int = 10) -> list[Version]:
     from google.cloud.aiplatform.models import ModelRegistry
 
@@ -105,7 +136,9 @@ def versions(uc: ResolvedUseCase, env: Environment, creds, check_gates: bool = T
         default.approved = approval_on_record(uc, env, creds, default.version_id)
     for v in out[:limit] if check_gates and gates.needs_record(uc.ml["evaluation"]) else []:
         try:
-            problems = gate_problems(uc, creds, resource, v.version_id, _number(v.version_id) > oldest)
+            problems = gate_problems(uc, creds, resource, v.version_id,
+                                     _number(v.version_id) > oldest and champion_expected(
+                                         env, creds, resource, v.version_id, {x.version_id: x for x in out}))
         except Exception as e:  # noqa: BLE001 - listing must not fail because one record cannot be read
             v.gates = f"not checked: {type(e).__name__}"
             continue
@@ -363,7 +396,7 @@ def approve_for_test(uc: ResolvedUseCase, env: Environment, creds, version: str,
         raise ConfigError(f"v{version} is already the default (the control): an A/B test needs another version")
     rules, record, folder = _judged(uc, env, creds, resource, version, log)
     released = _check_rules(uc, env, rules, identity, approved, version, log)
-    earlier = any(_number(k) < _number(version) for k in known)
+    earlier = champion_expected(env, creds, resource, version, known)
     problems = gates.verify(Gcp(creds), folder, released.ml["evaluation"], earlier)
     if problems:
         raise ConfigError(problems, source=f"v{version} of {uc.model['name']} cannot be tested: it does not pass "
@@ -407,7 +440,7 @@ def approve(uc: ResolvedUseCase, env: Environment, creds, version: str, identity
     rules, record, folder = _judged(uc, env, creds, resource, version, log)
     released = _check_rules(uc, env, rules, identity, approved, version, log)
     # Pipewright recomputes the gates from the version's evaluation record; it does not trust the pipeline.
-    earlier = any(_number(k) < _number(version) for k in known)
+    earlier = champion_expected(env, creds, resource, version, known)
     problems = gates.verify(Gcp(creds), folder, released.ml["evaluation"], earlier)
     if problems:
         raise ConfigError(problems, source=f"v{version} of {uc.model['name']} cannot become the default: it does "

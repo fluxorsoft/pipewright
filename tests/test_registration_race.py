@@ -321,3 +321,35 @@ def test_run_unregistered_may_send_an_email(repo):
 @pytest.mark.parametrize("path", ["src/pipewright/launcher/unregistered.py", "src/pipewright/models/names.py"])
 def test_no_em_dashes(path):
     assert "—" not in (ROOT / path).read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------ the champion rule under parallel runs --
+def _gcp_for(versions, jobs):
+    class G:
+        def __init__(self, creds=None):
+            pass
+
+        def get(self, url, **params):
+            if url.endswith(":listVersions"):
+                return SimpleNamespace(ok=True, body={"models": versions})
+            return SimpleNamespace(ok=True, body={"pipelineJobs": [j for j in jobs if params["filter"].endswith(
+                f'"{j["run"]}"')]})
+    return G
+
+
+def test_a_version_trained_beside_another_needed_no_champion(monkeypatch):
+    from pipewright.models import registry
+
+    env = SimpleNamespace(region="r", project="p")
+    versions = [{"versionId": "1", "versionCreateTime": "2026-11-10T10:52:35Z", "labels": {"pipewright-run": "ra"}},
+                {"versionId": "2", "versionCreateTime": "2026-11-10T10:52:50Z", "labels": {"run_id": "run-rb"}}]
+    # both runs started at 10:42, before v1 was registered: v2 had no champion to compare with
+    monkeypatch.setattr("pipewright.gcp.Gcp", _gcp_for(versions, [{"run": "rb", "createTime": "2026-11-10T10:42:24Z"}]))
+    assert registry.champion_expected(env, None, "m", "2", {"1": 1, "2": 2}) is False
+    # a run that started after v1 was registered had one
+    monkeypatch.setattr("pipewright.gcp.Gcp", _gcp_for(versions, [{"run": "rb", "createTime": "2026-11-10T11:00:00Z"}]))
+    assert registry.champion_expected(env, None, "m", "2", {"1": 1, "2": 2}) is True
+    # the run cannot be found (Kubeflow): the stricter rule, as before
+    monkeypatch.setattr("pipewright.gcp.Gcp", _gcp_for(versions, []))
+    assert registry.champion_expected(env, None, "m", "2", {"1": 1, "2": 2}) is True
+    assert registry.champion_expected(env, None, "m", "1", {"1": 1, "2": 2}) is False
