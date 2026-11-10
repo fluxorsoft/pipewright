@@ -56,6 +56,28 @@ def log(message: str, ml_config: dict, severity: str = "INFO", run_id: str | Non
     print(json.dumps(entry, default=str), flush=True)
 
 
+# Who each event a step sends is for (Pipewright 1.4.3): its Pub/Sub message carries pw_<persona> = "1", so a team
+# subscribes with the filter attributes:pw_<persona>. The same as pipewright.observability.catalogue (checked by
+# tests/test_event_catalogue.py); this file cannot import the package.
+EVENT_PERSONAS = {
+    "model.registered": ("governance", "ml"),
+    "model.registration_skipped": ("ml",),
+    "model.lineage.recorded": ("governance",),
+    "training.evaluated": ("governance", "ml"),
+    "data.snapshot.written": ("data", "governance", "ml"),
+    "data.snapshot.replayed": ("governance", "ml"),
+    "data.features.resolved": ("data", "ml"),
+    "data.labels.resolved": ("data", "ml"),
+    "monitoring.recorded": ("ml",),
+    "monitoring.alert": ("ml", "product", "sre"),
+    "retrain.requested": ("ml",),
+    "synthetic.generated": ("data", "governance", "ml"),
+    "synthetic.evaluated": ("governance", "ml"),
+    "synthetic.rejected": ("governance", "ml"),
+    "ray.cluster.used": ("finops", "ml", "sre"),
+}
+
+
 def emit_event(event_type: str, ml_config: dict, run_id: str | None = None, **data) -> dict:
     """Never raises: a monitoring hiccup must not fail an ML step."""
     event = {"event_type": event_type, "time": datetime.now(timezone.utc).isoformat(),
@@ -71,6 +93,7 @@ def emit_event(event_type: str, ml_config: dict, run_id: str | None = None, **da
 
             creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/pubsub"])
             attributes = {k: str(event[k]) for k in ("event_type", "usecase", "environment", "tenant") if event[k]}
+            attributes.update({f"pw_{p}": "1" for p in EVENT_PERSONAS.get(event_type, ())})
             message = {"data": base64.b64encode(json.dumps(event, default=str).encode()).decode(),
                        "attributes": attributes}
             # Regional endpoint: private topics enforce in-region storage in transit.

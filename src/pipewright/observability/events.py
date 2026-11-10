@@ -5,15 +5,9 @@ observability.events_topic, a Pub/Sub message. The platform routes both to its t
 PagerDuty, Slack, BigQuery); Pipewright has no vendor code. Components emit the same shape through
 pipewright_runtime.emit_event.
 
-Event types: run.submitted, run.duplicate, release.live, release.rolled_back, model.registered, model.approved,
-model.deployed, model.undeployed (1.4.2), training.evaluated, monitoring.recorded, monitoring.alert,
-retrain.requested, data.erased, run.failed
-(Pipewright 1.2.0: a run that ended failed or cancelled, from the launcher's tick), run.unregistered (FR-124: an
-approved training run that ended succeeded without registering, from the same tick), model.duplicated
-(FR-124: a second model with a use case's model name, from the same tick), model.registration_skipped
-(FR-124: the register step skipped on purpose, a replay); retrain
-decisions (pipewright.retraining): retrain.proposed, retrain.approval, retrain.approved, retrain.declined,
-retrain.snoozed, retrain.reopened, retrain.escalated, retrain.digest.
+Event types: every one is listed, with where it comes from, when and who it is for, in
+pipewright.observability.catalogue (`pipewright events`, docs/EVENTS.md). Each message carries the attributes
+event_type, usecase, environment, tenant and pw_<persona> = "1" for subscription filters.
 """
 
 from __future__ import annotations
@@ -100,8 +94,11 @@ def emit(e: dict, topic: str | None = None, gcp=None, stream=None, region: str |
             from pipewright.gcp import Gcp
 
             gcp = Gcp()
+        from pipewright.observability.catalogue import attributes as persona_attributes
+
         attributes = {**{k: str(v) for k, v in (attributes or {}).items()},
-                      **{k: str(e[k]) for k in ("event_type", "usecase", "environment", "tenant") if e.get(k)}}
+                      **{k: str(e[k]) for k in ("event_type", "usecase", "environment", "tenant") if e.get(k)},
+                      **persona_attributes(e["event_type"])}     # 1.4.3: pw_<persona> = "1", for subscription filters
         message = {"data": base64.b64encode(json.dumps(e, default=str).encode()).decode(), "attributes": attributes}
         r = gcp.post(publish_url(topic, region), {"messages": [message]})
         if not r.ok:

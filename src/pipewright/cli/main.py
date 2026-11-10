@@ -241,6 +241,48 @@ def cmd_schemas(args) -> int:
     return 0
 
 
+def cmd_events(args) -> int:
+    """Every event Pipewright sends (1.4.3): by persona or family, with the Pub/Sub subscription filter that receives
+    exactly those. No cloud access."""
+    from pipewright.observability import catalogue
+
+    try:
+        chosen = catalogue.select(args.persona, args.family)
+        if args.persona and not args.family:
+            flt = catalogue.persona_filter(args.persona)
+        else:
+            flt = catalogue.subscription_filter(chosen) if chosen else ""
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if args.family and args.family not in catalogue.FAMILIES:
+        print(f"error: unknown family {args.family!r} (known: {', '.join(catalogue.FAMILIES)})", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps({"filter": flt, "events": [
+            {"type": e.type, "family": e.family, "source": e.source, "when": e.when, "personas": list(e.personas),
+             "since": e.since} for e in chosen]}, indent=2))
+        return 0
+    if args.filter:
+        print(flt)
+        return 0
+    if not args.persona and not args.family:
+        print("personas (--persona):")
+        for k, v in catalogue.PERSONAS.items():
+            print(f"  {k:<11} {v}")
+        print()
+    width = max((len(e.type) for e in chosen), default=10)
+    family = None
+    for e in chosen:
+        if e.family != family:
+            family = e.family
+            print(f"{family}: {catalogue.FAMILIES[family]}")
+        print(f"  {e.type:<{width}}  {e.when}  [{e.source}; {', '.join(e.personas)}]")
+    print()
+    print(f"{len(chosen)} event types. Pub/Sub subscription filter: {flt}")
+    return 0
+
+
 def cmd_explain(args) -> int:
     from pipewright.config import reference
 
@@ -1474,6 +1516,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--base", default="main", help="the revision to compare with (default: main)")
     sp.add_argument("--output", help="write the Markdown here instead of printing it")
     sp.set_defaults(func=cmd_review)
+
+    sp = sub.add_parser("events", help="every event Pipewright sends, by persona or family, with its Pub/Sub filter")
+    sp.add_argument("--persona", help="ml, sre, governance, product, data or finops")
+    sp.add_argument("--family", help="run, release, model, training, data, monitoring, retrain, loop, ab_test, ...")
+    sp.add_argument("--filter", action="store_true", help="print only the Pub/Sub subscription filter")
+    sp.add_argument("--json", action="store_true", help="machine-readable")
+    sp.set_defaults(func=cmd_events)
 
     sp = sub.add_parser("explain", help="what a use case key means: description, type, allowed values, default")
     sp.add_argument("key", nargs="?", help="dotted key under spec, e.g. data.split.strategy")
