@@ -993,6 +993,17 @@ def cmd_ab(args) -> int:
     if not args.env:
         raise ConfigError("give --env (or --request: the launcher's analysis request)")
     env = load_environment(Path(args.root), args.env)
+    if args.ab_command not in ("start", "plan"):
+        # The platform's rules govern starting a test (and were applied, and recorded, when it started). A running
+        # test can always be read, paused, lowered, analysed, decided and stopped, also after the platform tightens
+        # them or sets allowed: false (found in the QA battle test: `ab stop` was refused). feed_exposures stays: it
+        # governs data leaving the tenant's dataset.
+        import dataclasses
+
+        rules = (env.policies or {}).get("ab_test") or {}
+        kept = {k: v for k, v in rules.items() if k == "feed_exposures"}
+        env = dataclasses.replace(env, policies={**{k: v for k, v in (env.policies or {}).items() if k != "ab_test"},
+                                                 **({"ab_test": kept} if kept else {})})
     uc = resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env)
     gcp = Gcp()
     tests = ab.ABTests(uc, env, gcp, online=_ab_online(uc, env, gcp))

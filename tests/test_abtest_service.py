@@ -309,3 +309,36 @@ def test_every_analysis_is_kept_in_brief(monkeypatch):
     rows = s.current()["results"]
     assert [r["diff"] for r in rows] == [0.0, 0.01, 0.02] and rows[-1]["exposed"] == {"control": 200, "treatment": 40}
     assert "next: " in svc.render_test(s.current())
+
+
+def test_the_platforms_rules_govern_starting_never_stopping(monkeypatch):
+    """Found in the QA battle test: with policies.ab_test.allowed false, `ab stop` was refused; a running test must
+    stay stoppable whatever the platform's rules say now."""
+    import importlib
+
+    cli = importlib.import_module("pipewright.cli.main")
+
+    seen = {}
+    env = SimpleNamespace(name="test", policies={"ab_test": {"allowed": False, "max_treatment_bp": 100,
+                                                             "feed_exposures": True}, "deploy_model": "manual"})
+    import dataclasses
+
+    @dataclasses.dataclass(frozen=True)
+    class Env:
+        name: str
+        policies: dict
+
+    monkeypatch.setattr(cli, "load_environment", lambda root, name: Env("test", env.policies))
+    monkeypatch.setattr(cli, "_selected", lambda root, names: {names[0]: "p"})
+
+    def resolve(path, e):
+        seen["policies"] = e.policies
+        raise ConfigError("stop here")
+
+    monkeypatch.setattr(cli, "resolve_usecase", resolve)
+    for command, rules in (("stop", {"feed_exposures": True}), ("status", {"feed_exposures": True}),
+                           ("start", env.policies["ab_test"])):
+        args = SimpleNamespace(request=None, env="test", root=".", usecase="churn", ab_command=command)
+        with pytest.raises(ConfigError, match="stop here"):
+            cli.cmd_ab(args)
+        assert seen["policies"]["ab_test"] == rules and seen["policies"]["deploy_model"] == "manual", command
