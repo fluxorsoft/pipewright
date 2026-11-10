@@ -196,3 +196,15 @@ def test_a_full_layer_refuses_before_the_treatment_is_approved(monkeypatch):
         s.start("a@example.com", True)
     record, _ = layers.read(None, "b", "customers")
     assert [t["ab_test"] for t in record["tests"]] == ["big"]
+
+
+def test_the_analysis_counts_only_units_in_the_tests_range():
+    """Found in the QA battle test: a team's own score step from before layers labels every unit (outsiders as the
+    control); the analysis keeps only the units in the test's range, whatever the scoring wrote."""
+    from pipewright.abtest import analysis
+
+    test = {"name": "qa-l1", "unit": "customer_id", "layer": {"name": "customers", "start_bp": 0, "end_bp": 5000}}
+    sql = analysis.exposures_sql(test, "p", "d", "scores", True, [])
+    assert sql.count(assign.sql_in_layer(test["layer"], "CAST(`customer_id` AS STRING)")) == 1
+    assert sql.count("'layer/customers'") == 4                 # both bounds, in the batch and online parts
+    assert "layer/" not in analysis.exposures_sql({**test, "layer": None}, "p", "d", "scores", True, [])

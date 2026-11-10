@@ -37,16 +37,22 @@ def exposures_sql(test: dict, project: str, dataset: str, output_table: str | No
     """unit, arm, first_at (and the segment columns, batch only) per exposed unit; switched units flagged."""
     name = test["name"].replace("'", "")
     parts = []
+    # FR-123: only units in the test's range of its layer are exposures, whatever the scoring step wrote (found in
+    # the QA battle test: a team's own score step from before layers labels every unit, outsiders as the control)
+    from pipewright.abtest.assign import sql_in_layer
+
+    in_batch = sql_in_layer(test.get("layer"), f"CAST({q(test['unit'])} AS STRING)")
+    in_online = sql_in_layer(test.get("layer"), "CAST(jsonPayload.unit AS STRING)")
     seg_cols = "".join(f", ANY_VALUE({q(s)}) AS {q(s)}" for s in segments)
     seg_null = "".join(f", CAST(NULL AS STRING) AS {q(s)}" for s in segments)
     if output_table:
         parts.append(f"SELECT CAST({q(test['unit'])} AS STRING) AS unit, arm, MIN(scored_at) AS first_at{seg_cols} "
                      f"FROM `{project}.{dataset}.{output_table}` WHERE ab_test = '{name}' AND arm IS NOT NULL "
-                     f"GROUP BY unit, arm")
+                     f"AND {in_batch} GROUP BY unit, arm")
     if online:
         parts.append(f"SELECT CAST(jsonPayload.unit AS STRING) AS unit, jsonPayload.arm AS arm, MIN(timestamp) AS "
                      f"first_at{seg_null} FROM `{project}.{dataset}.{EXPOSURES_ONLINE}` WHERE jsonPayload.ab_test = "
-                     f"'{name}' AND jsonPayload.arm IN ('control', 'treatment') GROUP BY unit, arm")
+                     f"'{name}' AND jsonPayload.arm IN ('control', 'treatment') AND {in_online} GROUP BY unit, arm")
     union = "\nUNION ALL\n".join(parts)
     segs = "".join(f", ANY_VALUE({q(s)}) AS {q(s)}" for s in segments)
     return (f"WITH e AS ({union}),\n"

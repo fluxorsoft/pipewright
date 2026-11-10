@@ -59,6 +59,15 @@ def sql_bucket(name: str, unit_sql: str) -> str:
             f" AS INT64)")
 
 
+def sql_in_layer(layer: dict | None, unit_sql: str) -> str:
+    """SQL: the unit is in the test's range of its layer (TRUE without a layer)."""
+    if not layer:
+        return "TRUE"
+    b = sql_bucket(f"layer/{layer['name']}", unit_sql)
+    return (f"({b} >= {int(layer['start_bp']) * SPACE // 10000} AND "
+            f"{b} < {int(layer['end_bp']) * SPACE // 10000})")
+
+
 def sql_arm(name: str, unit_sql: str, treatment_bp: int, layer: dict | None = None) -> str:
     """The same arm in SQL; NULL outside the test's range of its layer."""
     arm_sql = (f"IF({sql_bucket(name, unit_sql)} < {threshold(treatment_bp)}, '{TREATMENT}', '{CONTROL}')")
