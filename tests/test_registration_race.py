@@ -287,8 +287,8 @@ def test_an_approved_run_without_a_registration_is_reported_once(monkeypatch):
     ((rid, detail),) = emitted
     assert rid == "r4eca" and detail["status"] == "unregistered" and detail["primary_value"] == 0.809
     statuses = {k.rsplit("-", 1)[-1]: v["status"] for k, v in gcp.markers.items()}
-    assert statuses == {"r4eca": "unregistered", "r9e5": "registered", "rrej": "rejected", "rrep": "skipped",
-                        "rold": "not_checkable"}           # rnew ended 5 minutes ago: the next tick
+    # rnew ended 5 minutes ago: the next tick; rold sent no evaluation: not settled, so no marker (looked at again)
+    assert statuses == {"r4eca": "unregistered", "r9e5": "registered", "rrej": "rejected", "rrep": "skipped"}
 
 
 def test_the_log_read_uses_the_platforms_bucket(monkeypatch):
@@ -388,3 +388,40 @@ def test_a_second_model_with_the_name_is_said_once(monkeypatch):
     one = SimpleNamespace(get=lambda url, **k: SimpleNamespace(ok=True, body={"models": models[:1]}), markers={})
     _patch_markers(monkeypatch, one)
     assert unregistered.duplicates(one, "b", "p", "r", [contract], lambda *a: None) == []
+
+
+def test_an_empty_first_page_of_logs_is_followed(monkeypatch):
+    """Found in the QA battle test in ent: Cloud Logging answered with an empty page and a token, and a registered run
+    read as having no events (then never looked at again)."""
+    pages = [{"entries": [], "nextPageToken": "t1"},
+             {"entries": [_event("training.evaluated", "r1", decision="approve"), _event("model.registered", "r1")]}]
+    seen = []
+
+    class G:
+        def post(self, url, body):
+            seen.append(body.get("pageToken"))
+            return SimpleNamespace(ok=True, status=200, body=pages[len(seen) - 1])
+
+    events = unregistered.run_events(G(), "p", "r1", NOW)
+    assert seen == [None, "t1"] and unregistered.judge(events)["status"] == "registered"
+
+
+def test_the_champion_rule_finds_a_kubeflow_runs_start(monkeypatch):
+    """Found in the QA battle test in ent: the rule read only Agent Platform pipeline jobs, so on Kubeflow it fell back
+    to the stricter rule and refused a version trained beside another."""
+    from pipewright.adapters import kfp
+    from pipewright.models import registry
+
+    versions = [{"versionId": "1", "versionCreateTime": "2026-11-10T15:01:32Z", "labels": {"run_id": "run-ra"}},
+                {"versionId": "2", "versionCreateTime": "2026-11-10T15:01:45Z", "labels": {"run_id": "run-rb"}}]
+    monkeypatch.setattr("pipewright.gcp.Gcp", _gcp_for(versions, []))           # no Agent Platform jobs
+    runs = [{"created_at": "2026-11-10T14:56:27Z",
+             "description": kfp.run_description({"pipewright-usecase": "churn-gke", "run-id": "rb"})}]
+
+    class Kube:
+        def get(self, path, **params):
+            return SimpleNamespace(ok=True, status=200, body={"runs": runs})
+
+    monkeypatch.setattr("pipewright.kube.KubeClient.from_manifest", lambda manifest, gcp, dns=False: Kube())
+    env = SimpleNamespace(region="r", project="p", kubernetes={"namespace": "kubeflow"})
+    assert registry.champion_expected(env, None, "m", "2", {"1": 1, "2": 2}) is False

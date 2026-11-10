@@ -10,8 +10,9 @@ registry is now said, not silent.
 
 The events are read from Cloud Logging (the launcher needs logging.viewer; with observability.log_bucket, the platform's
 bucket view). A run is looked at once it ended SETTLE ago, so its events are in; a marker in the artifacts bucket
-(runs/registration/<job>) makes each run looked at once. A run without a training.evaluated event (a release from
-before the event, or a pipeline of the team's own that does not send it) is recorded as not checkable, never alerted.
+(runs/registration/<job>) records each settled verdict once. A run without a training.evaluated event (a release from
+before the event, or a pipeline of the team's own that does not send it) is not checkable: never alerted, looked at
+again by later ticks while it is within LOOKBACK, no marker written.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ SETTLE = timedelta(minutes=10)            # events reach Cloud Logging within a 
 LOG_API = "https://logging.googleapis.com/v2/entries:list"
 EVENTS = ("training.evaluated", "model.registered", "model.registration_skipped")
 KFP_SUCCEEDED = "SUCCEEDED"
+PAGES = 10                                # of 100 entries: a run sends a handful of these events
 
 
 def _z(t: datetime) -> str:
@@ -85,12 +87,21 @@ def run_events(gcp, project: str, run_id: str, since: datetime, bucket: str | No
     types = " OR ".join(f"jsonPayload.pipewright_event.event_type={json.dumps(e)}" for e in EVENTS)
     flt = (f'jsonPayload.pipewright_event.run_id={json.dumps(run_id)} AND ({types}) AND '
            f'timestamp>="{_z(since)}"')
-    r = gcp.post(LOG_API, {"resourceNames": [f"{bucket}/views/_AllLogs" if bucket else f"projects/{project}"],
-                           "filter": flt, "orderBy": "timestamp asc", "pageSize": 100})
-    if not r.ok:
-        raise PermissionError(f"Cloud Logging: HTTP {r.status} (the launcher needs logging.viewer to see whether "
-                              "approved runs registered)")
-    return [(e.get("jsonPayload") or {}).get("pipewright_event") or {} for e in (r.body or {}).get("entries") or []]
+    out, token = [], None
+    # Cloud Logging may answer with an empty page and a token while it scans (found in the QA battle test in ent: a
+    # registered run read as having no events): follow the tokens.
+    for _ in range(PAGES):
+        body = {"resourceNames": [f"{bucket}/views/_AllLogs" if bucket else f"projects/{project}"],
+                "filter": flt, "orderBy": "timestamp asc", "pageSize": 100, **({"pageToken": token} if token else {})}
+        r = gcp.post(LOG_API, body)
+        if not r.ok:
+            raise PermissionError(f"Cloud Logging: HTTP {r.status} (the launcher needs logging.viewer to see whether "
+                                  "approved runs registered)")
+        out += [(e.get("jsonPayload") or {}).get("pipewright_event") or {} for e in (r.body or {}).get("entries") or []]
+        token = (r.body or {}).get("nextPageToken")
+        if not token:
+            break
+    return out
 
 
 def judge(events: list[dict]) -> dict:
@@ -142,6 +153,8 @@ def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, n
             return out                                          # the same for every run: said once
         detail = {"pipeline": "training", "job_id": job["job_id"], "run_id": run_id, "ended": job.get("ended"),
                   **verdict}
+        if verdict["status"] == "not_checkable":
+            continue                     # not settled: looked at again by later ticks while the run is in LOOKBACK
         try:
             gcs_write(gcp, bucket, marker, json.dumps(detail), if_generation_match=0)
         except PreconditionFailed:

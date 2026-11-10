@@ -87,6 +87,21 @@ def _number(version_id) -> int:
     return int(version_id) if str(version_id).isdigit() else 0
 
 
+def _kfp_run_started(env, gcp, run: str) -> str:
+    """When the Kubeflow run with this run ID was created ("" when not found), through the cluster's API as the
+    caller (the DNS endpoint from outside the VPC, as Fleet View reads it)."""
+    from pipewright.adapters.kfp import api_path, run_labels
+    from pipewright.kube import KubeClient
+
+    kube = KubeClient.from_manifest({"kubernetes": env.kubernetes}, gcp, dns=True)
+    namespace = env.kubernetes.get("namespace") or "kubeflow"
+    r = kube.get(f"{api_path(namespace)}/runs", page_size=100, sort_by="created_at desc")
+    for item in ((r.body or {}).get("runs") or []) if r.ok else []:
+        if run_labels(item.get("description")).get("run-id") == run:
+            return str(item.get("created_at") or "")
+    return ""
+
+
 def champion_expected(env: Environment, creds, resource: str, version: str, known) -> bool:
     """Whether a champion existed when this version was trained, so its record must hold a comparison: a version
     registered before this version's training run started (FR-124, found in the QA battle test: two runs trained in
@@ -111,6 +126,8 @@ def champion_expected(env: Environment, creds, resource: str, version: str, know
                        filter=f'labels."run-id"="{run}"', pageSize=5)
         found = ((jobs.body or {}).get("pipelineJobs") or []) if jobs.ok else []
         started = min((j.get("createTime") or "" for j in found), default="")
+        if not started and getattr(env, "kubernetes", None):
+            started = _kfp_run_started(env, gcp, run)        # orchestrator kfp (found in the QA battle test in ent)
         if not started:
             return True
         return any(str((rows.get(k) or {}).get("versionCreateTime") or "") < started for k in earlier)
