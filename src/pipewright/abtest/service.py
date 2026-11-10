@@ -124,8 +124,15 @@ class ABTests:
             raise ConfigError(f"v{treatment} is the default: the treatment must be another version")
         overlaps = self._overlaps(section)
         release = launch.live_release(self.env, self.uc.name, self.gcp)
-        record = registry.approve_for_test(self.uc, self.env, creds, treatment, section["name"], identity, approved,
-                                           self.log)
+        # FR-123: the layer's range before the approval, so a full layer refuses before anything is recorded (found
+        # in the QA battle test: the treatment's approval for the test was recorded, then the start was refused)
+        layer = self._claim(section) if section.get("layer") else None
+        try:
+            record = registry.approve_for_test(self.uc, self.env, creds, treatment, section["name"], identity,
+                                               approved, self.log)
+        except Exception:
+            self._release({"name": section["name"], "layer": layer})
+            raise
         test = {"name": section["name"], "usecase": self.uc.name, "tenant": self.uc.tenant,
                 "environment": self.env.name, "mode": section["mode"], "unit": section["unit"],
                 "digest": ab_config.digest(section), "release": release, "state": "running",
@@ -138,8 +145,8 @@ class ABTests:
                 "history": []}
         if overlaps:
             test["overlaps"] = overlaps
-        if section.get("layer"):                                # FR-123: the test's range of its layer
-            test["layer"] = self._claim(section)
+        if layer:
+            test["layer"] = layer
         self._history(test, "start", identity)
         try:
             self.store.create(test)

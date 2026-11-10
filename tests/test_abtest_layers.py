@@ -156,3 +156,43 @@ def test_the_layer_is_checked():
         t["layer"] = layer
         abc.check({"ab_test": t, "task": "binary"}, set(), "churned", lambda *a: None, problems)
         assert any(msg in p for p in problems), (layer, problems)
+
+
+def test_a_full_layer_refuses_before_the_treatment_is_approved(monkeypatch):
+    """Found in the QA battle test: the start recorded the treatment's approval for the test, then the layer refused."""
+    from types import SimpleNamespace
+
+    from pipewright.loop import driver
+    from pipewright.models import deploy, registry
+    from pipewright.retraining.store import CaseStore
+    from pipewright.runs import launch
+
+    section = {**_section(arms={"control": "champion", "treatment": {"model_version": "7"}}),
+               "layer": {"name": "customers", "share_bp": 3000}}
+    s = _svc(monkeypatch, ml={"ab_test": section, "inference": {"output_table": "preds"}})
+    monkeypatch.setattr(layers, "gcs_read", st.gcs_read)
+    monkeypatch.setattr(layers, "gcs_write", st.gcs_write)
+    s.gcp = SimpleNamespace(session=SimpleNamespace(credentials=None))
+    monkeypatch.setattr(deploy, "check_approval", lambda *a: None)
+    monkeypatch.setattr(CaseStore, "current", lambda self, uc: None)
+    monkeypatch.setattr(driver, "finished", lambda loop: True)
+    monkeypatch.setattr(registry, "versions", lambda *a, **k: [SimpleNamespace(version_id="5", default=True)])
+    monkeypatch.setattr(launch, "live_release", lambda *a: "R1")
+    approved = []
+    monkeypatch.setattr(registry, "approve_for_test", lambda *a: approved.append(a) or {"files": []})
+    s.store.create({**_test(name="big", unit="customer_id", layer={"name": "customers", "start_bp": 0,
+                                                                     "end_bp": 9000, "share_bp": 9000}),
+                    "usecase": "upsell"})
+    layers.claim(None, "b", {"name": "customers", "share_bp": 9000}, "customer_id", "upsell", "big",
+                 lambda uc, t: True)
+    with pytest.raises(ConfigError, match="no 30% left"):
+        s.start("a@example.com", True)
+    assert approved == [] and s.current() is None
+
+    # and a refused approval frees the range it claimed
+    monkeypatch.setattr(registry, "approve_for_test", lambda *a: (_ for _ in ()).throw(ConfigError("gates fail")))
+    s.uc.ml["ab_test"]["layer"] = {"name": "customers", "share_bp": 1000}
+    with pytest.raises(ConfigError, match="gates fail"):
+        s.start("a@example.com", True)
+    record, _ = layers.read(None, "b", "customers")
+    assert [t["ab_test"] for t in record["tests"]] == ["big"]
