@@ -126,7 +126,7 @@ def register_model(
     online = ml_config.get("online_features")
     manual = ml_config["registry"]["set_default"] == "manual"
 
-    def upload(parent):
+    def upload(parent, fixed_id=True):
         first = parent is None
         make_default = not manual or first
         return make_default, aiplatform.Model.upload(
@@ -141,7 +141,7 @@ def register_model(
                 {"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
                 if online and not (ml_config.get("serving") or {}).get("pool") else None),
             parent_model=parent,
-            model_id=registry_model_id(model_display_name) if first else None,
+            model_id=registry_model_id(model_display_name) if first and fixed_id else None,
             is_default_version=make_default,
             version_aliases=[alias],
             version_description=f"run {run_id}, {primary}={value:.4f}" if value is not None else f"run {run_id}",
@@ -162,19 +162,31 @@ def register_model(
     except Conflict:
         if existing:
             raise
-        # another run made the first version a moment ago: this one is a version of that model
-        logging.info("another run registered the first %s version at the same time: registering this run as a "
-                     "version of that model", model_display_name)
-        import time
+        rid = registry_model_id(model_display_name)
+        try:
+            holder = aiplatform.Model(model_name=rid).display_name
+        except Exception:  # noqa: BLE001 - not readable yet: the winner's upload is still finishing
+            holder = model_display_name
+        if holder != model_display_name:
+            # Another model already has this ID (another display name that maps to it, such as Churn_V2 and churn-v2,
+            # or one cut at 63 characters): register under a generated ID, as before FR-124.
+            logging.info("model ID %s belongs to %s: registering %s under a generated ID", rid, holder,
+                         model_display_name)
+            make_default, registered = upload(None, fixed_id=False)
+        else:
+            # another run made the first version a moment ago: this one is a version of that model
+            logging.info("another run registered the first %s version at the same time: registering this run as a "
+                         "version of that model", model_display_name)
+            import time
 
-        for _ in range(12):                    # the winner's upload may still be finishing
-            existing = registry_models(aiplatform, model_display_name)
-            if existing:
-                break
-            time.sleep(10)
-        if not existing:
-            raise
-        make_default, registered = upload(existing[0].resource_name)
+            for _ in range(12):                    # the winner's upload may still be finishing
+                existing = registry_models(aiplatform, model_display_name)
+                if existing:
+                    break
+                time.sleep(10)
+            if not existing:
+                raise
+            make_default, registered = upload(existing[0].resource_name)
     vertex_model.uri = f"https://{region}-aiplatform.googleapis.com/v1/{registered.versioned_resource_name}"
     vertex_model.metadata.update({"resourceName": registered.resource_name, "versionId": registered.version_id,
                                   "versionedResourceName": registered.versioned_resource_name,

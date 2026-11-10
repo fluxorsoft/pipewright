@@ -56,6 +56,15 @@ def emit(env, uc, gcp, event_type: str, test: dict, **data) -> None:
     e = events.event(event_type, uc.name, env.name, uc.tenant, test.get("release"), None, ab_test=test["name"],
                      **data)
     events.emit(e, env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)
+    to_feed(env, uc, gcp, event_type, test, e)
+
+
+def to_feed(env, uc, gcp, event_type: str, test: dict, e: dict) -> None:
+    """The event's copy on the tenant's feed, with publish.events (and without who acted unless publish.include_by).
+    Also for the launcher's own ab_test.decision (found in the QA edge-case review: a group's decision never reached
+    the feed)."""
+    from pipewright.observability import events
+
     publish = ((uc.ml or {}).get("ab_test") or {}).get("publish") or {}
     topic = feed_topic(env, uc.tenant)
     if publish.get("events") and topic:

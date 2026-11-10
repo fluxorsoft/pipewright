@@ -355,6 +355,43 @@ def test_an_ab_decision_accepts_a_persons_gcloud_token(gcs, monkeypatch):
     assert seen and identity.GCLOUD_CLIENT_ID in seen[-1] and "https://l" in seen[-1]
 
 
+def test_a_recorded_ab_decision_reaches_the_teams_feed(gcs, monkeypatch):
+    """Found in the QA edge-case review: the launcher recorded a group's decision and sent ab_test.decision to the
+    event log only; the team's feed (ab_test.publish.events) never got it."""
+    pytest.importorskip("flask")
+    from pipewright.abtest import service as ab_service
+    from pipewright.abtest.store import TestStore
+    from pipewright.launcher.app import create_app
+    from tests.test_abtest_core import FakeGcs
+    from tests.test_launcher import FakeRegistry
+
+    FakeGcs(monkeypatch)
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("pipewright.config.environment.environment_from_dict", lambda m: SimpleNamespace(name="prod"))
+    monkeypatch.setattr(identity, "verify", lambda token, audiences: "lead@x")
+    fed = []
+    monkeypatch.setattr(ab_service, "to_feed", lambda env, uc, gcp, kind, test, e: fed.append((kind, test["name"], e)))
+    reg = FakeRegistry([CONTRACT])
+    reg.gcp, reg.bucket = None, "b"
+    reg.manifest.update(launcher={"url": "https://l", "service_account": "launcher@p"}, artifacts_bucket="b",
+                        project="p", region="europe-west2",
+                        approver_groups={"ml-leads": {"topic": "projects/p/topics/a",
+                                                      "subscription": "projects/p/subscriptions/a"}})
+    TestStore(None, "b").create({"name": "t1", "usecase": "churn", "state": "decision_required", "mode": "ab",
+                                 "decision": {"required": ["ml-leads"], "approvals": []}})
+    client = create_app(reg).test_client()
+    decision = {"kind": "ab.decision", "usecase": "churn", "ab_test": "t1", "winner": "treatment",
+                "reason": "go", "id_token": "tok"}
+    push = {"message": {"data": base64.b64encode(json.dumps(decision).encode()).decode()},
+            "subscription": "projects/p/subscriptions/a"}
+    r = client.post("/retraining/decide", json=push, headers={"Authorization": _token("launcher@p")})
+    assert r.status_code == 200 and r.json["status"] == "recorded", r.json
+    ((kind, name, e),) = fed
+    assert (kind, name) == ("ab_test.decision", "t1") and e["data"]["group"] == "ml-leads"
+    assert e["data"]["decided"] == "treatment" and e["data"]["by"] == "lead@x"   # to_feed drops it unless include_by
+
+
 # ----------------------------------------------------------------------------------------------- alerts --
 
 def test_decision_alert_policies(repo):

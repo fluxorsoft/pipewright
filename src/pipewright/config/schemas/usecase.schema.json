@@ -965,7 +965,7 @@
                         "description": "email addresses, including distribution lists" },
             "events": { "type": "array", "minItems": 1, "items": { "enum": ["monitoring.alert", "retrain.requested",
                         "training.rejected", "training.evaluated", "model.registered", "run.failed",
-                        "run.unregistered"] } },
+                        "run.unregistered", "model.duplicated"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         },
@@ -1342,7 +1342,7 @@
                         "description": "email addresses, including distribution lists" },
             "events": { "type": "array", "minItems": 1, "items": { "enum": ["monitoring.alert", "retrain.requested",
                         "training.rejected", "training.evaluated", "model.registered", "run.failed",
-                        "run.unregistered"] } },
+                        "run.unregistered", "model.duplicated"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         } }

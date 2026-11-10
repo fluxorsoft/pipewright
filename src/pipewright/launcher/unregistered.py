@@ -152,3 +152,35 @@ def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, n
             out.append({"usecase": contract.usecase, **detail})
             log.warning("run.unregistered %s %s (run %s)", contract.usecase, job["job_id"], run_id)
     return out
+
+
+def duplicates(gcp, bucket: str, project: str, region: str, contracts: list, emit) -> list:
+    """model.duplicated once for each second model with a use case's model name (FR-124, found in the QA edge-case
+    review): a team's register step from before FR-124 can still make one when two runs register a first version at
+    once. Each registration sends model.registered, so report() sees nothing wrong, and the oldest-model rule hides
+    the newer model's versions. The event names both models; the team moves or retrains the hidden version."""
+    from pipewright.models.names import oldest
+
+    api = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/models"
+    out = []
+    for contract in contracts:
+        name = (getattr(contract, "metadata", None) or {}).get("model")
+        if not name:
+            continue
+        r = gcp.get(api, filter=f'display_name="{name}"', pageSize=20)
+        models = oldest((r.body or {}).get("models") or []) if r.ok else []
+        for extra in models[1:]:
+            mid = extra["name"].rsplit("/", 1)[-1]
+            marker = f"{MARKERS}/duplicate-{contract.usecase}-{mid}"
+            detail = {"model": name, "kept": models[0]["name"], "duplicate": extra["name"],
+                      "created": extra.get("createTime"),
+                      "why": "two models have the use case's model name; Pipewright uses the oldest, so the other's "
+                             "versions are not seen (a register step from before Pipewright FR-124)"}
+            try:
+                gcs_write(gcp, bucket, marker, json.dumps(detail), if_generation_match=0)
+            except PreconditionFailed:
+                continue                                        # said already
+            emit(contract, None, detail)
+            out.append({"usecase": contract.usecase, **detail})
+            log.warning("model.duplicated %s: %s besides %s", contract.usecase, extra["name"], models[0]["name"])
+    return out

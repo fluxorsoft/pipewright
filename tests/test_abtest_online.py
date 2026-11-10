@@ -470,3 +470,18 @@ def test_a_change_to_a_running_kserve_test_only_rewrites_the_state_file(monkeypa
     arms.apply({**KSERVE_TEST, "state": "paused"})
     assert [m for m, _ in kube.calls] == ["GET", "GET", "GET"]
     assert written["online-sync/churn/churn-x/ab/lapse-k1.router.json"]["state"] == "paused"
+
+
+def test_both_routers_are_given_the_tests_layer(monkeypatch):
+    """FR-123 edge case: the layer reaches the Agent Platform gateway's and the KServe router's configuration (the
+    router keeps outsiders out of the test only if it is told the range)."""
+    layer = {"name": "customers", "start_bp": 0, "end_bp": 5000, "share_bp": 5000}
+    m = {**MANIFEST, "serving": {"endpoints": {"churn-x-ab": {"resource": "projects/1/locations/r/endpoints/8"}}}}
+    cfg, _ = ol.ab_gateway(_contract(_section()), m, {}, Gcp({}), {**TEST, "layer": layer})
+    assert cfg["layer"] == layer
+    plain, _ = ol.ab_gateway(_contract(_section()), m, {}, Gcp({}), TEST)
+    assert "layer" not in plain
+    arms, kube, _ = _karms(monkeypatch)
+    arms.apply({**KSERVE_TEST, "layer": layer})
+    dep = kube.objects["/apis/apps/v1/namespaces/serving-churn/deployments/pw-ab-router-churn-x"]
+    assert json.loads(dep["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"])["ab_test"]["layer"] == layer

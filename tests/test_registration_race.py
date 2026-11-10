@@ -49,10 +49,15 @@ class Registry:
         registry = self
 
         class Model:
-            def __init__(self, name, version):
+            def __init__(self, name=None, version="1", model_name=None):
+                if model_name is not None:                 # a lookup by ID, as aiplatform.Model(model_name=...)
+                    name = next((k for k in registry.models if k.endswith(f"/{model_name}")), None)
+                    if name is None:
+                        raise LookupError(model_name)
                 self.resource_name, self.version_id = name, version
                 self.versioned_resource_name = f"{name}@{version}"
                 self.create_time = registry.models[name]["created"]
+                self.display_name = registry.models[name]["display"]
 
             @staticmethod
             def list(filter):
@@ -145,6 +150,18 @@ def test_two_first_versions_at_once_make_one_model(monkeypatch, tmp_path):
     assert b["is_default_version"] is False and b["labels"]["status"] == "candidate"     # manual: not the default
     assert "approval" not in b["labels"]
     assert out.metadata["versionId"] == "2" and events[-1][0] == "model.registered"
+
+
+def test_an_id_held_by_another_display_name_falls_back_to_a_generated_id(monkeypatch, tmp_path):
+    """Edge case: Churn-GKE_Classifier and churn-gke-classifier map to one ID; the second use case's first version
+    must not wait for a model of its own name that never comes."""
+    registry = Registry()
+    run, _ = _register(monkeypatch, tmp_path, registry)
+    registry.Model.upload(display_name="Churn-GKE_Classifier", parent_model=None, model_id="churn-gke-classifier")
+    out = run("r1")
+    assert len(registry.models) == 2 and registry.uploads[-1]["model_id"] is None
+    assert out.metadata["resourceName"] != "projects/p/locations/r/models/churn-gke-classifier"
+    assert out.metadata["versionId"] == "1"
 
 
 def test_a_first_version_is_made_under_the_fixed_id(monkeypatch, tmp_path):
@@ -353,3 +370,21 @@ def test_a_version_trained_beside_another_needed_no_champion(monkeypatch):
     monkeypatch.setattr("pipewright.gcp.Gcp", _gcp_for(versions, []))
     assert registry.champion_expected(env, None, "m", "2", {"1": 1, "2": 2}) is True
     assert registry.champion_expected(env, None, "m", "1", {"1": 1, "2": 2}) is False
+
+
+def test_a_second_model_with_the_name_is_said_once(monkeypatch):
+    """QA edge case: an old register step made a duplicate; both runs sent model.registered, so only the registry
+    shows it. The tick says so once, naming the model it keeps (the oldest)."""
+    models = [{"name": "projects/p/locations/r/models/222", "createTime": "2026-11-10T10:56:00Z"},
+              {"name": "projects/p/locations/r/models/111", "createTime": "2026-11-10T10:55:00Z"}]
+    gcp = SimpleNamespace(get=lambda url, **k: SimpleNamespace(ok=True, body={"models": models}), markers={})
+    _patch_markers(monkeypatch, gcp)
+    emitted = []
+    contract = SimpleNamespace(usecase="churn-gke", metadata={"model": "churn-gke-classifier"})
+    first = unregistered.duplicates(gcp, "b", "p", "r", [contract], lambda c, rid, d: emitted.append(d))
+    again = unregistered.duplicates(gcp, "b", "p", "r", [contract], lambda c, rid, d: emitted.append(d))
+    assert len(first) == 1 and again == [] and len(emitted) == 1
+    assert emitted[0]["kept"].endswith("/111") and emitted[0]["duplicate"].endswith("/222")
+    one = SimpleNamespace(get=lambda url, **k: SimpleNamespace(ok=True, body={"models": models[:1]}), markers={})
+    _patch_markers(monkeypatch, one)
+    assert unregistered.duplicates(one, "b", "p", "r", [contract], lambda *a: None) == []

@@ -93,6 +93,9 @@ def check(ml: dict, columns: set, label: str | None, known, problems: list[str],
         if not isinstance(share, int) or not 0 < share <= 10000:
             problems.append(f"{where}.layer.share_bp: the test's share of the layer's units, whole basis points "
                             "from 1 to 10000 (3000 is 30%)")
+        if t["mode"] == "shadow":
+            problems.append(f"{where}.layer: a shadow test exposes no unit (the control answers every call), so it "
+                            "needs no layer and would only take the layer's range from other tests")
     if t["mode"] == "ab":
         _metric(t["metric"], f"{where}.metric", problems, required=True)
         for i, g in enumerate(t["guardrails"].get("business") or []):

@@ -49,6 +49,27 @@ From the FR-57 QA round:
   `run.unregistered` for an approved training run that ended succeeded without a `model.registered` event
   (`monitoring.alerts.events` may email it); the register step says `model.registration_skipped` for a replay. The
   launcher now reads the project's logs in every environment (the starter's and Enterprise's grants).
+- Found in the QA battle test and its edge-case review:
+  - A team's own register step from before FR-124 can still make a duplicate: the tick also records
+    `model.duplicated` for a second model with a use case's model name. A display name whose ID is taken by
+    another model (Churn_V2 and churn-v2) registers under a generated ID instead of waiting. A champion comparison
+    is expected only from a version registered before this version's run started (two runs trained in parallel
+    were refused for not beating each other).
+  - A team's own score step from before layers labels every unit: the analysis counts only the units in the
+    test's range, whatever the scoring wrote. A full layer refuses before the treatment's approval for the test is
+    recorded; a shadow test takes no layer.
+  - The platform's A/B rules govern starting a test: a running test can always be read, paused, analysed, decided
+    and stopped, also after `policies.ab_test.allowed: false` or a lower limit.
+  - A group's decision recorded by the launcher (`ab_test.decision`) reaches the team's feed too.
+  - `ab status` names the next step when approver groups disagree: stop the test, which keeps the control.
+  - The starter takes `policies.ab_test` in `terraform.tfvars`.
+
+### Upgrading
+
+Teams' own component steps are theirs: update `components/register.py` from the churn example (the fixed model ID)
+and, for layers, the `ab_arm(...)` call in `components/score.py` (pass `test.get("layer")`, and score units whose arm
+is None with the default). Without the update, scoring is still correct and the launcher's checks say when a
+duplicate model appears.
 
 ## [1.4.2] - 2026-11-09
 

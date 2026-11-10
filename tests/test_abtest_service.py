@@ -342,3 +342,30 @@ def test_the_platforms_rules_govern_starting_never_stopping(monkeypatch):
         with pytest.raises(ConfigError, match="stop here"):
             cli.cmd_ab(args)
         assert seen["policies"]["ab_test"] == rules and seen["policies"]["deploy_model"] == "manual", command
+
+
+def test_edge_cases_of_the_next_step():
+    """QA edge-case review: groups that disagree can never record a winner (each decides once)."""
+    base = {**_test(), "environment": "prod", "state": "decision_required",
+            "analysis": {"status": "decision_required", "decision_reasons": ["the planned sample is reached"],
+                         "primary": {"treatment_better": True}},
+            "decision": {"required": ["ml-leads", "model-risk"], "disagreement": ["control", "treatment"],
+                         "approvals": [{"group": "ml-leads", "winner": "treatment"},
+                                       {"group": "model-risk", "winner": "control"}]}}
+    step = decide.next_step(base)
+    assert step["action"] == "stop" and "ml-leads chose the treatment" in step["text"]
+    assert step["command"].startswith("pipewright ab stop")
+    # a shadow test due for a decision concludes with the control
+    shadow = {**base, "mode": "shadow", "decision": {"required": [], "approvals": []},
+              "analysis": {"status": "decision_required", "decision_reasons": ["max_days (14) is reached"],
+                           "mode": "shadow"}}
+    assert "--winner control" in decide.next_step(shadow)["command"]
+
+
+def test_a_shadow_test_takes_no_layer():
+    problems = []
+    t = _section()
+    t["mode"] = "shadow"
+    t["layer"] = {"name": "customers", "share_bp": 2000}
+    abc.check({"ab_test": t, "task": "binary"}, set(), "churned", lambda *a: None, problems)
+    assert any("a shadow test exposes no unit" in p for p in problems)

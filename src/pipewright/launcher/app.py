@@ -338,9 +338,21 @@ def create_app(registry: Registry | None = None) -> Flask:
             why = held.get("refused") or f"no test {message.get('ab_test')} for {contract.usecase}"
             log.warning("A/B decision on %s by %s refused: %s", message.get("ab_test"), by, why)
             return jsonify(status="refused", reason=why), 200
-        _event("ab_test.decision", contract, None, ab_test=t["name"], group=group, by=by,
-               winner=message.get("winner"), reason=message.get("reason"),
-               decided=(t.get("decision") or {}).get("winner"))
+        data = {"ab_test": t["name"], "group": group, "by": by, "winner": message.get("winner"),
+                "reason": message.get("reason"), "decided": (t.get("decision") or {}).get("winner")}
+        _event("ab_test.decision", contract, None, **data)
+        try:                          # the team's feed too (found in the QA edge-case review: it never got it)
+            from pipewright.abtest import service as ab_service
+            from pipewright.abtest import watch as ab_watch
+            from pipewright.config.environment import environment_from_dict
+
+            env = environment_from_dict(reg().manifest)
+            ab_service.to_feed(env, ab_watch.released_usecase(contract), getattr(reg(), "gcp", None),
+                               "ab_test.decision", t,
+                               events.event("ab_test.decision", contract.usecase, contract.environment,
+                                            contract.tenant, contract.release_id, None, **data))
+        except Exception:  # noqa: BLE001 - the decision is recorded; the feed is a copy
+            log.exception("A/B decision not copied to the feed")
         return jsonify(status="recorded", ab_test=t["name"], group=group, by=by,
                        winner=(t.get("decision") or {}).get("winner")), 200
 
@@ -498,6 +510,9 @@ def create_app(registry: Registry | None = None) -> Flask:
                     r.gcp, r.bucket, m["project"], m["region"], contracts,
                     lambda contract, rid, detail: _event("run.unregistered", contract, rid, **detail),
                     manifest=manifest, log_bucket=(m.get("observability") or {}).get("log_bucket"))
+                out += unregistered.duplicates(
+                    r.gcp, r.bucket, m["project"], m["region"], contracts,
+                    lambda contract, rid, detail: _event("model.duplicated", contract, rid, **detail))
             except Exception as e:  # noqa: BLE001
                 log.exception("approved runs not checked for a registration")
                 out.append({"error": f"registrations not checked: {str(e)[:280]}"})

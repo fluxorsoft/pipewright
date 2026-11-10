@@ -92,6 +92,12 @@ def next_step(test: dict, default_version: str | None = None, served: list[str] 
         winner = "treatment" if p.get("treatment_better") else "control"
         why = "; ".join(res.get("decision_reasons") or []) or "a decision is due"
         missing = [g for g in d.get("required") or [] if g not in {a["group"] for a in d.get("approvals") or []}]
+        if d.get("disagreement") and not d.get("winner"):
+            chose = "; ".join(f"{a['group']} chose the {a['winner']}" for a in d.get("approvals") or [])
+            return {"action": "stop", "text": f"the approver groups disagree ({chose}): each group decides once "
+                    "and nobody's choice is overwritten, so no winner can be recorded; stop the test, which keeps "
+                    "the control",
+                    "command": f"pipewright ab stop {where} --reason <why>"}
         if missing and not d.get("winner"):
             return {"action": "decide", "text": f"{why}; the analysis supports the {winner}; waiting for "
                     f"{', '.join(missing)}",
