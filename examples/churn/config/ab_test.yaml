@@ -20,6 +20,7 @@ ab_test:
   # arms:
   #   treatment: { model_version: "7" }  # the candidate; approved for the test (its gates and files) at start
   # default ab_test.allocation.treatment_bp: 1000  # the treatment's share in basis points (1000 = 10%); only lowered
+  # default ab_test.layer: null  # FR-123: { name: customers, share_bp: 3000 } keeps tests that name the layer apart
   # metric:                              # the business outcome that decides
   #   name: renewed
   #   source: bq://${project}.${resources.bigquery_dataset}.renewals   # outcomes, one row per event
@@ -47,5 +48,6 @@ ab_test:
   # default ab_test.decision.approvals.required: []  # approver groups that must agree on the winner (the platform may add)
   # default ab_test.publish.events: false  # copy the test's events to the tenant's feed topic
   # default ab_test.publish.exposures: false  # per-unit lines, pseudonymised, where the platform allows
+  # default ab_test.publish.include_by: false  # the feed's copy of an event keeps who acted
   # default ab_test.results_table: null  # the analysis's table (default: <usecase>_ab_results)
   # default ab_test.callers: []  # who may call a router-only gateway (callers that send features)

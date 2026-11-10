@@ -90,6 +90,12 @@ def register_model(
                      champ.get("_version", "?"))
         with open(card.path, "w") as f:
             f.write(f"Replay of {source_uri}: reproduced the champion exactly; not registered.\n")
+        from pipewright_runtime import emit_event
+
+        # Said as an event (Pipewright FR-124): the launcher's tick reports an approved run that registered nothing,
+        # and a replay is the one approved run that rightly registers nothing.
+        emit_event("model.registration_skipped", ml_config, run_id, model=model_display_name, reason="replay",
+                   source_uri=source_uri, primary_metric=key, primary_value=new)
         return
 
     text = model_card(ml_config, evaluation, run_id, source_uri)
@@ -107,39 +113,68 @@ def register_model(
     from pipewright_runtime import folder_files
 
     registered_files = folder_files(model.uri, project)
-    existing = aiplatform.Model.list(filter=f'display_name="{model_display_name}"', order_by="create_time desc")
-    make_default = ml_config["registry"]["set_default"] == "on_approval" or not existing
+    from google.api_core.exceptions import Conflict
+    from pipewright_runtime import registry_model_id, registry_models
+
+    # The oldest model with the name is the use case's model (Pipewright FR-124): two runs registering a first version
+    # at once each found none and each made a model, and Pipewright read only one of them. A first version is now
+    # made under a fixed model ID, so the second run gets a conflict and becomes a version of the first one's model.
+    existing = registry_models(aiplatform, model_display_name)
     alias = re.sub(r"[^a-z0-9-]", "-", f"run-{run_id}".lower())[:127]
     primary = ml_config["evaluation"]["primary_metric"]
     value = evaluation["metrics"].get(primary)
     online = ml_config.get("online_features")
-    registered = aiplatform.Model.upload(
-        display_name=model_display_name,
-        artifact_uri=model.uri,
-        serving_container_image_uri=SERVING_IMAGE,
-        # The environment's online lookup on the container, which the handler prefers over serving.json, so a
-        # promoted copy can be given the destination's (Pipewright 1.2.0, FR-76).
-        # On a shared pool (Pipewright 1.4.2, FR-105) none: the pool's variables are the first model's, so a pool
-        # model's settings stay in serving.json with its files (deploy-model refuses a pool model that sets any).
-        serving_container_environment_variables=(
-            {"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
-            if online and not (ml_config.get("serving") or {}).get("pool") else None),
-        parent_model=existing[0].resource_name if existing else None,
-        is_default_version=make_default,
-        version_aliases=[alias],
-        version_description=f"run {run_id}, {primary}={value:.4f}" if value is not None else f"run {run_id}",
-        encryption_spec_key_name=ml_config["platform"].get("kms_key"),   # CMEK in private environments
-        labels={"run_id": alias[:63], "pipeline": "training", "usecase": ml_config["usecase"][:63],
-                "status": "champion" if make_default else "candidate",
-                # A first version is the default by itself; under a manual policy nobody has approved it yet
-                # (Pipewright 1.2.0, FR-83): `pipewright model approve` records the approval.
-                **({"approval": "pending"} if not existing and ml_config["registry"]["set_default"] == "manual"
-                   else {}),
-                # the release that trained it: `pipewright promote` promotes a model only with that release
-                **({"release": re.sub(r"[^a-z0-9-]", "-", os.environ["PIPEWRIGHT_RELEASE"].lower())[:63]}
-                   if os.environ.get("PIPEWRIGHT_RELEASE") else {})},
-        sync=True,
-    )
+    manual = ml_config["registry"]["set_default"] == "manual"
+
+    def upload(parent):
+        first = parent is None
+        make_default = not manual or first
+        return make_default, aiplatform.Model.upload(
+            display_name=model_display_name,
+            artifact_uri=model.uri,
+            serving_container_image_uri=SERVING_IMAGE,
+            # The environment's online lookup on the container, which the handler prefers over serving.json, so a
+            # promoted copy can be given the destination's (Pipewright 1.2.0, FR-76).
+            # On a shared pool (Pipewright 1.4.2, FR-105) none: the pool's variables are the first model's, so a pool
+            # model's settings stay in serving.json with its files (deploy-model refuses a pool model that sets any).
+            serving_container_environment_variables=(
+                {"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
+                if online and not (ml_config.get("serving") or {}).get("pool") else None),
+            parent_model=parent,
+            model_id=registry_model_id(model_display_name) if first else None,
+            is_default_version=make_default,
+            version_aliases=[alias],
+            version_description=f"run {run_id}, {primary}={value:.4f}" if value is not None else f"run {run_id}",
+            encryption_spec_key_name=ml_config["platform"].get("kms_key"),   # CMEK in private environments
+            labels={"run_id": alias[:63], "pipeline": "training", "usecase": ml_config["usecase"][:63],
+                    "status": "champion" if make_default else "candidate",
+                    # A first version is the default by itself; under a manual policy nobody has approved it yet
+                    # (Pipewright 1.2.0, FR-83): `pipewright model approve` records the approval.
+                    **({"approval": "pending"} if first and manual else {}),
+                    # the release that trained it: `pipewright promote` promotes a model only with that release
+                    **({"release": re.sub(r"[^a-z0-9-]", "-", os.environ["PIPEWRIGHT_RELEASE"].lower())[:63]}
+                       if os.environ.get("PIPEWRIGHT_RELEASE") else {})},
+            sync=True,
+        )
+
+    try:
+        make_default, registered = upload(existing[0].resource_name if existing else None)
+    except Conflict:
+        if existing:
+            raise
+        # another run made the first version a moment ago: this one is a version of that model
+        logging.info("another run registered the first %s version at the same time: registering this run as a "
+                     "version of that model", model_display_name)
+        import time
+
+        for _ in range(12):                    # the winner's upload may still be finishing
+            existing = registry_models(aiplatform, model_display_name)
+            if existing:
+                break
+            time.sleep(10)
+        if not existing:
+            raise
+        make_default, registered = upload(existing[0].resource_name)
     vertex_model.uri = f"https://{region}-aiplatform.googleapis.com/v1/{registered.versioned_resource_name}"
     vertex_model.metadata.update({"resourceName": registered.resource_name, "versionId": registered.version_id,
                                   "versionedResourceName": registered.versioned_resource_name,

@@ -221,7 +221,7 @@ def ab_gateway(contract, manifest: dict, online: dict, gcp, test: dict) -> tuple
            "treatment": {k: treatment[k] for k in ("predict_url", "endpoint", "private", "region")},
            "treatment_deployed_model": (test["arms"]["treatment"] or {}).get("deployed_model"),
            "breaker": ((section.get("guardrails") or {}).get("technical") or {}).get("breaker") or {},
-           "feed": feed_cfg}
+           "feed": feed_cfg, **({"layer": test["layer"]} if test.get("layer") else {})}
     return cfg, env
 
 

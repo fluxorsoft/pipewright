@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pipewright.config import Environment, resolve_usecase
 from pipewright.errors import ConfigError
+from pipewright.models.names import oldest
 
 
 class GcpBackend:
@@ -239,7 +240,7 @@ class GcpBackend:
         e, uc = self.envs[env], self.ucs[env]
         api = f"https://{e.region}-aiplatform.googleapis.com/v1/projects/{e.project}/locations/{e.region}/models"
         found = self.gcp.get(api, filter=f'display_name="{uc.model["name"]}"')
-        models = (found.body or {}).get("models", []) if found.ok else []
+        models = oldest((found.body or {}).get("models", []) if found.ok else [])
         if not models:
             raise ConfigError(f"no model {uc.model['name']!r} in {env}")
         body = self.gcp.get(f"https://{e.region}-aiplatform.googleapis.com/v1/{models[0]['name'].split('@')[0]}"

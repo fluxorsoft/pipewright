@@ -56,12 +56,13 @@ def score_batch(
         approved_download(test["treatment"]["approved_files"], treatment, project)
         arms["treatment"] = (treatment, str(test["treatment"]["version"]))
         unit = test["unit"] if test["unit"] in df.columns else key
-        df["arm"] = [ab_arm(test["name"], u, test["treatment_bp"]) for u in df[unit].astype(str)]
+        # FR-123: with a layer, units outside the test's range get None: not in the test, scored by the default
+        df["arm"] = [ab_arm(test["name"], u, test["treatment_bp"], test.get("layer")) for u in df[unit].astype(str)]
     else:
         df["arm"] = "control"
     parts = []
     for name, (path, version) in arms.items():
-        part = df[df["arm"] == name].copy()
+        part = df[df["arm"].where(df["arm"].notna(), "control") == name].copy()
         if part.empty:
             continue
         features, medians = model_files(path)

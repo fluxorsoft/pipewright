@@ -66,7 +66,9 @@ class TestStore:
         return sorted(tests, key=lambda t: t.get("started_at") or "", reverse=True)
 
     def usecases(self) -> list[str]:
-        return sorted({n.split("/")[1] for n in gcs_list(self.gcp, self.bucket, f"{PREFIX}/") if n.count("/") >= 2})
+        # ab-tests/_layers/ holds the layers' registry (FR-123), not a use case
+        return sorted({n.split("/")[1] for n in gcs_list(self.gcp, self.bucket, f"{PREFIX}/")
+                       if n.count("/") >= 2 and not n.split("/")[1].startswith("_")})
 
     def create(self, record: dict) -> dict:
         """A new test: refused when the use case already has an active one, or a test of that name exists."""

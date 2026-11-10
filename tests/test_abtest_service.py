@@ -239,3 +239,73 @@ def test_a_stop_that_could_not_remove_the_arm_can_be_finished(monkeypatch):
     s.online = None
     with pytest.raises(ConfigError, match="no running test"):
         s.set_state("stopped", "x", "a@example.com")
+
+
+# -- FR-122: the feed copy leaves out who acted ------------------------------------------------------------------
+
+def _feed_emit(monkeypatch, publish):
+    import base64
+    import json
+
+    sent = []
+    monkeypatch.setattr("pipewright.observability.events.emit", lambda *a, **k: None)
+    gcp = SimpleNamespace(post=lambda url, body: sent.append(body) or SimpleNamespace(ok=True, status=200))
+    uc = SimpleNamespace(name="churn", tenant="retention", ml={"ab_test": {"publish": publish}})
+    env = SimpleNamespace(name="prod", region="r", observability={},
+                          tenants={"retention": {"ab_test_feed": {"topic": "projects/p/topics/feed"}}})
+    svc.emit(env, uc, gcp, "ab_test.decided", {"name": "lapse-v7", "release": "R1"}, by="lead@example.com",
+             winner="treatment", approvals=[{"group": "ml-leads", "by": "x@example.com"}])
+    (body,) = sent
+    (message,) = body["messages"]
+    return json.loads(base64.b64decode(message["data"])), message["attributes"]
+
+
+def test_the_feed_copy_leaves_out_who_acted(monkeypatch):
+    data, attributes = _feed_emit(monkeypatch, {"events": True})
+    assert "by" not in data["data"] and data["data"]["approvals"] == [{"group": "ml-leads"}]
+    assert data["data"]["winner"] == "treatment" and attributes["event_type"] == "ab_test.decided"
+    assert "lead@example.com" not in str(data) and "x@example.com" not in str(data)
+    kept, _ = _feed_emit(monkeypatch, {"events": True, "include_by": True})
+    assert kept["data"]["by"] == "lead@example.com"
+
+
+# -- FR-121: what comes next ----------------------------------------------------------------------------------------
+
+def test_the_next_step_follows_the_test():
+    base = {**_test(), "environment": "prod"}
+    step = decide.next_step(base)
+    assert step["action"] == "analyse" and step["command"] == "pipewright ab analyse --env prod --usecase churn"
+    going = {**base, "analysis": {"status": "continue", "age_days": 3.0, "matured": {"control": 900, "treatment": 200},
+                                  "plan": {"needed": {"control": 1500, "treatment": 700}},
+                                  "duration": {"min_days": 7, "max_days": 60}}}
+    text = decide.next_step(going)["text"]
+    assert "4 more day(s) to min_days" in text and "about 600 more units" in text and "2026-12-31" in text
+    blocked = {**base, "analysis": {"status": "blocked", "blocked": ["sample ratio mismatch: ..."]}}
+    assert decide.next_step(blocked)["action"] == "fix" and "sample ratio" in decide.next_step(blocked)["text"]
+    due = {**base, "state": "decision_required", "decision": {"required": ["ml-leads"], "approvals": []},
+           "analysis": {"status": "decision_required", "decision_reasons": ["the planned sample is reached"],
+                        "primary": {"treatment_better": True}}}
+    step = decide.next_step(due)
+    assert step["action"] == "decide" and "--winner treatment --group ml-leads" in step["command"]
+    due["decision"] = {"required": [], "approvals": []}
+    assert decide.next_step(due)["action"] == "conclude"
+    won = {**base, "state": "concluded", "decision": {"winner": "treatment"}}
+    assert decide.next_step(won, default_version="7", served=["5"])["action"] == "deploy"
+    assert decide.next_step(won, default_version="7", served=["7"])["action"] == "none"
+    assert "a newer approval" in decide.next_step(won, default_version="9")["text"]
+    assert "v5 stays the default" in decide.next_step({**won, "decision": {"winner": "control"}})["text"]
+    assert decide.next_step({**base, "state": "paused"})["action"] == "resume"
+
+
+def test_every_analysis_is_kept_in_brief(monkeypatch):
+    s = _svc(monkeypatch, _test())
+    for i in range(3):
+        s.record_result("lapse-v7", {"at": f"2026-11-0{i + 2}T00:00:00", "status": "continue",
+                                     "primary": {"name": "lapse", "control": 0.3, "treatment": 0.3 + 0.01 * i,
+                                                 "diff": 0.01 * i, "ci": [-0.01, 0.02 * i], "p": 0.5},
+                                     "exposed": {"control": 100 * i, "treatment": 20 * i}, "blocked": [],
+                                     "matured": {"control": 0, "treatment": 0},
+                                     "decision_reasons": []})
+    rows = s.current()["results"]
+    assert [r["diff"] for r in rows] == [0.0, 0.01, 0.02] and rows[-1]["exposed"] == {"control": 200, "treatment": 40}
+    assert "next: " in svc.render_test(s.current())

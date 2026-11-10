@@ -1056,6 +1056,25 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
     return logs
 
 
+# -- the registry (Pipewright FR-124) ----------------------------------------------------------------------------------
+
+def registry_model_id(display_name: str) -> str:
+    """The model ID a first version is registered under: the display name as an ID (a letter first, [a-z0-9-], at
+    most 63). Fixed, so two runs registering a first version at once cannot make two models: the second one's upload
+    is refused with a conflict and it registers as a version of the first one's model. pipewright.models.registry
+    keeps the same rule (a test keeps them equal)."""
+    rid = re.sub(r"[^a-z0-9-]", "-", display_name.lower()).strip("-")
+    rid = rid if rid[:1].isalpha() else f"m-{rid}"
+    return rid[:63].rstrip("-")
+
+
+def registry_models(aiplatform, display_name: str) -> list:
+    """The models with the display name, oldest first: the oldest is the use case's model. A second one is what a
+    race between two first versions left before Pipewright FR-124."""
+    models = aiplatform.Model.list(filter=f'display_name="{display_name}"')
+    return sorted(models, key=lambda m: (str(getattr(m, "create_time", "") or ""), m.resource_name))
+
+
 # -- the approved bytes (Pipewright 1.4.1, FR-101) -------------------------------------------------------------------
 
 def folder_files(uri: str, project: str) -> dict:
@@ -1133,23 +1152,39 @@ def ab_spec(ab_test: str | dict | None) -> dict | None:
     return spec if spec.get("name") else None
 
 
-def ab_arm(name: str, unit, treatment_bp: int) -> str:
-    """control or treatment: first 7 bytes of SHA-256(name:unit) below treatment_bp * 2^56 // 10000."""
+def _ab_bucket(name: str, unit) -> int:
     import hashlib
 
+    return int.from_bytes(hashlib.sha256(f"{name}:{unit}".encode()).digest()[:7], "big")
+
+
+def ab_arm(name: str, unit, treatment_bp: int, layer: dict | None = None) -> str | None:
+    """control or treatment: first 7 bytes of SHA-256(name:unit) below treatment_bp * 2^56 // 10000. With a layer
+    (FR-123), None for a unit outside the test's range of the layer: not in the test, scored by the default."""
     if unit is None or unit == "":
         return "control"
-    bucket = int.from_bytes(hashlib.sha256(f"{name}:{unit}".encode()).digest()[:7], "big")
-    return "treatment" if bucket < int(treatment_bp) * 2**56 // 10000 else "control"
+    if layer:
+        b = _ab_bucket(f"layer/{layer['name']}", unit)
+        if not int(layer["start_bp"]) * 2**56 // 10000 <= b < int(layer["end_bp"]) * 2**56 // 10000:
+            return None
+    return "treatment" if _ab_bucket(name, unit) < int(treatment_bp) * 2**56 // 10000 else "control"
 
 
-def ab_sql_arm(name: str, unit_sql: str, treatment_bp: int) -> str:
-    """The same arm in BigQuery SQL."""
+def _ab_sql_bucket(name: str, unit_sql: str) -> str:
     quoted = name.replace("\\", "\\\\").replace("'", "\\'")
-    b = (f"CAST(CONCAT('0x', TO_HEX(SUBSTR(SHA256(CONCAT('{quoted}', ':', CAST({unit_sql} AS STRING))), 1, 7))) "
-         f"AS INT64)")
-    return (f"IF({unit_sql} IS NULL OR CAST({unit_sql} AS STRING) = '', 'control', "
-            f"IF({b} < {int(treatment_bp) * 2**56 // 10000}, 'treatment', 'control'))")
+    return (f"CAST(CONCAT('0x', TO_HEX(SUBSTR(SHA256(CONCAT('{quoted}', ':', CAST({unit_sql} AS STRING))), 1, 7))) "
+            f"AS INT64)")
+
+
+def ab_sql_arm(name: str, unit_sql: str, treatment_bp: int, layer: dict | None = None) -> str:
+    """The same arm in BigQuery SQL; NULL outside the test's range of its layer."""
+    arm = (f"IF({_ab_sql_bucket(name, unit_sql)} < {int(treatment_bp) * 2**56 // 10000}, 'treatment', "
+           f"'control')")
+    if layer:
+        b = _ab_sql_bucket(f"layer/{layer['name']}", unit_sql)
+        lo, hi = int(layer["start_bp"]) * 2**56 // 10000, int(layer["end_bp"]) * 2**56 // 10000
+        arm = f"IF({b} >= {lo} AND {b} < {hi}, {arm}, NULL)"
+    return f"IF({unit_sql} IS NULL OR CAST({unit_sql} AS STRING) = '', 'control', {arm})"
 
 
 if __name__ == "__main__":       # `python pipewright_runtime.py` prints the format version (image smoke test)

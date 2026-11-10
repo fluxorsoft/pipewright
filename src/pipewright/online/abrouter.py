@@ -38,10 +38,15 @@ SPACE = 2**56
 LOG_API = "https://logging.googleapis.com/v2/entries:write"
 
 
-def arm(name: str, unit, treatment_bp: int) -> str:
-    """The same assignment as pipewright.abtest.assign (a test keeps them equal)."""
+def arm(name: str, unit, treatment_bp: int, layer: dict | None = None) -> str | None:
+    """The same assignment as pipewright.abtest.assign (a test keeps them equal); None outside the test's range of
+    its layer (FR-123)."""
     if unit is None or unit == "":
         return "control"
+    if layer:
+        b = int.from_bytes(hashlib.sha256(f"layer/{layer['name']}:{unit}".encode()).digest()[:7], "big")
+        if not int(layer["start_bp"]) * SPACE // 10000 <= b < int(layer["end_bp"]) * SPACE // 10000:
+            return None
     bucket = int.from_bytes(hashlib.sha256(f"{name}:{unit}".encode()).digest()[:7], "big")
     return "treatment" if bucket < int(treatment_bp) * SPACE // 10000 else "control"
 
@@ -213,7 +218,8 @@ class ABRouter:
             "ab_test": self.cfg["name"], "event": "counts", "usecase": self.usecase, "instance": self.instance,
             **{k: self.counts.get(k, 0) for k in ("control_calls", "treatment_calls", "control_instances",
                                                   "treatment_instances", "control_errors", "treatment_errors",
-                                                  "control_ms", "treatment_ms", "unassigned", "mismatched_model")},
+                                                  "control_ms", "treatment_ms", "unassigned", "mismatched_model",
+                                                  "outside")},
             "dropped": getattr(self.log, "dropped", 0) + getattr(self.log, "failed", 0),
             "breaker_tripped": self.breaker.tripped_at is not None, "at": time.time()})
 
@@ -223,15 +229,20 @@ class ABRouter:
             return 0
         return int(self.cfg.get("treatment_bp", 0))
 
-    def split(self, units: list[str]) -> dict[str, str]:
+    def split(self, units: list[str]) -> dict[str, str | None]:
+        """Each unit's arm; None for a unit outside the test's range of its layer (FR-123), which the control's
+        endpoint (the default) serves and which is never an exposure."""
         bp = self._bp() if self.cfg.get("mode", "ab") == "ab" else 0
-        return {u: arm(self.cfg["name"], u, bp) for u in units}
+        return {u: arm(self.cfg["name"], u, bp, self.cfg.get("layer")) for u in units}
 
     def _exposures(self, arms: dict[str, str], deployed: dict[str, str | None]) -> None:
         now = time.time()
         for unit, a in arms.items():
             if not unit or unit == "None":
                 self.counts["unassigned"] += 1
+                continue
+            if a is None:                                # outside the test's range of its layer: not in the test
+                self.counts["outside"] += 1
                 continue
             if self.log is None:
                 continue
@@ -288,7 +299,7 @@ class ABRouter:
         if self.cfg.get("mode") == "shadow":
             return self._shadow(ids)
         arms = self.split(ids)
-        groups = {a: [i for i in ids if arms[i] == a] for a in ("control", "treatment")}
+        groups = {a: [i for i in ids if (arms[i] or "control") == a] for a in ("control", "treatment")}
         body = {"predictions": {}, "not_found": [], "arms": {}, "ab_test": self.cfg["name"],
                 "deployed_model": {}, "model_version": {}}
         fields = {"asked": len(ids), "found": 0, "attempts": 0, "control": len(groups["control"]),
@@ -305,7 +316,7 @@ class ABRouter:
             deployed[a] = out.get("deployed_model")
             self._check_model(a, deployed[a])
             for i in out["predictions"]:
-                body["arms"][i] = a
+                body["arms"][i] = arms[i]                # None outside the test's range of its layer
             fields["found"] += f["found"]
             fields["attempts"] += f["attempts"]
         self._exposures({i: arms[i] for i in body["arms"]}, deployed)
@@ -338,7 +349,7 @@ class ABRouter:
         preds: list = [None] * len(units)
         deployed = {}
         for a in ("control", "treatment"):
-            idx = [k for k, u in enumerate(units) if arms[u] == a]
+            idx = [k for k, u in enumerate(units) if (arms[u] or "control") == a]
             if not idx:
                 continue
             g = self.control if a == "control" else self.treatment

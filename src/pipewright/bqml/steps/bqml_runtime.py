@@ -729,14 +729,32 @@ def upload_version(project: str, region: str, registry_id: str, labels: dict, de
     model = {"displayName": registry_id, "description": description, "versionDescription": description,
              "labels": labels,
              **({"encryptionSpec": {"kmsKeyName": kms_key}} if kms_key else {})}
-    r = session.post(f"{base}/models:upload", timeout=60,
-                     json={"model": model, **({"parentModel": parent} if exists else {"modelId": registry_id})})
+    try:
+        return _upload(session, base, region, {"model": model, **({"parentModel": parent} if exists
+                                                                    else {"modelId": registry_id})}, wait_s)
+    except _Exists:
+        if exists:
+            raise RuntimeError(f"Model Registry upload: {registry_id} conflicts with an existing model") from None
+        # Another run made the first version a moment ago (Pipewright FR-124): this one is a version of that model.
+        return _upload(session, base, region, {"model": model, "parentModel": parent}, wait_s)
+
+
+class _Exists(Exception):
+    """The model ID is taken: another run registered the first version at the same time."""
+
+
+def _upload(session, base: str, region: str, body: dict, wait_s: int) -> str:
+    r = session.post(f"{base}/models:upload", timeout=60, json=body)
+    if r.status_code == 409:
+        raise _Exists()
     if r.status_code >= 300:
         raise RuntimeError(f"Model Registry upload: {r.status_code} {r.text[:300]}")
     operation, deadline = r.json()["name"], time.time() + wait_s
     while True:
         op = session.get(f"https://{region}-aiplatform.googleapis.com/v1/{operation}", timeout=60).json()
         if op.get("done"):
+            if (op.get("error") or {}).get("code") == 6:           # ALREADY_EXISTS
+                raise _Exists()
             if op.get("error"):
                 raise RuntimeError(f"Model Registry upload: {op['error']}")
             return str(op["response"]["modelVersionId"])

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
+from pipewright.models.names import oldest
 
 
 @dataclass
@@ -147,7 +148,7 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     if not uc.resources.get("online_serving", False):
         raise ConfigError(f"tenant {uc.tenant!r} is not enabled for online serving in {env.name}")
     ai = _aiplatform(env, creds)
-    models = ai.Model.list(filter=f'display_name="{uc.model["name"]}"')
+    models = oldest(ai.Model.list(filter=f'display_name="{uc.model["name"]}"'))
     if not models:
         raise ConfigError(f"no model {uc.model['name']!r} in the registry yet: run the pipeline first")
     default = ai.Model(model_name=f"{models[0].resource_name}@default")
@@ -261,7 +262,7 @@ def deploy(uc: ResolvedUseCase, env: Environment, creds, canary: bool = False, l
     if p.already_deployed:
         log(f"{p.endpoint} already serves {p.model} v{p.version}: nothing to do")
         return
-    registered = ai.Model.list(filter=f'display_name="{p.model}"')[0]
+    registered = oldest(ai.Model.list(filter=f'display_name="{p.model}"'))[0]
     model = ai.Model(model_name=f"{registered.resource_name}@default")
     existing = _endpoint_for(ai, uc, env, create=False)
     if existing:

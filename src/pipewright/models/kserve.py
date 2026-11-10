@@ -22,6 +22,7 @@ import time
 
 from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
+from pipewright.models.names import oldest
 
 API = "/apis/serving.kserve.io/v1beta1"
 # Agent Platform's defaults for its prebuilt serving containers (TorchServe based), when the registry has none.
@@ -86,7 +87,7 @@ def default_version(uc: ResolvedUseCase, env: Environment, gcp) -> dict:
     r = gcp.get(f"{api}/models", filter=f'display_name="{uc.model["name"]}"')
     if not r.ok:
         raise ConfigError(f"Model Registry: {error_text(r)}")
-    models = (r.body or {}).get("models") or []
+    models = oldest((r.body or {}).get("models") or [])
     if not models:
         raise ConfigError(f"no model {uc.model['name']!r} in the registry yet: run the pipeline first")
     r = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{models[0]['name'].split('@')[0]}@default")

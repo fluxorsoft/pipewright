@@ -8,7 +8,9 @@ pipewright_runtime.emit_event.
 Event types: run.submitted, run.duplicate, release.live, release.rolled_back, model.registered, model.approved,
 model.deployed, model.undeployed (1.4.2), training.evaluated, monitoring.recorded, monitoring.alert,
 retrain.requested, data.erased, run.failed
-(Pipewright 1.2.0: a run that ended failed or cancelled, from the launcher's tick); retrain
+(Pipewright 1.2.0: a run that ended failed or cancelled, from the launcher's tick), run.unregistered (FR-124: an
+approved training run that ended succeeded without registering, from the same tick), model.registration_skipped
+(FR-124: the register step skipped on purpose, a replay); retrain
 decisions (pipewright.retraining): retrain.proposed, retrain.approval, retrain.approved, retrain.declined,
 retrain.snoozed, retrain.reopened, retrain.escalated, retrain.digest.
 """

@@ -37,6 +37,18 @@ def feed_topic(env, tenant: str) -> str | None:
     return ((env.tenants.get(tenant) or {}).get("ab_test_feed") or {}).get("topic")
 
 
+RESULTS_KEPT = 200                 # analyses kept on the record in brief (FR-121); the results table keeps all
+
+
+def without_by(value):
+    """The event without who acted (FR-122): every `by`, at any depth (a decision's approvals carry theirs too)."""
+    if isinstance(value, dict):
+        return {k: without_by(v) for k, v in value.items() if k != "by"}
+    if isinstance(value, list):
+        return [without_by(v) for v in value]
+    return value
+
+
 def emit(env, uc, gcp, event_type: str, test: dict, **data) -> None:
     """The event, on the events topic and, with publish.events, on the tenant's feed (aggregates only)."""
     from pipewright.observability import events
@@ -47,8 +59,9 @@ def emit(env, uc, gcp, event_type: str, test: dict, **data) -> None:
     publish = ((uc.ml or {}).get("ab_test") or {}).get("publish") or {}
     topic = feed_topic(env, uc.tenant)
     if publish.get("events") and topic:
+        sent = e if publish.get("include_by") else without_by(e)
         r = gcp.post(events.publish_url(topic, env.region), {"messages": [{
-            "data": base64.b64encode(json.dumps(e, default=str).encode()).decode(),
+            "data": base64.b64encode(json.dumps(sent, default=str).encode()).decode(),
             "attributes": {"usecase": uc.name, "ab_test": test["name"], "event_type": event_type}}]})
         if not r.ok:
             print(f"note: the event was not copied to the feed {topic} (HTTP {r.status})")
@@ -125,8 +138,14 @@ class ABTests:
                 "history": []}
         if overlaps:
             test["overlaps"] = overlaps
+        if section.get("layer"):                                # FR-123: the test's range of its layer
+            test["layer"] = self._claim(section)
         self._history(test, "start", identity)
-        self.store.create(test)
+        try:
+            self.store.create(test)
+        except Exception:
+            self._release(test)
+            raise
         if self.online is not None:
             arms = {}
             try:
@@ -147,7 +166,33 @@ class ABTests:
              treatment_bp=section["allocation"]["treatment_bp"], mode=section["mode"], digest=test["digest"])
         self.log(f"started {test['name']}: v{treatment} against the default v{default.version_id}, "
                  f"{section['allocation']['treatment_bp'] / 100:g}% of units to the treatment (mode {section['mode']})")
+        if test.get("layer"):
+            ly = test["layer"]
+            self.log(f"  layer {ly['name']}: this test has {ly['share_bp'] / 100:g}% of its units (positions "
+                     f"{ly['start_bp']} to {ly['end_bp']} of 10000); the rest are not in the test")
         return test
+
+    def _claim(self, section: dict) -> dict:
+        from pipewright.abtest import layers
+        from pipewright.abtest.store import ACTIVE
+
+        def active(usecase: str, name: str) -> bool:
+            other = self.store.get(usecase, name)
+            return bool(other and other.get("state") in ACTIVE)
+
+        return layers.claim(self.gcp, self.env.artifacts_bucket, section["layer"], section["unit"], self.uc.name,
+                            section["name"], active)
+
+    def _release(self, t: dict) -> None:
+        """The test's range of its layer, freed (a later claim drops an ended test's range anyway)."""
+        if not t.get("layer"):
+            return
+        from pipewright.abtest import layers
+
+        try:
+            layers.release(self.gcp, self.env.artifacts_bucket, t["layer"]["name"], self.uc.name, t["name"])
+        except Exception as e:  # noqa: BLE001 - the next claim in the layer frees it
+            self.log(f"note: layer {t['layer']['name']} still lists {t['name']} ({e}); the next start frees it")
 
     def _overlaps(self, section: dict) -> list[dict]:
         """Other use cases' active tests in this environment on the same unit (policies.ab_test.overlap): their
@@ -163,7 +208,9 @@ class ABTests:
             if other == self.uc.name:
                 continue
             t = self.store.current(other)
-            if t and t.get("state") in ACTIVE and t.get("unit") == section["unit"]:
+            same_layer = bool(section.get("layer")) and (t or {}).get("layer", {}).get("name") == \
+                section["layer"]["name"]                     # FR-123: apart by construction
+            if t and t.get("state") in ACTIVE and t.get("unit") == section["unit"] and not same_layer:
                 found.append({"usecase": other, "ab_test": t["name"], "unit": t["unit"], "state": t["state"]})
         if found and mode == "refuse":
             names = ", ".join(f"{o['ab_test']} ({o['usecase']})" for o in found)
@@ -215,6 +262,8 @@ class ABTests:
                                  reason=reason)
 
         t = self._change(t["name"], change)
+        if state == "stopped":
+            self._release(t)
         emit(self.env, self.uc, self.gcp, {"paused": "ab_test.paused", "running": "ab_test.resumed",
                                            "stopped": "ab_test.stopped"}[state], t, reason=reason, by=identity)
         if self.online is not None:
@@ -304,6 +353,12 @@ class ABTests:
             p = (result.get("primary") or {}).get("p_sequential")
             if p is not None:
                 t["looks"] = (t.get("looks") or []) + [{"at": result["at"], "p": p}]
+            # FR-121: every analysis in brief, so a reader sees the result settle (or not) over the test
+            prim = result.get("primary") or {}
+            t["results"] = ((t.get("results") or []) + [{
+                "at": result["at"], "status": result.get("status"), "diff": prim.get("diff"), "ci": prim.get("ci"),
+                "p": prim.get("p"), "p_sequential": prim.get("p_sequential"),
+                "exposed": result.get("exposed")}])[-RESULTS_KEPT:]
             if result["status"] == "decision_required" and t["state"] == "running":
                 t["state"] = "decision_required"
                 self._history(t, "decision_required", None, reasons=result["decision_reasons"])
@@ -395,6 +450,7 @@ class ABTests:
             return self._history(t, "conclude", identity, winner=winner, reason=reason)
 
         t = self._change(t["name"], change)
+        self._release(t)
         if self.online is not None:
             self._remove(t)
         emit(self.env, self.uc, self.gcp, "ab_test.decided", t, winner=winner, reason=reason, by=identity,
@@ -416,6 +472,11 @@ class ABTests:
             return out
         need_c, need_t = stats.sample_size(m["type"], baseline, m["minimum_effect"], sd, a["alpha"], a["power"], bp)
         out.update(baseline=baseline, needed={"control": need_c, "treatment": need_t}, total=need_c + need_t)
+        share = int((section.get("layer") or {}).get("share_bp") or 10000)
+        if per_day and share < 10000:          # FR-123: a test in a layer sees only its share of the units
+            out["layer"] = {"name": section["layer"]["name"], "share_bp": share,
+                            "units_per_day_in_test": round(per_day * share / 10000, 1)}
+            per_day = per_day * share / 10000
         if per_day:
             days = (need_c + need_t) / per_day + m["window_days"]
             out["days"] = round(days, 1)
@@ -455,6 +516,14 @@ def render_test(t: dict) -> str:
     if t.get("breaker"):
         lines.append(f"  the gateway's breaker tripped at {t['breaker'].get('tripped_at')}: "
                      f"{t['breaker'].get('error_rate')} errors on the treatment")
+    if t.get("layer"):
+        ly = t["layer"]
+        lines.append(f"  layer {ly['name']}: {ly['share_bp'] / 100:g}% of its units (positions {ly['start_bp']} to "
+                     f"{ly['end_bp']} of 10000)")
     if t.get("analysis"):
         lines.append(ab_analysis.render(t["analysis"], t))
+    from pipewright.abtest.decide import next_step
+
+    step = next_step(t)
+    lines.append(f"  next: {step['text']}" + (f" (`{step['command']}`)" if step.get("command") else ""))
     return "\n".join(x for x in lines if x)

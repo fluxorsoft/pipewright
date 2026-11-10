@@ -12,6 +12,7 @@ from pipewright.build.compile import ML_CONFIG_PARAMETER, check_parameters, comp
 from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
 from pipewright.gcp import Gcp, error_text
+from pipewright.models.names import oldest
 from pipewright.tables.plan import plan_table
 
 OK, INFO, WARN, FAIL = "OK", "INFO", "WARN", "FAIL"
@@ -597,7 +598,7 @@ def _check_champion_approval(uc: ResolvedUseCase, env: Environment, gcp: Gcp, re
     api = f"https://{env.region}-aiplatform.googleapis.com/v1"
     found = gcp.get(f"{api}/projects/{env.project}/locations/{env.region}/models",
                     filter=f'display_name="{uc.model["name"]}"')
-    models = (found.body or {}).get("models", []) if found.ok else []
+    models = oldest((found.body or {}).get("models", []) if found.ok else [])
     if not models:
         return
     default = gcp.get(f"{api}/{models[0]['name']}@default")
@@ -748,7 +749,7 @@ def _check_champion_store(uc: ResolvedUseCase, gcp: Gcp, report: Report, s: str,
 
     parent = f"projects/{uc.platform['project']}/locations/{uc.platform['region']}"
     found = gcp.get(f"{api}/{parent}/models", filter=f'display_name="{uc.model["name"]}"')
-    models = (found.body or {}).get("models", []) if found.ok else []
+    models = oldest((found.body or {}).get("models", []) if found.ok else [])
     if not models:
         report.add(s, Result(INFO, "champion's online store", "no model registered yet"))
         return

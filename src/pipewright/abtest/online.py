@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from pipewright.errors import ConfigError
+from pipewright.models.names import oldest
 
 ARM = "ab"
 
@@ -90,13 +91,18 @@ class Arms:
         if tf_endpoints.is_private(self.env, arm_key(self.uc)):
             tf_endpoints.publish_dns(self.gcp, self.env, arm_key(self.uc), endpoint.resource_name, self.log)
         self._event("model.deployed", test, version, traffic_percent=100)
+        serving = self.uc.model.get("serving") or {}
+        # What the arm stands on (FR-121: Fleet View prices the test so far): a pool adds no machines.
+        where = ({"pool": serving["pool"]} if serving.get("pool") else
+                 {"machine": serving.get("machine"),
+                  "replicas_min": max(int((serving.get("replicas") or {}).get("min", 1)), 1)})
         return {"treatment": {**test["arms"]["treatment"], "endpoint": endpoint.resource_name,
-                              "deployed_model": deployed.id, "created_endpoint": created}}
+                              "deployed_model": deployed.id, "created_endpoint": created, **where}}
 
     def _deploy(self, ai, endpoint, test: dict, version: str) -> None:
         from pipewright.models import deploy
 
-        registered = ai.Model.list(filter=f'display_name="{self.uc.model["name"]}"')
+        registered = oldest(ai.Model.list(filter=f'display_name="{self.uc.model["name"]}"'))
         if not registered:
             raise ConfigError(f"model {self.uc.model['name']} is not registered")
         model = ai.Model(model_name=f"{registered[0].resource_name}@{version}")
@@ -302,7 +308,7 @@ class KServeArms:
                                                                 "auth": "none"},
                             "treatment_deployed_model": None,
                             "breaker": ((section.get("guardrails") or {}).get("technical") or {}).get("breaker") or {},
-                            "feed": feed_cfg,
+                            "feed": feed_cfg, **({"layer": test["layer"]} if test.get("layer") else {}),
                             "follow": {"bucket": self.env.artifacts_bucket, "object": state_object(test),
                                        "every": 30}}}
 

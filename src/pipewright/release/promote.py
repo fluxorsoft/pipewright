@@ -21,6 +21,7 @@ import yaml
 from pipewright.config import Environment, ResolvedUseCase, resolve_usecase
 from pipewright.errors import ConfigError
 from pipewright.gcp import Gcp, PreconditionFailed, gcs_read, gcs_write
+from pipewright.models.names import oldest
 from pipewright.observability import events
 from pipewright.release import publish
 from pipewright.release.contract import ReleaseContract, contract_name, new_pointer, pointer_name
@@ -200,7 +201,7 @@ def _find_model(gcp: Gcp, env: Environment, display_name: str) -> dict | None:
                 filter=f'display_name="{display_name}"')
     if not r.ok:
         raise ConfigError(f"cannot list models in {env.name}: {r.status} {str(r.body)[:200]}")
-    models = r.body.get("models", [])
+    models = oldest(r.body.get("models", []))
     return models[0] if models else None
 
 

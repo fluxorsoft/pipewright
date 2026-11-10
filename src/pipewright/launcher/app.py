@@ -491,6 +491,16 @@ def create_app(registry: Registry | None = None) -> Flask:
             except Exception as e:  # noqa: BLE001 - a failed look must not stop the tick
                 log.exception("failed runs not checked")
                 out.append({"error": str(e)[:300]})
+            try:                      # FR-124: approved runs that ended succeeded without registering the model
+                from pipewright.launcher import unregistered
+
+                out += unregistered.report(
+                    r.gcp, r.bucket, m["project"], m["region"], contracts,
+                    lambda contract, rid, detail: _event("run.unregistered", contract, rid, **detail),
+                    manifest=manifest, log_bucket=(m.get("observability") or {}).get("log_bucket"))
+            except Exception as e:  # noqa: BLE001
+                log.exception("approved runs not checked for a registration")
+                out.append({"error": f"registrations not checked: {str(e)[:280]}"})
         return out
 
     # ---------------------------------------------------------------------------------- Ray clusters --

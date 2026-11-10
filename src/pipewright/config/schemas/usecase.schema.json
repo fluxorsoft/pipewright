@@ -664,6 +664,16 @@
           "additionalProperties": false,
           "properties": { "treatment_bp": { "type": "integer", "minimum": 1, "maximum": 9999 } }
         },
+        "layer": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "description": "FR-123 (off unless set): tests of any use case in this environment that name the same layer never share a unit; this test takes share_bp of the layer's units, the rest are not in it",
+          "required": ["name", "share_bp"],
+          "properties": {
+            "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,40}[a-z0-9]$" },
+            "share_bp": { "type": "integer", "minimum": 1, "maximum": 10000 }
+          }
+        },
         "metric": {
           "type": "object",
           "additionalProperties": false,
@@ -770,7 +780,8 @@
           "additionalProperties": false,
           "properties": {
             "events": { "type": "boolean" },
-            "exposures": { "type": "boolean" }
+            "exposures": { "type": "boolean" },
+            "include_by": { "type": "boolean", "description": "FR-122: the feed's copy of an event keeps who acted (by); off by default" }
           }
         },
         "results_table": { "type": ["string", "null"] },
@@ -953,7 +964,8 @@
             "notify": { "type": "array", "items": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" },
                         "description": "email addresses, including distribution lists" },
             "events": { "type": "array", "minItems": 1, "items": { "enum": ["monitoring.alert", "retrain.requested",
-                        "training.rejected", "training.evaluated", "model.registered", "run.failed"] } },
+                        "training.rejected", "training.evaluated", "model.registered", "run.failed",
+                        "run.unregistered"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         },
@@ -1259,6 +1271,7 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "arms": { "$ref": "#/$defs/ab_test/properties/arms" },
+            "layer": { "$ref": "#/$defs/ab_test/properties/layer" },
             "allocation": { "$ref": "#/$defs/ab_test/properties/allocation" },
             "duration": { "$ref": "#/$defs/ab_test/properties/duration" },
             "publish": { "$ref": "#/$defs/ab_test/properties/publish" },
@@ -1328,7 +1341,8 @@
             "notify": { "type": "array", "items": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" },
                         "description": "email addresses, including distribution lists" },
             "events": { "type": "array", "minItems": 1, "items": { "enum": ["monitoring.alert", "retrain.requested",
-                        "training.rejected", "training.evaluated", "model.registered", "run.failed"] } },
+                        "training.rejected", "training.evaluated", "model.registered", "run.failed",
+                        "run.unregistered"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         } }

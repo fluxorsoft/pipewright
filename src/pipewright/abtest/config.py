@@ -18,6 +18,7 @@ DEFAULTS = {
     "unit": None,                         # a data contract column; default: the entity or erasure key
     "arms": {"control": "champion", "treatment": {"model_version": None}},
     "allocation": {"treatment_bp": 1000},
+    "layer": None,                        # FR-123: {name, share_bp} keeps tests that name the layer apart
     "metric": {"name": None, "source": None, "key": None, "time_column": None, "value_column": None,
                "denominator_column": None, "where": None, "window_days": 30, "type": "proportion",
                "direction": "higher", "minimum_effect": None},
@@ -31,7 +32,7 @@ DEFAULTS = {
                  "cuped": {"enabled": False, "covariate": None, "source": None},
                  "segments": [], "tau": None},
     "decision": {"approvals": {"required": []}},
-    "publish": {"events": False, "exposures": False},
+    "publish": {"events": False, "exposures": False, "include_by": False},
     "results_table": None,
     "callers": [],
 }
@@ -83,6 +84,15 @@ def check(ml: dict, columns: set, label: str | None, known, problems: list[str],
     bp = (t.get("allocation") or {}).get("treatment_bp")
     if not isinstance(bp, int) or not 0 < bp < 10000:
         problems.append(f"{where}.allocation.treatment_bp: whole basis points between 1 and 9999 (2000 is 20%)")
+    layer = t.get("layer")
+    if layer is not None:                                  # FR-123
+        if not isinstance(layer, dict) or not NAME.match(str(layer.get("name") or "")):
+            problems.append(f"{where}.layer.name: required with a layer, 3 to 42 characters, lower case letters, "
+                            "digits and hyphens (tests of any use case naming it share its units, never a unit)")
+        share = layer.get("share_bp") if isinstance(layer, dict) else None
+        if not isinstance(share, int) or not 0 < share <= 10000:
+            problems.append(f"{where}.layer.share_bp: the test's share of the layer's units, whole basis points "
+                            "from 1 to 10000 (3000 is 30%)")
     if t["mode"] == "ab":
         _metric(t["metric"], f"{where}.metric", problems, required=True)
         for i, g in enumerate(t["guardrails"].get("business") or []):

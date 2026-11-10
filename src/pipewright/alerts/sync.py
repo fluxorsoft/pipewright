@@ -47,6 +47,10 @@ EVENTS = {
     # from the launcher's hourly tick (Pipewright 1.2.0, FR-67)
     "run.failed": ('jsonPayload.pipewright_event.event_type="run.failed"', "pipeline run failed",
                    ["pipeline", "job_id", "state", "failed_steps", "error"]),
+    # FR-124, from the same tick: the evaluation approved the model, the run succeeded, nothing was registered
+    "run.unregistered": ('jsonPayload.pipewright_event.event_type="run.unregistered"',
+                         "approved model was not registered", ["job_id", "run_id", "primary_metric",
+                                                               "primary_value", "why"]),
     # Pipewright 1.4.1 (FR-101): the watch found an approved version changed, unapproved or not checkable; and a
     # scoring run refused or warned by the full check. Added for every use case of an environment whose
     # policies.integrity.watch is on (model.integrity) or inference is warn or refuse (run.integrity).

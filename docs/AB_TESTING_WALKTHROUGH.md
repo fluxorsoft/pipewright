@@ -111,6 +111,7 @@ ab_test:
   publish:
     events: true       # started, allocation changed, paused, resumed, analysed, guardrail breached, decided, stopped
     exposures: true    # one line per customer and call, with a keyed hash of the customer; only where allowed
+    include_by: false  # the default: the feed's copy of an event leaves out who acted (see below)
 ```
 
 **The team subscribes** with one of the identities in `feed_subscribers`, and keeps the messages it wants. Events
@@ -122,15 +123,42 @@ gcloud pubsub subscriptions create ab-dashboard \
   --message-filter='attributes.event_type = "ab_test.analysed" OR attributes.event_type = "ab_test.guardrail_breached"'
 ```
 
+**Exposure lines have no such attributes.** They reach the topic through a Cloud Logging sink, and a sink adds only
+a timestamp attribute, so a subscription filter cannot pick exposures, or one test's or one arm's. Two ways to work
+with that:
+
+- **Filter in the subscriber's code.** An exposure is a log entry whose `jsonPayload` has `unit_ref`; an event has
+  `event_type` in its body. For example, in Python:
+
+  ```python
+  import json
+
+  def handle(message):
+      body = json.loads(message.data)
+      line = body.get("jsonPayload") or {}
+      if "unit_ref" in line:                                 # an exposure line
+          if line["ab_test"] == "lapse-v7":
+              record_exposure(line["unit_ref"], line["arm"], line["at"])
+      elif body.get("event_type", "").startswith("ab_test."):  # an event
+          record_event(body)
+      message.ack()
+  ```
+
+- **Two subscriptions.** One with `--message-filter='attributes:event_type'` (only messages with that attribute: the
+  events), and one without a filter for whoever wants the exposures as well.
+
+Pipewright does not publish exposures itself, by design: the sink keeps Pub/Sub off the path of every prediction, so a
+slow or unavailable topic can never slow down or fail a caller.
+
 What arrives, as the battle test received it on KServe (the screenshot above):
 
 | Message | When | What it carries |
 |---|---|---|
-| `ab_test.started` | `ab start` | the versions, the treatment's share, the mode, the configuration digest, who started it |
+| `ab_test.started` | `ab start` | the versions, the treatment's share, the mode, the configuration digest (who started it, with `include_by`) |
 | `ab_test.analysed` | every analysis, scheduled or by hand | the status, the metric's difference, interval and p-values, the customers exposed per arm, what blocks a decision |
 | `ab_test.guardrail_breached` | the launcher stops the treatment, or a business guardrail is breached | which guardrail, why |
 | `ab_test.decision`, `ab_test.decided` | an approver group decides; the test concludes | the group, the winner, the reason |
-| `ab_test.paused`, `resumed`, `stopped`, `allocation_changed` | those commands | who and why |
+| `ab_test.paused`, `resumed`, `stopped`, `allocation_changed` | those commands | why (and who, with `include_by`) |
 | exposure lines | each customer routed online, within a few minutes | the test, the arm, `unit_ref` (a keyed hash of the customer), the time; never the customer's ID |
 
 Things to know:
@@ -138,10 +166,23 @@ Things to know:
 - **At least once, unordered.** A message can arrive twice and out of order; key on `event_type`, `ab_test` and
   `time`, and for exposures on `unit_ref` and `at`.
 - **Exposures are pseudonymised, not anonymous.** The hash is stable for a customer, so it still counts as personal
-  data where the customer is a person; keep it as you would keep the customer's ID. Joining it to the team's own
-  records needs the key, which only the gateway reads; a platform that wants a team to join gives that team read access
-  to the key in Secret Manager, as its own decision.
-- **Events name who acted** (`by`): an identity, not a customer.
+  data where the customer is a person; keep it as you would keep the customer's ID.
+- **To join exposures to the team's own records, use BigQuery, not the feed.** The exposure table in the team's own
+  dataset (`pipewright_ab_exposure`) has the real unit, under the team's own access, so a join needs no key at all:
+
+  ```sql
+  SELECT e.jsonPayload.arm AS arm, c.region, COUNT(DISTINCT e.jsonPayload.unit) AS customers
+  FROM `my-project.churn_ds.pipewright_ab_exposure` AS e
+  JOIN `my-project.churn_ds.customers` AS c ON c.customer_id = CAST(e.jsonPayload.unit AS STRING)
+  WHERE e.jsonPayload.ab_test = 'lapse-v7' AND e.jsonPayload.arm IN ('control', 'treatment')
+  GROUP BY arm, c.region
+  ```
+
+  The feed's `unit_ref` is for tools that should never see the customer's ID; matching it back to customers needs the
+  key, which only the gateway reads. Giving a team read access to the key in Secret Manager stays the platform's
+  decision, and it turns the feed's exposures back into identifiable data for that team.
+- **Events leave out who acted.** The event log, Fleet View and lineage keep `by` (an identity, never a customer);
+  the feed's copy drops it, since the feed goes to the team's own tools. `publish.include_by: true` keeps it.
 - **In a private environment**, the topic keeps messages in the environment's region and enforces it in transit: pull
   through the region's endpoint (for example `https://us-central1-pubsub.googleapis.com`).
 - **BigQuery stays the record.** The analysis, the evidence and Fleet View read the dataset, never the feed.

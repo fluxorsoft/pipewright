@@ -85,7 +85,7 @@ ab_test:
   arms: { treatment: { model_version: "7" } }
 ```
 
-Only `enabled`, `arms`, `allocation`, `duration`, `publish` and `decision` may differ per environment; the rest is the
+Only `enabled`, `arms`, `allocation`, `layer`, `duration`, `publish` and `decision` may differ per environment; the rest is the
 same everywhere. The churn example's `config/ab_test.yaml` shows every key with its default; `pipewright explain
 ab_test` describes each. For a batch test, add `ab_test` and `arm` (STRING, NULLABLE) to the predictions table's
 schema: `validate` says so when they are missing.
@@ -170,6 +170,36 @@ per tenant (`tenants.<t>.ab_test_feed`). `publish.exposures` also copies exposur
 instead of the unit, only where the platform sets `policies.ab_test.feed_exposures`. A pseudonymised unit is still
 personal data where the unit is a person. BigQuery stays the record; the feed is a copy, delivered at least once and
 unordered.
+
+Events carry `event_type`, `ab_test` and `usecase` as attributes for subscription filters; exposure lines come through
+a log sink and carry none, so filter them in the subscriber's code. The feed's copy of an event leaves out who acted
+(`by`) unless `publish.include_by` is true. To join exposures to the team's own records, join the exposure table in
+the team's dataset, which has the unit, rather than the feed's `unit_ref`. The walkthrough's section 7 has examples of
+both.
+
+## Tests that share units: layers
+
+Two use cases may test on the same customers at once, for example a churn model and an upsell model. Without anything
+else, a customer can be in both tests, and each result then carries some of the other test's effect.
+`policies.ab_test.overlap` (allow, warn or refuse) judges that at `ab start`. **Layers** keep such tests apart instead:
+
+```yaml
+ab_test:
+  layer: { name: customers, share_bp: 3000 }    # this test takes 30% of the layer's customers
+```
+
+Every customer has one position in a layer, from the layer's own hash. A test in the layer claims a range of
+positions when it starts (`ab start` says which), and only customers in its range are in the test. The others are
+served by the default model, are never exposures and are never counted. Ranges of running tests never meet, so a
+customer is in at most one test of the layer, and tests in different layers stay independent as before. A stopped or
+concluded test's range is free for the next test.
+
+The price is a smaller sample: a test with `share_bp: 3000` sees 30% of the customers, so it takes longer to reach its
+planned sample (`ab plan --per-day` divides by the share). `ab start` refuses when the layer has no free range that
+large, or when the layer already splits another unit. Tests in the same layer are not overlaps under
+`policies.ab_test.overlap`; a test without a layer still overlaps every test on its unit. The registry is one file per
+layer, `ab-tests/_layers/<name>.json` in the artifacts bucket, written with a generation match so two starts never
+claim the same range.
 
 ## For the platform team
 

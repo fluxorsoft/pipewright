@@ -14,6 +14,7 @@ from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
 from pipewright.models import gates
 from pipewright.models.deploy import check_approval
+from pipewright.models.names import oldest
 
 
 @dataclass
@@ -32,7 +33,7 @@ def _resource(uc: ResolvedUseCase, env: Environment, creds) -> str:
     from google.cloud import aiplatform
 
     aiplatform.init(project=env.project, location=env.region, credentials=creds)
-    models = aiplatform.Model.list(filter=f'display_name="{uc.model["name"]}"')
+    models = oldest(aiplatform.Model.list(filter=f'display_name="{uc.model["name"]}"'))
     if not models:
         raise ConfigError(f"no model {uc.model['name']!r} in the registry yet: run the training pipeline first")
     return models[0].resource_name

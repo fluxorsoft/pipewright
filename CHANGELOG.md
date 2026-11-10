@@ -29,6 +29,27 @@ as in 1.4.2. The guide is [docs/AB_TESTING.md](docs/AB_TESTING.md).
 - The starter: `tenants.<t>.ab_test` (the exposure sink, the gateway's identity, the job, the launcher's reads, the
   feed); `serving.yaml` documents the arm endpoint.
 
+From the FR-57 QA round:
+
+- Layers (FR-123), off unless set: `ab_test.layer: {name, share_bp}`. Tests of any use case that name the same layer
+  claim disjoint ranges of its units at `ab start` (a registry in `ab-tests/_layers/`, written with a generation
+  match), so a unit is in at most one of them; units outside a test's range are served by the default and never
+  counted. `ab plan --per-day` sizes a layered test by its share. Tests in one layer are not overlaps under
+  `policies.ab_test.overlap`.
+- What comes next (FR-121): `ab status` ends with the next step and its command (keep running for about N more units
+  or until max_days, decide, conclude, deploy the winner, fix a blocked test); each analysis is kept in brief on the
+  test's record (`results`, the newest 200), and a treatment arm on Agent Platform records its machine.
+- The feed (FR-122): an event's copy on the feed leaves out who acted (`by`) unless `ab_test.publish.include_by`; the
+  walkthrough shows filtering exposure lines in the subscriber's code (a log sink adds no attributes) and joining
+  exposures to the team's records through the exposure table in BigQuery rather than the feed's `unit_ref`.
+- A registration lost under parallel training runs (FR-124, a bug): two runs registering a first version at once
+  each made a model with the name, and lookups took whichever the API listed first. A first version is now registered
+  under a fixed model ID (the display name), so the second run becomes a version of the first one's model (container
+  and BigQuery ML steps alike); every lookup takes the oldest model with the name. The launcher's tick records
+  `run.unregistered` for an approved training run that ended succeeded without a `model.registered` event
+  (`monitoring.alerts.events` may email it); the register step says `model.registration_skipped` for a replay. The
+  launcher now reads the project's logs in every environment (the starter's and Enterprise's grants).
+
 ## [1.4.2] - 2026-11-09
 
 Phase 9: choosing the online feature store (FR-104); endpoints in Terraform and private endpoints (FR-92); model

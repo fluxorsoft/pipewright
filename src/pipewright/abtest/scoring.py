@@ -49,7 +49,8 @@ def param(gcp, manifest: dict, contract, gate=None) -> tuple[str | None, dict]:
         return None, {"test": test["name"], "problem": f"treatment v{version}: {check['problem']}",
                       "scored": "control only"}
     spec = {"name": test["name"], "unit": test["unit"], "treatment_bp": bp,
-            "treatment": {"version": version, "approved_files": check["approved_files"]}}
+            "treatment": {"version": version, "approved_files": check["approved_files"]},
+            **({"layer": test["layer"]} if test.get("layer") else {})}       # FR-123: only the units in its range
     record = {"test": test["name"], "treatment": version, "treatment_bp": bp}
     if check.get("problem"):
         record["problem"] = f"treatment v{version} (warn): {check['problem']}"

@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
+from pipewright.models.names import oldest
 
 GCS = "https://storage.googleapis.com/storage/v1"
 MAX_FILES = 500                      # a model folder with more files is recorded by count and digest only
@@ -605,7 +606,7 @@ def inference_check(gcp, manifest: dict, contract) -> tuple[str, str | None]:
     api = f"https://{contract.region}-aiplatform.googleapis.com/v1"
     found = gcp.get(f"{api}/projects/{contract.project}/locations/{contract.region}/models",
                     filter=f'display_name="{name}"')
-    models = (found.body or {}).get("models", []) if found.ok else []
+    models = oldest((found.body or {}).get("models", []) if found.ok else [])
     if not models:
         return mode, None                                  # nothing registered yet: the run fails on its own
     default = gcp.get(f"{api}/{models[0]['name'].split('@')[0]}@default")
@@ -737,7 +738,7 @@ def inference_gate(gcp, manifest: dict, contract, version: str | None = None) ->
     api = f"https://{contract.region}-aiplatform.googleapis.com/v1"
     found = gcp.get(f"{api}/projects/{contract.project}/locations/{contract.region}/models",
                     filter=f'display_name="{name}"')
-    models = (found.body or {}).get("models", []) if found.ok else []
+    models = oldest((found.body or {}).get("models", []) if found.ok else [])
     if not models:
         return out
     r = gcp.get(f"{api}/{models[0]['name'].split('@')[0]}@{version or 'default'}")

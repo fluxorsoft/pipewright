@@ -372,15 +372,20 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
                              "name none): it cannot be scored")
         treatment_version = str(tv["versionId"])
         tmodel = f"{project}.{ml_config['platform']['bigquery_dataset']}.{tlabel}"
-        arm = ab_sql_arm(test["name"], rt.q(test["unit"]), int(test["treatment_bp"]))
+        arm = ab_sql_arm(test["name"], rt.q(test["unit"]), int(test["treatment_bp"]), test.get("layer"))
         parts = {}
-        for name, which in (("control", model), ("treatment", tmodel)):
+        arms = [("control", model, f"{arm} = 'control'"), ("treatment", tmodel, f"{arm} = 'treatment'")]
+        if test.get("layer"):                 # FR-123: units outside the test's range, scored by the champion
+            arms.append(("outside", model, f"{arm} IS NULL"))
+        for name, which, where in arms:
             parts[name] = rt.table_ref(project, ml_config, run_id, f"scored_{name}")
-            jobs.run(rt.predict_sql(ml_config, which, rows_table, parts[name], f"{arm} = '{name}'", jobs.labels,
+            jobs.run(rt.predict_sql(ml_config, which, rows_table, parts[name], where, jobs.labels,
                                     False, parts=rt.model_parts(jobs, which)), f"predictions ({name})")
+        outside = (f"UNION ALL SELECT *, CAST(NULL AS STRING) AS _pw_arm FROM `{parts['outside']}`"
+                   if "outside" in parts else "")
         jobs.run(rt.render("ab_union.sql", out_table=scored, labels=rt.label_pairs(jobs.labels),
-                           keep_days=rt.KEEP_DAYS, control=parts["control"], treatment=parts["treatment"]),
-                 "predictions per arm")
+                           keep_days=rt.KEEP_DAYS, control=parts["control"], treatment=parts["treatment"],
+                           outside=outside), "predictions per arm")
     elif not ml_config["bqml"].get("forecast"):
         jobs.run(rt.predict_sql(ml_config, model, rows_table, scored, "TRUE", jobs.labels, False,
                                 parts=rt.model_parts(jobs, model)), "predictions")

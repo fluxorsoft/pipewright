@@ -211,6 +211,7 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
     age = (now - started).total_seconds() / 86400
     d = section["duration"]
     out["age_days"] = round(age, 2)
+    out["duration"] = {"min_days": d["min_days"], "max_days": d["max_days"]}     # FR-121: what comes next
     reasons = []
     if any(g.get("breached") for g in gres):
         reasons.append("a business guardrail is breached: " + ", ".join(g["name"] for g in gres if g.get("breached")))
