@@ -407,14 +407,21 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     same_files = _pinned_files(current) == ((pinned or {}).get("files") or None)
     # 1.4.3 (FR-98): capture or health turned on or off changes the predictor, not the version
     pred_now = ((current or {}).get("spec") or {}).get("predictor") or {}
-    same_obs = pred_now.get("logger") == body["spec"]["predictor"].get("logger") and \
-        [e.get("name") for c in pred_now.get("containers") or [] for e in c.get("env") or []
-         if e.get("name") == "TS_METRICS_MODE"] == \
-        [e.get("name") for c in body["spec"]["predictor"]["containers"] for e in c.get("env") or []
-         if e.get("name") == "TS_METRICS_MODE"]
+    def shape(pred):
+        return (pred.get("logger"),
+                [(e.get("name")) for c in pred.get("containers") or [] for e in c.get("env") or []
+                 if e.get("name") == "TS_METRICS_MODE"],
+                [(p.get("name"), p.get("containerPort")) for c in pred.get("containers") or []
+                 for p in c.get("ports") or []])
+
+    same_obs = shape(pred_now) == shape(body["spec"]["predictor"])
+    # Found in the 1.4.3 battle test: an InferenceService that never reconciled still carried the version's label, so
+    # it was "already live" and never repaired. Live means Ready too.
+    ready = any(c.get("type") == "Ready" and c.get("status") == "True"
+                for c in ((current or {}).get("status") or {}).get("conditions") or [])
     if observed(uc):
         apply_pod_monitoring(k, log)
-    if running == _label(vid) and current_pin == (pinned or {}).get("folder") and same_files and same_obs:
+    if running == _label(vid) and current_pin == (pinned or {}).get("folder") and same_files and same_obs and ready:
         log(f"v{vid} of {uc.model['name']} is already live on {k.name}")
         log(k.how_to_call() or "")
         return {"version": vid, "status": "live"}
