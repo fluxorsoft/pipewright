@@ -226,6 +226,30 @@ def ab_gateway(contract, manifest: dict, online: dict, gcp, test: dict) -> tuple
     return cfg, env
 
 
+def refresh_if_stale(contract, manifest: dict, gcp, refresh=None) -> str | None:
+    """A use case's lookup service (or A/B router) running an image other than the environment's (GA QA: after a
+    launcher upgrade the gateways it had made kept the old image, so fixes never reached them) is refreshed.
+    Returns the image it ran when refreshed, None when it is current or there is no service."""
+    online = online_of(contract)
+    if not has_service(online):
+        if not running_ab(contract, manifest, gcp):
+            return None
+        online = router_online(contract)
+    store = ((manifest.get("features") or {}).get("online_store")) or {}
+    want = (store.get("lookup") or {}).get("image") or (manifest.get("launcher") or {}).get("image")
+    if not want:
+        return None
+    got = gcp.get(f"{RUN}/projects/{manifest['project']}/locations/{manifest['region']}/services/"
+                  f"{online['service']}")
+    if not got.ok:
+        return None
+    image = (((got.body or {}).get("template") or {}).get("containers") or [{}])[0].get("image")
+    if not image or image == want:
+        return None
+    (refresh or (lambda c: ensure_lookup_service(c, manifest, gcp, wait=240)))(contract)
+    return image
+
+
 def ensure_lookup_service(contract, manifest: dict, gcp, wait: float = 600, sleep=time.sleep) -> dict:
     online = online_of(contract)
     test = running_ab(contract, manifest, gcp)

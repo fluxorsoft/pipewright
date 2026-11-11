@@ -417,13 +417,25 @@ def create_app(registry: Registry | None = None) -> Flask:
         except Exception as e:  # noqa: BLE001
             log.exception("A/B tests not checked")
             ab = {"status": "error", "reason": str(e)[:300]}
+        try:                                  # GA QA: gateways made before a launcher upgrade run its image
+            from pipewright.online import launcher as gw_launcher
+
+            refreshed = []
+            for c in reg().live():
+                was = gw_launcher.refresh_if_stale(c, m, Gcp())
+                if was:
+                    log.info("lookup service of %s refreshed from %s", c.usecase, was)
+                    refreshed.append({"usecase": c.usecase, "was": was})
+        except Exception as e:  # noqa: BLE001 - never stops the tick
+            log.exception("lookup services not refreshed")
+            refreshed = [{"error": str(e)[:300]}]
         try:                                  # 1.4.3 (FR-98): capture coverage
             covered = capture_coverage()
         except Exception as e:  # noqa: BLE001
             log.exception("capture coverage not checked")
             covered = {"status": "error", "reason": str(e)[:300]}
         return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched, online=online,
-                       ab=ab, coverage=covered), 200
+                       ab=ab, coverage=covered, gateways=refreshed), 200
 
     def capture_coverage() -> list:
         """serving.capture_gap and serving.capture_silent for live use cases with capture on (FR-98)."""
