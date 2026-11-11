@@ -556,6 +556,14 @@
         }
       }
     },
+    "health_threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warning": { "type": "number", "exclusiveMinimum": 0 },
+        "critical": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
     "synthetic_engine": {
       "type": "object",
       "properties": {
@@ -958,6 +966,40 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "online": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "1.4.3 (FR-98): the team's monitor steps on live traffic (spec.pipelines.monitoring), from what capture records",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string", "description": "cron, default 0 6 * * * (daily)" },
+            "window_hours": { "type": "number", "exclusiveMinimum": 0 },
+            "min_samples": { "type": "integer", "minimum": 1, "description": "below this the window is insufficient_data, never no drift (default 500)" },
+            "attribution": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "1.4.3 (FR-98 stage 4): which features drive the answers, against training (permutation Shapley values)",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "sample_rows": { "type": "integer", "minimum": 1, "maximum": 5000 },
+                "threshold": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+              }
+            }
+          }
+        },
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "1.4.3 (FR-98): alert policies on each deployed version's errors, latency and replicas, whose incidents become serving.degraded and serving.recovered events",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "error_rate": { "$ref": "#/$defs/health_threshold" },
+            "latency_p95_ms": { "$ref": "#/$defs/health_threshold" },
+            "min_ready_replicas": { "type": "integer", "minimum": 0 },
+            "scaling_minutes": { "type": "integer", "minimum": 1 },
+            "propose_rollback_hours": { "type": "integer", "minimum": 0 }
+          }
+        },
         "alerts": {
           "type": "object",
           "additionalProperties": false,
@@ -1056,6 +1098,17 @@
           "properties": {
             "type": { "type": "string", "minLength": 1 },
             "count": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "capture": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "1.4.3 (FR-98): record a sample of what the deployed version receives and answers, in the tenant's dataset (Agent Platform request logging, or KServe's logger through a log sink)",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "sample_rate": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "max_per_day": { "type": "integer", "minimum": 1 },
+            "retention_days": { "type": "integer", "minimum": 1 }
           }
         },
         "scale_to_zero": { "type": "boolean", "description": "with replicas.min 0: an idle endpoint runs no replica, and the first request after a quiet spell waits for one to start (Pipewright 1.2.0; Agent Platform preview)" },

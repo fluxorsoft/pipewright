@@ -451,8 +451,28 @@
             "null"
           ],
           "additionalProperties": false,
-          "description": "Pipewright 1.4.2: rules for shared serving pools in this environment",
+          "description": "Pipewright 1.4.2: rules for shared serving pools in this environment; 1.4.3 (FR-98): capture, health and scale to zero",
           "properties": {
+            "capture": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "description": "1.4.3 (FR-98): whether use cases may record what their endpoints receive and answer, and the limits",
+              "properties": {
+                "allowed": { "type": ["boolean", "null"] },
+                "max_sample_rate": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1 },
+                "retention_days": { "type": ["integer", "null"], "minimum": 1 }
+              }
+            },
+            "health": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "description": "1.4.3 (FR-98): required: every use case that serves must have monitoring.health on",
+              "properties": { "required": { "type": ["boolean", "null"] } }
+            },
+            "scale_to_zero": {
+              "enum": ["allowed", "refused", null],
+              "description": "1.4.3 (FR-98): refused: no use case may set model.serving.scale_to_zero (an Agent Platform Preview that drops calls while it scales up)"
+            },
             "pools": {
               "description": "Rules for shared deployment resource pools: in production at least two machines (min_replicas) and no Preview serving images unless allow_preview",
               "type": [

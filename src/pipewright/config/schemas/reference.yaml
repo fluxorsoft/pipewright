@@ -190,6 +190,27 @@ inference.decision_threshold: The score above which a prediction is positive. Le
 monitoring: Checks run on each inference, for drift, prediction drift and performance against observed outcomes.
 monitoring.alerts.events: The events that send an email. run.failed (Pipewright 1.2.0) emails a run that ended failed or cancelled, found by the launcher within the hour.
 monitoring.alerts.severity: The severity of the alert policies.
+monitoring.online: "1.4.3 (FR-98): your monitor steps on live traffic. A monitoring pipeline (spec.pipelines.monitoring) reads the window capture recorded and runs the same drift and performance checks as batch scoring. Needs model.serving.capture."
+monitoring.online.enabled: Whether online monitoring runs. Default false.
+monitoring.online.schedule: "When it runs, a cron expression. Default 0 6 * * * (daily); hourly for busy models."
+monitoring.online.window_hours: How much live traffic each run reads. Default 24.
+monitoring.online.min_samples: "Below this many usable rows the window is recorded as insufficient_data and the drift check is skipped: an empty window is never no drift. Default 500."
+monitoring.online.attribution: "1.4.3 (FR-98): which features drive the model's answers on the window, against training (permutation Shapley values). A move past the threshold sends monitoring.attribution_drift; in 1.4.3 it does not open a retrain case on its own."
+monitoring.online.attribution.enabled: Whether attribution is measured. Default false.
+monitoring.online.attribution.sample_rows: "Rows of the window explained, 1 to 5,000. Default 500 (about 15 seconds on 2 vCPU)."
+monitoring.online.attribution.threshold: "The total variation distance between the window's and training's attribution shares above which it is drift. Default 0.10."
+monitoring.health: "1.4.3 (FR-98): alert policies on each deployed version's errors, latency and replicas. Their incidents arrive on Pub/Sub as serving.degraded and serving.recovered."
+monitoring.health.enabled: Whether health policies are kept for the deployed versions. Default false.
+monitoring.health.error_rate: "The share of 5xx answers that is a warning and that is critical. Default 0.01 and 0.05."
+monitoring.health.latency_p95_ms: "The 95th percentile latency (ms) that is a warning and that is critical. Default 500 and 1000. On KServe, from the handler's latency histogram; without one, the mean, labelled so."
+monitoring.health.min_ready_replicas: Fewer ready replicas than this is degraded. Default 1.
+monitoring.health.scaling_minutes: "Replicas wanted but not ready for this long is degraded (a stuck scale-up; a normal cold start ends sooner). Default 5."
+monitoring.health.propose_rollback_hours: "Above 0: a critical breach within this many hours of a promotion opens a rollback proposal for the release's approvers. Never automatic. Default 0 (off)."
+model.serving.capture: "1.4.3 (FR-98): record a sample of what the deployed version receives and answers, in the tenant's dataset (Agent Platform request-response logging; on KServe, the logger through a receiver and a log sink)."
+model.serving.capture.enabled: Whether capture is on. Default false.
+model.serving.capture.sample_rate: "The share of requests recorded. Default 0.05."
+model.serving.capture.max_per_day: "At most this many records a day; above it records are dropped and counted. Default 100,000."
+model.serving.capture.retention_days: "Days the records are kept (the table's partition expiry). Default 30."
 monitoring.drift: Whether the scored data has moved away from the training data, feature by feature.
 monitoring.drift.enabled: Whether drift is checked.
 monitoring.drift.method: How drift is measured (population stability index).
