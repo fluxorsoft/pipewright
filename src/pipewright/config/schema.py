@@ -42,7 +42,8 @@ def _message(error) -> str:
         and parts[1] == "environments"
     ):
         msg += (" (only parameters, steps, triggers, training.hyperparameters, training.tuning, model.serving, "
-                "approvals, retraining.enabled, monitoring.alerts, monitoring.online, monitoring.health, outputs.bigquery.retention_days and ab_test's "
+                "approvals, retraining.enabled, monitoring.alerts, monitoring.online, monitoring.health, "
+                "outputs.bigquery.retention_days and ab_test's "
                 "enabled, arms, allocation, layer, duration, publish and decision may vary per environment)")
     if error.validator == "additionalProperties" and "(True was unexpected)" in msg:
         msg += " (YAML reads an unquoted key on, yes or y as true: quote it, or use retraining.when)"
