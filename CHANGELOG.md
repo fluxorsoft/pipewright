@@ -28,6 +28,10 @@ before. The guides are [docs/SERVING.md](docs/SERVING.md) (serving observability
   ML too. `validate` and `doctor` show what still writes the registry directly.
 - Repeatable synthetic runs: `synthetic.engine.seed` and `max_epochs` (and per candidate); the evaluation record says
   whether a candidate repeats and why; a free local port for the engine.
+- Fixed (FR-128): the churn example's parallel tuning failed on Kubeflow Pipelines 2.17.2 ("expect STRUCT, got
+  string"). Trials now travel as JSON text. A use case copied from the example before 1.4.3 makes the same change in
+  its `components/tune.py` (`plan_trials` returns `json.dumps` of each trial; `tune_trial` takes a string and parses
+  it).
 
 A/B testing of models (FR-57), off until `ab_test.enabled`: a use case that sets none of it scores and serves exactly
 as in 1.4.2. The guide is [docs/AB_TESTING.md](docs/AB_TESTING.md).
