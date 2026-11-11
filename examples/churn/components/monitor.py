@@ -21,8 +21,10 @@ def check_batch(
     ml_config: dict,
     report: dsl.Output[dsl.Artifact],
     metrics: dsl.Output[dsl.Metrics],
+    online: bool = False,
 ) -> NamedTuple("Monitoring", [("alert", str), ("triggers", list), ("summary", str)]):
-    """alert is "yes" or "no"; triggers lists what fired (drift, performance)."""
+    """alert is "yes" or "no"; triggers lists what fired (drift, performance). online (Pipewright 1.4.3): scored is
+    the live window, and performance joins monitoring.online.outcomes by prediction ID."""
     import json
     import logging
     import os
@@ -60,7 +62,15 @@ def check_batch(
 
         labels, key = perf["labels"], perf["labels"]["key"]
         when = labels.get("time_column")
-        if when:
+        from pipewright_runtime import online_outcomes_sql
+
+        if online:
+            # Pipewright 1.4.3 (FR-98 stage 3): live quality, outcomes joined by the prediction ID to the online
+            # predictions the monitoring pipeline recorded
+            sql = online_outcomes_sql(ml_config, project)
+            if sql is None:
+                result["notes"].append("online: no monitoring.online.outcomes, so live performance is not measured")
+        elif when:
             # Pipewright 1.2.0 (FR-78): each outcome meets the score made for its cut-off, never a later score that
             # already knows the outcome. Outcomes of cut-offs this version has not scored are not counted.
             sql = f"""
@@ -87,9 +97,13 @@ def check_batch(
             QUALIFY ROW_NUMBER() OVER (PARTITION BY {key} ORDER BY pr.scored_at DESC) = 1"""
         from pipewright_runtime import bigquery_client
 
-        job = bigquery_client(project, ml_config).query(sql, job_config=bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("version", "STRING", model_version)]))
-        labelled = job.to_dataframe()
+        if sql is None:
+            labelled = None
+        else:
+            job = bigquery_client(project, ml_config).query(sql, job_config=bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("version", "STRING", model_version)]))
+            labelled = job.to_dataframe()
+    if perf["enabled"] and labelled is not None:
         result["labelled_rows"] = len(labelled)
         if "cutoff" in labelled:
             # Pipewright 1.4.2: which cut-offs the value measures. A run scoring a month whose outcomes are not known

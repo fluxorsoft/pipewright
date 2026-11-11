@@ -44,7 +44,7 @@ def churn_monitoring_pipeline(
     with dsl.If(window.outputs["Output"] == "yes", name="enough-rows"):
         check = check_batch(project=project, bq_dataset=bq_dataset, scored=window.outputs["scored"],
                             model=champion.outputs["model"], model_version=champion.outputs["version"],
-                            ml_config=ml_config).set_display_name("check-drift-and-performance")
+                            ml_config=ml_config, online=True).set_display_name("check-drift-and-performance")
         check.set_caching_options(False)
         attribution = check_attribution(run_id=run_id, scored=window.outputs["scored"],
                                         model=champion.outputs["model"], model_version=champion.outputs["version"],

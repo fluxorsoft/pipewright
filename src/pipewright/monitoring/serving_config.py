@@ -14,6 +14,10 @@ case sets them, so a use case without them resolves and releases exactly as befo
         schedule: "0 6 * * *"
         window_hours: 24
         min_samples: 500              # below: insufficient_data, never "no drift"
+        outcomes:                     # live quality (stage 3): outcomes keyed by the prediction ID
+          table: churn_outcomes_online    # a table in the tenant's dataset: <key>, <label>
+          key: prediction_id              # the ID the lookup gateway returned (or the caller sent as _pw_prediction_id)
+          label: churned
         attribution:                  # which features drive the answers, against training (stage 4)
           enabled: false
           sample_rows: 500            # up to 5,000
@@ -39,7 +43,7 @@ from pipewright.config.merge import deep_merge
 CAPTURE_DEFAULTS = {"enabled": False, "sample_rate": 0.05, "max_per_day": 100000, "retention_days": 30}
 ATTRIBUTION_DEFAULTS = {"enabled": False, "sample_rows": 500, "threshold": 0.10}
 ONLINE_DEFAULTS = {"enabled": False, "schedule": "0 6 * * *", "window_hours": 24, "min_samples": 500,
-                   "attribution": ATTRIBUTION_DEFAULTS}
+                   "attribution": ATTRIBUTION_DEFAULTS, "outcomes": None}
 HEALTH_DEFAULTS = {"enabled": False, "error_rate": {"warning": 0.01, "critical": 0.05},
                    "latency_p95_ms": {"warning": 500, "critical": 1000}, "min_ready_replicas": 1,
                    "scaling_minutes": 5, "propose_rollback_hours": 0}
@@ -110,6 +114,12 @@ def _online(online: dict, serving: dict, problems: list[str]) -> None:
         problems.append(f"{where}.min_samples must be a whole number, 1 or above")
     if not isinstance(online["schedule"], str) or len(online["schedule"].split()) != 5:
         problems.append(f"{where}.schedule must be a cron expression (five fields)")
+    out = online.get("outcomes")
+    if out is not None:
+        if not isinstance(out, dict) or not out.get("table") or not out.get("label"):
+            problems.append(f"{where}.outcomes: give table and label (and key, default prediction_id)")
+        else:
+            out.setdefault("key", "prediction_id")
     att = online["attribution"]
     if att["enabled"]:
         if not isinstance(att["sample_rows"], int) or not 1 <= att["sample_rows"] <= MAX_ATTRIBUTION_ROWS:

@@ -37,6 +37,10 @@ def read_online_window(
     if (ml_config.get("platform") or {}).get("orchestrator") == "kfp":       # KServe on private GKE
         isvc = ml_config["usecase"].lower().replace("_", "-").replace(".", "-")[:45].rstrip("-")
     rows, summary = online_window(ml_config, project, source_uri, features, model_version, isvc=isvc)
+    # Live quality (stage 3): the predictions with an ID, kept for the outcomes that arrive later
+    from pipewright_runtime import record_online_predictions
+
+    summary["recorded_predictions"] = record_online_predictions(ml_config, project, rows, model_version, run_id)
     df = pd.DataFrame(rows, columns=[*features, "prediction"]).rename(columns={"prediction": "churn_probability"})
     if summary["insufficient_data"]:
         df = df.iloc[0:0]

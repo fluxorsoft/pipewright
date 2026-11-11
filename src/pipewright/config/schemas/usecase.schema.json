@@ -976,6 +976,17 @@
             "schedule": { "type": "string", "description": "cron, default 0 6 * * * (daily)" },
             "window_hours": { "type": "number", "exclusiveMinimum": 0 },
             "min_samples": { "type": "integer", "minimum": 1, "description": "below this the window is insufficient_data, never no drift (default 500)" },
+            "outcomes": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["table", "label"],
+              "description": "1.4.3 (FR-98 stage 3): live quality. Outcomes keyed by the prediction ID (the lookup gateway returns it; callers may send _pw_prediction_id), joined to the online predictions the monitoring pipeline records",
+              "properties": {
+                "table": { "type": "string", "minLength": 1 },
+                "key": { "type": "string", "minLength": 1 },
+                "label": { "type": "string", "minLength": 1 }
+              }
+            },
             "attribution": {
               "type": "object",
               "additionalProperties": false,

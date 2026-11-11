@@ -1243,6 +1243,57 @@ def online_window(ml_config: dict, project: str, source_uri: str, features: list
     return rows, summary
 
 
+def online_predictions_table(ml_config: dict) -> str:
+    """The table where each monitoring run records the online predictions that carry a prediction ID (FR-98)."""
+    return re.sub(r"[^a-z0-9_]", "_", ml_config["usecase"].lower()) + "_online_predictions"
+
+
+def record_online_predictions(ml_config: dict, project: str, rows: list[dict], model_version: str, run_id: str,
+                              client=None) -> int:
+    """Appends the window's predictions that carry a prediction ID to <usecase>_online_predictions in the tenant's
+    dataset (prediction_id, model_version, prediction, recorded_at, run_id), so outcomes that arrive later meet the
+    prediction they judge (FR-98 stage 3). Partitions expire after model.serving.capture.retention_days (30 by
+    default): it holds no features and no entity ID, only the ID the gateway made. Returns the rows written."""
+    from google.cloud import bigquery
+
+    kept = [r for r in rows if r.get("_pw_prediction_id")]
+    if not kept:
+        return 0
+    platform = ml_config.get("platform") or {}
+    table = f"{project}.{platform['bigquery_dataset']}.{online_predictions_table(ml_config)}"
+    days = int(((ml_config.get("serving_capture") or {}).get("retention_days")) or 30)
+    client = client or bigquery_client(project, ml_config)
+    now = datetime.now(timezone.utc).isoformat()
+    key = platform.get("bigquery_kms_key")
+    config = bigquery.LoadJobConfig(
+        schema=[bigquery.SchemaField("prediction_id", "STRING"), bigquery.SchemaField("model_version", "STRING"),
+                bigquery.SchemaField("prediction", "FLOAT"), bigquery.SchemaField("recorded_at", "TIMESTAMP"),
+                bigquery.SchemaField("run_id", "STRING")],
+        write_disposition="WRITE_APPEND",
+        time_partitioning=bigquery.TimePartitioning(field="recorded_at", expiration_ms=days * 86400 * 1000),
+        **({"destination_encryption_configuration": bigquery.EncryptionConfiguration(kms_key_name=key)}
+           if key else {}))
+    data = [{"prediction_id": r["_pw_prediction_id"], "model_version": str(model_version),
+             "prediction": float(r["prediction"]), "recorded_at": now, "run_id": run_id} for r in kept]
+    client.load_table_from_json(data, table, job_config=config).result()
+    return len(data)
+
+
+def online_outcomes_sql(ml_config: dict, project: str) -> str | None:
+    """The query joining monitoring.online.outcomes to the recorded online predictions of one model version
+    (@version), one row per prediction ID: prob, outcome. None without monitoring.online.outcomes."""
+    out = ((ml_config.get("monitoring") or {}).get("online") or {}).get("outcomes")
+    if not out:
+        return None
+    dataset = (ml_config.get("platform") or {})["bigquery_dataset"]
+    return f"""
+        SELECT pr.prediction AS prob, CAST(lb.{out['label']} AS INT64) AS outcome
+        FROM `{project}.{dataset}.{online_predictions_table(ml_config)}` AS pr
+        JOIN `{project}.{dataset}.{out['table']}` AS lb ON lb.{out.get('key', 'prediction_id')} = pr.prediction_id
+        WHERE pr.model_version = @version
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY pr.prediction_id ORDER BY pr.recorded_at DESC) = 1"""
+
+
 # ------------------------------------------------------------------ attribution (1.4.3, FR-98 stage 4) --
 
 def permutation_shapley(predict, rows, background, permutations: int = 2, seed: int = 42):

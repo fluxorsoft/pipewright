@@ -198,6 +198,10 @@ monitoring.online.enabled: Whether online monitoring runs. Default false.
 monitoring.online.schedule: "When it runs, a cron expression. Default 0 6 * * * (daily); hourly for busy models."
 monitoring.online.window_hours: How much live traffic each run reads. Default 24.
 monitoring.online.min_samples: "Below this many usable rows the window is recorded as insufficient_data and the drift check is skipped: an empty window is never no drift. Default 500."
+monitoring.online.outcomes: "1.4.3 (FR-98): live quality. The team's outcomes table, keyed by the prediction ID the lookup gateway returned (or the caller sent as _pw_prediction_id); the monitoring pipeline joins it to the online predictions it records (<usecase>_online_predictions) and checks monitoring.performance's metric and min on live traffic. Default: none."
+monitoring.online.outcomes.table: The outcomes table in the tenant's dataset.
+monitoring.online.outcomes.key: "The column holding the prediction ID. Default prediction_id."
+monitoring.online.outcomes.label: The column holding the observed outcome.
 monitoring.online.attribution: "1.4.3 (FR-98): which features drive the model's answers on the window, against training (permutation Shapley values). A move past the threshold sends monitoring.attribution_drift; in 1.4.3 it does not open a retrain case on its own."
 monitoring.online.attribution.enabled: Whether attribution is measured. Default false.
 monitoring.online.attribution.sample_rows: "Rows of the window explained, 1 to 5,000. Default 500 (about 15 seconds on 2 vCPU)."
