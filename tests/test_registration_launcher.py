@@ -18,10 +18,12 @@ RECORD_TEXT = json.dumps(RECORD, indent=2)
 
 
 def contract(set_default="auto", gates=True):
-    ml = {"registry": {"set_default": set_default}, "platform": {"kms_key": None},
+    ml = {"registry": {"set_default": set_default}, "platform": {"kms_key": None}, "model_name": "churn",
           "evaluation": {"primary_metric": "auc", "gates": [{"metric": "auc", "min": 0.7}] if gates else []}}
     return SimpleNamespace(usecase="churn", tenant="churn", project="acme-ml-dev", region="europe-west2",
                            environment="dev", runner_service_account=RUNNER, pipeline_root=ROOT, release_id="r1",
+                           component_image="europe-west2-docker.pkg.dev/acme-ml-dev/pw-images/churn-components@sha256:"
+                                           + "a" * 64,
                            static_parameters={"ml_config": ml})
 
 
@@ -115,6 +117,11 @@ def test_a_repeated_request_answers_the_same_without_uploading(store):
     ({"body": {"evaluation": {"uri": f"{FOLDER}/evaluation.json", "sha256": "0" * 64}}}, "changed after the step"),
     ({"body": {"evaluation": None}}, "names no evaluation record"),
     ({"record": {"metrics": {"auc": 0.6}}}, "does not pass churn's gates"),
+    # GA QA: another model's name, an image from anywhere, a record whose own decision is reject
+    ({"body": {"display_name": "fraud-classifier"}}, "registers only its own model 'churn'"),
+    ({"body": {"serving_image": "docker.io/someone/server:latest"}}, "neither one of Google's prebuilt"),
+    ({"body": {"serving_image": "europe-west2-docker.pkg.dev/other-project/pw-images/x:1"}}, "neither one of"),
+    ({"record": {"metrics": {"auc": 0.81}, "decision": "reject"}}, "own decision is reject"),
 ])
 def test_refusals_are_answered_and_upload_nothing(store, case, expect):
     if "record" in case:
@@ -227,3 +234,10 @@ def test_the_answer_names_its_request_the_same_way_the_step_does():
     assert request_digest({**sent, "artifact_uri": "gs://b/y"}) != step
     src = inspect.getsource(rt.register_version)
     assert 'answer.get("request") not in (None, digest)' in src            # older launchers: no digest, accepted
+
+
+def test_an_image_in_the_environments_repository_is_accepted(store):
+    gcp = FakeGcp(models=[{"name": "projects/p/locations/r/models/churn", "createTime": "2026-01-01T00:00:00Z"}])
+    image = "europe-west2-docker.pkg.dev/acme-ml-dev/pw-images/churn-serving@sha256:" + "b" * 64
+    out = reg.Registrations(gcp, "acme-artifacts", dict, job()).register(contract(), body(serving_image=image), RUNNER)
+    assert out["status"] == "registered" and gcp.uploads[0]["model"]["containerSpec"]["imageUri"] == image

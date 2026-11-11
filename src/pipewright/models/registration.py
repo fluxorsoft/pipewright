@@ -109,6 +109,22 @@ class Registrations:
             raise RegistrationRefused(f"run {run_id} is {job.get('state')}: only a running run may register")
         return job
 
+    def check_model(self, contract, body: dict, ml: dict) -> None:
+        """The use case's own model, served by an image the environment trusts (GA QA: the launcher registered a model
+        under a name the runner chose, so a runner could add versions to another use case's model). The image: one of
+        Google's prebuilt serving images, or one in the environment's images repository (where the release's
+        component image is)."""
+        want = ml.get("model_name")
+        name = body.get("display_name") or ""
+        if want and name != want:
+            raise RegistrationRefused(f"{contract.usecase} registers only its own model {want!r}, not {name!r}")
+        image = body.get("serving_image") or ""
+        repository = (getattr(contract, "component_image", "") or "").split("@")[0].rsplit("/", 1)[0]
+        google = re.match(r"^[a-z0-9-]*-?docker\.pkg\.dev/vertex-ai(-restricted)?/", image)
+        if not image or not (google or (repository and image.startswith(repository + "/"))):
+            raise RegistrationRefused(f"serving image {image or '(none)'} is neither one of Google's prebuilt serving "
+                                      f"images nor in the environment's images repository ({repository or 'unknown'})")
+
     def check_files(self, contract, artifact_uri: str, evaluation: dict | None, ml: dict) -> dict | None:
         root = contract.pipeline_root.rstrip("/") + "/"
         if not artifact_uri or not artifact_uri.rstrip("/").startswith(root.rstrip("/") + "/"):
@@ -136,6 +152,9 @@ class Registrations:
         if not gates.needs_record(evaluation):
             return
         problems = gates.check(record or {}, evaluation, champion_expected)
+        if (record or {}).get("decision") == "reject":
+            # The team's own evaluation said no (GA QA): its pipeline never registers that, so neither does the launcher
+            problems.insert(0, "the evaluation record's own decision is reject")
         if problems:
             raise RegistrationRefused(f"the evaluation record does not pass {contract.usecase}'s gates (release "
                                       f"{contract.release_id}): {'; '.join(problems[:3])}")
@@ -242,6 +261,7 @@ class Registrations:
                 self.check_gates(contract, record, ml, champion_expected=bool(
                     self._registry_model(contract, ml["bqml"]["registry_id"])))
             else:
+                self.check_model(contract, body, ml)
                 record = self.check_files(contract, body.get("artifact_uri") or "", body.get("evaluation"), ml)
                 existing = self._models(contract, body.get("display_name") or "")
                 self.check_gates(contract, record, ml, champion_expected=bool(existing))

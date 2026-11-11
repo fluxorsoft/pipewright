@@ -1398,9 +1398,12 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
 
     alias = re.sub(r"[^a-z0-9-]", "-", f"run-{run_id}".lower())[:127]
     name = f"runs/registration/{platform.get('tenant')}/{alias}.json"
-    blob = storage.Client(project=platform.get("project")).bucket(platform["artifacts_bucket"]).blob(name)
+    bucket = storage.Client(project=platform.get("project")).bucket(platform["artifacts_bucket"])
     deadline = time.time() + 60 * wait_minutes
     while time.time() < deadline:
+        # A new handle each time (GA QA): a blob that was downloaded keeps that generation and reads it forever, so
+        # after another request's answer the step never saw its own.
+        blob = bucket.blob(name)
         if blob.exists():
             answer = json.loads(blob.download_as_text())
             if answer.get("request") not in (None, digest):     # an answer to another request of this run
