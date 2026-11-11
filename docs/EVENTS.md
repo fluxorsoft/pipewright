@@ -62,7 +62,7 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 | Event | When | Sent by | For | Since | |
 |---|---|---|---|---|---|
 | `model.registered` | A new model version is in the registry (and whether it is the champion). With policies.registration: launcher (1.4.3) the launcher sends it, with registered_by: launcher. | pipeline step | ml, governance | 1.0.0 | email |
-| `model.registration_refused` | The launcher refused a run's registration (wrong run, files outside the tenant's root, a changed evaluation record, failed gates), with the reason. | launcher | governance, ml, sre | 1.4.3 |  |
+| `model.registration_refused` | The launcher refused a run's registration (wrong run, files outside the tenant's root, a changed evaluation record, failed gates), with the reason. | launcher | governance, ml, sre | 1.4.3 | email |
 | `model.registration_skipped` | The register step skipped on purpose (an exact replay ties itself). | pipeline step | ml | 1.4.3 |  |
 | `model.approved` | A person approved a model version. | CLI | governance, ml | 1.0.0 | decision |
 | `model.promoted` | A model version was copied to another environment's registry. | CLI | governance, ml, sre | 1.1.0 | decision |
