@@ -100,8 +100,8 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 |---|---|---|---|---|---|
 | `monitoring.recorded` | A scoring run's drift and performance were recorded. | pipeline step | ml | 1.0.0 |  |
 | `monitoring.alert` | Drift or a performance drop crossed its threshold. | pipeline step | ml, product, sre | 1.0.0 | email |
-| `monitoring.insufficient_data` | An online window had fewer usable rows than min_samples: the drift check was skipped (never recorded as no drift). | pipeline step | ml | 1.4.3 |  |
-| `monitoring.attribution_drift` | The features driving the answers moved away from training past the threshold (the top movers in the data). | pipeline step | ml, governance | 1.4.3 |  |
+| `monitoring.insufficient_data` | An online window had fewer usable rows than min_samples: the drift check was skipped (never recorded as no drift). | pipeline step | ml | 1.4.3 | email |
+| `monitoring.attribution_drift` | The features driving the answers moved away from training past the threshold (the top movers in the data). | pipeline step | ml, governance | 1.4.3 | email |
 
 ### retrain: Retrain decision cases
 
@@ -167,17 +167,17 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 
 | Event | When | Sent by | For | Since | |
 |---|---|---|---|---|---|
-| `serving.degraded` | A deployed version's health policy opened an incident (errors, latency, replicas or a stuck scale-up), with the threshold in force. | launcher | sre, ml, product | 1.4.3 |  |
-| `serving.recovered` | That incident closed. | launcher | sre, ml, product | 1.4.3 |  |
-| `serving.capture_gap` | What capture recorded parted from what was served by more than the margin. | launcher | sre, ml | 1.4.3 |  |
-| `serving.capture_silent` | Traffic was served but capture recorded nothing. | launcher | sre, ml | 1.4.3 |  |
+| `serving.degraded` | A deployed version's health policy opened an incident (errors, latency, replicas or a stuck scale-up), with the threshold in force. | launcher | sre, ml, product | 1.4.3 | email |
+| `serving.recovered` | That incident closed. | launcher | sre, ml, product | 1.4.3 | email |
+| `serving.capture_gap` | What capture recorded parted from what was served by more than the margin. | launcher | sre, ml | 1.4.3 | email |
+| `serving.capture_silent` | Traffic was served but capture recorded nothing. | launcher | sre, ml | 1.4.3 | email |
 | `serving.pool.change` | A shared serving pool gained or lost a model, or changed size. | CLI | sre, finops | 1.4.2 |  |
 
 ### rollback: Rollback proposals from serving health
 
 | Event | When | Sent by | For | Since | |
 |---|---|---|---|---|---|
-| `rollback.proposed` | A critical incident soon after a deployment opened a rollback proposal for the release's approvers (never automatic). | launcher | governance, sre, product | 1.4.3 |  |
+| `rollback.proposed` | A critical incident soon after a deployment opened a rollback proposal for the release's approvers (never automatic). | launcher | governance, sre, product | 1.4.3 | email |
 | `rollback.decided` | A person approved or declined a rollback proposal. | CLI | governance, sre, product | 1.4.3 |  |
 
 ### synthetic: Synthetic data

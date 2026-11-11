@@ -67,6 +67,22 @@ EVENTS = {
                      ["type", "last_generation", "hours", "limit_hours"]),
     "online.billed": ('jsonPayload.pipewright_event.event_type="online.billed"', "online lookups billed as full "
                       "table reads (BI Engine did not serve them)", ["table", "billed_lookups", "bytes_billed"]),
+    # Pipewright 1.4.3 (FR-98): serving observability. The same events are on Pub/Sub; email is one consumer.
+    "serving.degraded": ('jsonPayload.pipewright_event.event_type="serving.degraded"', "serving degraded",
+                         ["signal", "severity", "threshold", "observed_value", "model_version", "target",
+                          "deployed_model", "isvc"]),
+    "serving.recovered": ('jsonPayload.pipewright_event.event_type="serving.recovered"', "serving recovered",
+                          ["signal", "severity", "model_version", "target", "deployed_model", "isvc"]),
+    "rollback.proposed": ('jsonPayload.pipewright_event.event_type="rollback.proposed"', "rollback proposed",
+                          ["case_id", "version", "previous_version", "signal", "observed_value"]),
+    "monitoring.attribution_drift": ('jsonPayload.pipewright_event.event_type="monitoring.attribution_drift"',
+                                     "attribution drift", ["model_version", "distance", "threshold", "rows"]),
+    "monitoring.insufficient_data": ('jsonPayload.pipewright_event.event_type="monitoring.insufficient_data"',
+                                     "online window too small to check", ["rows", "min_samples", "window_hours"]),
+    "serving.capture_gap": ('jsonPayload.pipewright_event.event_type="serving.capture_gap"', "capture gap",
+                            ["served", "recorded", "expected", "share"]),
+    "serving.capture_silent": ('jsonPayload.pipewright_event.event_type="serving.capture_silent"',
+                               "capture silent", ["served", "expected"]),
 }
 
 # Retrain decision events (pipewright.retraining): emailed to retraining.decisions.notify.
