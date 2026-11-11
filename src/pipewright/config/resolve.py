@@ -334,7 +334,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     problems += accelerators.problems(steps, model["serving"], env.policies, env.name)
     extra_warnings += accelerators.warnings(model["serving"])
-    from pipewright.monitoring import serving_config   # 1.4.3 (FR-98): only when the use case sets the keys
+    from pipewright.monitoring import serving_config  # 1.4.3 (FR-98): only when the use case sets the keys
 
     serving_config.resolve((eff["model"].get("serving") or {}), ml_spec.get("monitoring") or {}, model["serving"],
                            ml["monitoring"], env.policies, env.name, problems, extra_warnings)
