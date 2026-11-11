@@ -118,3 +118,22 @@ def test_receiver_metrics_for_coverage():
 def test_the_online_window_reads_the_sink_table_on_kserve():
     assert capture.source_table("churn-kq", "kserve") == "stdout"
     assert capture.source_table("churn-kq", "vertex") == "churn_kq_online_log"
+
+
+def test_agent_platform_coverage_says_when_capture_cannot_be_read():
+    # GA QA: the launcher could not read the capture table (no grant), and coverage took it as nothing to report
+    from types import SimpleNamespace
+
+    import pytest
+
+    from pipewright.serving import coverage
+
+    series = {"timeSeries": [{"points": [{"value": {"int64Value": "400"}}]}]}
+    ok = SimpleNamespace(get=lambda url, **k: SimpleNamespace(ok=True, status=200, body=series),
+                         post=lambda url, body: SimpleNamespace(ok=True, status=200, body={
+                             "jobComplete": True, "rows": [{"f": [{"v": "0"}]}]}))
+    assert coverage.agent_platform(ok, "p", "r", "1", "p.d.t", 1.0)["event"] == "serving.capture_silent"
+    denied = SimpleNamespace(get=ok.get, post=lambda url, body: SimpleNamespace(
+        ok=False, status=403, body={"error": {"message": "Access Denied: Table p:d.t"}}))
+    with pytest.raises(RuntimeError, match="not readable: HTTP 403 Access Denied"):
+        coverage.agent_platform(denied, "p", "r", "1", "p.d.t", 1.0)

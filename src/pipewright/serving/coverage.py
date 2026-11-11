@@ -40,7 +40,8 @@ def agent_platform(gcp, project: str, region: str, endpoint_id: str, table: str,
                 **{"interval.startTime": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                    "interval.endTime": now.strftime("%Y-%m-%dT%H:%M:%SZ")})
     if not r.ok:
-        return None
+        # GA QA: a read that fails is said (it was taken as "nothing to report", so coverage never ran unseen)
+        raise RuntimeError(f"served requests not readable from Cloud Monitoring: HTTP {r.status}")
     served = sum(float(list(p["value"].values())[0]) for ts in (r.body or {}).get("timeSeries") or []
                  for p in ts.get("points") or [])
     q = gcp.post(f"https://bigquery.googleapis.com/bigquery/v2/projects/{project}/queries",
@@ -48,7 +49,10 @@ def agent_platform(gcp, project: str, region: str, endpoint_id: str, table: str,
                            "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)", "useLegacySql": False,
                   "location": region, "timeoutMs": 30000,
                   **({"destinationEncryptionConfiguration": {"kmsKeyName": kms_key}} if kms_key else {})})
-    if not q.ok or not (q.body or {}).get("jobComplete"):
+    if not q.ok:
+        message = ((q.body or {}).get("error") or {}).get("message", "") if isinstance(q.body, dict) else ""
+        raise RuntimeError(f"capture table {table} not readable: HTTP {q.status} {message}"[:300])
+    if not (q.body or {}).get("jobComplete"):
         return None
     recorded = float(((q.body.get("rows") or [{}])[0].get("f") or [{"v": 0}])[0]["v"] or 0)
     return judge(served, recorded, rate)
