@@ -35,7 +35,7 @@ def test_absent_means_nothing_changes(repo):
 
 def test_defaults_when_set(repo):
     uc = resolve(serving_repo(repo, {"capture": {"enabled": True}},
-                              {"online": {"enabled": True}, "health": {"enabled": True}}))
+                              {"online": {"enabled": False}, "health": {"enabled": True}}))
     assert uc.model["serving"]["capture"] == {"enabled": True, "sample_rate": 0.05, "max_per_day": 100000,
                                               "retention_days": 30}
     online, health = uc.ml["monitoring"]["online"], uc.ml["monitoring"]["health"]
@@ -50,6 +50,7 @@ def test_checks(repo):
         "online": {"enabled": True, "schedule": "daily"},
         "health": {"enabled": True, "error_rate": {"warning": 0.1, "critical": 0.05}}}))
     for part in ("monitoring.online: needs model.serving.capture.enabled", "schedule must be a cron expression",
+                 "needs spec.pipelines.monitoring",
                  "monitoring.health.error_rate: warning is above critical"):
         assert part in found, part
 

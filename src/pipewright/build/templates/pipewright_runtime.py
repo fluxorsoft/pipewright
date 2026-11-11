@@ -1083,6 +1083,137 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
 
 # -- the registry (Pipewright FR-124) ----------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------ online window (1.4.3, FR-98) --
+
+def parse_instance(instance) -> tuple[list | dict | None, str | None]:
+    """(the row, the prediction ID) of one logged instance. An instance may be a plain row, {"instances": [row],
+    "_pw_prediction_id": ...} (the churn handler's form before 1.4.3), or {"_pw_prediction_id", "_pw_unit", "row"}
+    (the 1.4.3 caller contract, spike 3)."""
+    if isinstance(instance, str):
+        try:
+            instance = json.loads(instance)
+        except ValueError:
+            return None, None
+    if isinstance(instance, dict):
+        pid = instance.get("_pw_prediction_id")
+        if "row" in instance:
+            return instance["row"], pid
+        if instance.get("instances"):
+            return instance["instances"][0], pid
+        return {k: v for k, v in instance.items() if not k.startswith("_pw_")}, pid
+    return instance, None
+
+
+def parse_prediction(answer):
+    if isinstance(answer, str):
+        try:
+            answer = json.loads(answer)
+        except ValueError:
+            return None
+    if isinstance(answer, list):
+        answer = answer[0] if answer else None
+    if isinstance(answer, dict):
+        for key in ("score", "probability", "prediction", "value"):
+            if key in answer:
+                return answer[key]
+        return None
+    return answer
+
+
+def _champion_deployed_model(ml_config: dict, version: str) -> str | None:
+    """The deployed model serving the version on the use case's endpoint (Agent Platform)."""
+    platform = ml_config.get("platform") or {}
+    name = ml_config.get("endpoint_name") or f"{ml_config['usecase']}-endpoint"
+    api = f"https://{platform['region']}-aiplatform.googleapis.com/v1/projects/{platform['project']}/locations/" \
+          f"{platform['region']}"
+    r = _session().get(f"{api}/endpoints", params={"filter": f'display_name="{name}"'}, timeout=60)
+    for ep in (r.json().get("endpoints") or []) if r.status_code == 200 else []:
+        for dm in ep.get("deployedModels") or []:
+            if str(dm.get("modelVersionId")) == str(version):
+                return dm["id"]
+    return None
+
+
+def online_window(ml_config: dict, project: str, source_uri: str, features: list[str], model_version: str,
+                  client=None, deployed_model: str | None = None, isvc: str | None = None) -> tuple:
+    """What the deployed version received and answered in the last monitoring.online.window_hours, as rows of the
+    model's features plus `prediction` (and `_pw_prediction_id` when the caller sent one), de-duplicated on the
+    prediction ID, at most model.serving.capture.max_per_day a day. Returns (rows, summary); summary says
+    insufficient_data when fewer than min_samples rows are usable: never "no drift" (spike 5).
+
+    Agent Platform's log (one row per request, request_payload and response_payload arrays in order) is unnested by
+    offset; only the champion's deployed model is read. KServe's records (the log sink's table) pair each request
+    and answer by their CloudEvent ID; only the use case's InferenceService is read."""
+    from google.cloud import bigquery
+
+    online = (ml_config.get("monitoring") or {}).get("online") or {}
+    hours, min_samples = float(online.get("window_hours", 24)), int(online.get("min_samples", 500))
+    cap = int(((ml_config.get("serving_capture") or {}).get("max_per_day")) or 100000)
+    table = bq_table(source_uri, project)
+    client = client or bigquery.Client(project=project)
+    params = [bigquery.ScalarQueryParameter("minutes", "INT64", int(hours * 60)),
+              bigquery.ScalarQueryParameter("cap", "INT64", int(cap * max(hours / 24, 1)))]
+    columns = {f.name for f in client.get_table(table).schema}
+    if "request_payload" in columns:
+        deployed_model = deployed_model or _champion_deployed_model(ml_config, model_version)
+        params.append(bigquery.ScalarQueryParameter("dm", "STRING", deployed_model or ""))
+        sql = f"""
+            SELECT req AS instance, response_payload[SAFE_OFFSET(i)] AS answer
+            FROM `{table}`, UNNEST(request_payload) AS req WITH OFFSET AS i
+            WHERE logging_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @minutes MINUTE)
+              AND (@dm = '' OR deployed_model_id = @dm)
+            LIMIT @cap"""
+        source = "agent_platform"
+    else:
+        params.append(bigquery.ScalarQueryParameter("isvc", "STRING", isvc or ""))
+        rec = "jsonPayload.pipewright_online_log"
+        sql = f"""
+            WITH r AS (SELECT {rec}.ce_id AS id, {rec}.ce_type AS t, {rec}.body AS body
+                       FROM `{table}`
+                       WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @minutes MINUTE)
+                         AND (@isvc = '' OR {rec}.isvc = @isvc))
+            SELECT q.body AS request, a.body AS response
+            FROM r q JOIN r a ON q.id = a.id
+            WHERE ENDS_WITH(q.t, 'request') AND ENDS_WITH(a.t, 'response')
+            LIMIT @cap"""
+        source = "kserve"
+    job = client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params,
+                                                               labels=labels(ml_config)))
+    found = [dict(r.items()) for r in job.result()]
+    if source == "kserve":                 # one record per request: its instances and predictions, in order
+        pairs = []
+        for r in found:
+            try:
+                q, a = json.loads(r["request"]), json.loads(r["response"])
+            except (TypeError, ValueError):
+                continue
+            for inst, ans in zip((q or {}).get("instances") or [], (a or {}).get("predictions") or [], strict=False):
+                pairs.append({"instance": inst, "answer": ans})
+        found = pairs
+    rows, seen, skipped = [], set(), 0
+    for r in found:
+        row, pid = parse_instance(r["instance"])
+        pred = parse_prediction(r["answer"])
+        if isinstance(row, dict):
+            row = [row.get(f) for f in features]
+        if row is None or pred is None or len(row) != len(features):
+            skipped += 1                   # an answer that was an error, or a row of another shape
+            continue
+        if pid and pid in seen:
+            continue                       # a retried call logged twice
+        if pid:
+            seen.add(pid)
+        try:
+            rows.append({**dict(zip(features, [None if v is None else float(v) for v in row], strict=True)),
+                         "prediction": float(pred), **({"_pw_prediction_id": pid} if pid else {})})
+        except (TypeError, ValueError):
+            skipped += 1
+    summary = {"source": source, "table": table, "window_hours": hours, "records": len(found), "rows": len(rows),
+               "skipped": skipped, "min_samples": min_samples, "insufficient_data": len(rows) < min_samples,
+               "deployed_model": deployed_model, "isvc": isvc, "model_version": model_version}
+    return rows, summary
+
+
 def registration_by_launcher(ml_config: dict) -> bool:
     """policies.registration: launcher (Pipewright 1.4.3, FR-100): this runner cannot write the registry."""
     return (ml_config.get("platform") or {}).get("registration") == "launcher"

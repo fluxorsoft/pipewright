@@ -11,6 +11,23 @@ monitoring:
     severity: WARNING
   drift: { enabled: true, method: psi, threshold: 0.2 }     # features default to the model's features
   prediction_drift: { enabled: true, threshold: 0.2 }
+  # 1.4.3 (FR-98): your monitor steps on live traffic (monitoring_pipeline.py), from what capture records
+  # (model.serving.capture in usecase.yaml). Below min_samples a window is insufficient_data, never "no drift".
+  online:
+    enabled: false
+    schedule: "0 6 * * *"                 # daily (UTC); hourly for busy models
+    window_hours: 24
+    min_samples: 500
+    attribution: { enabled: false, sample_rows: 500, threshold: 0.10 }   # which features drive the answers
+  # 1.4.3 (FR-98): alert policies on each deployed version; their incidents arrive on Pub/Sub as serving.degraded
+  # and serving.recovered (the platform turns on the incident channel: serving_health in the starter)
+  health:
+    enabled: false
+    error_rate: { warning: 0.01, critical: 0.05 }
+    latency_p95_ms: { warning: 500, critical: 1000 }
+    min_ready_replicas: 1
+    scaling_minutes: 5                    # replicas wanted but not ready this long: a stuck scale-up
+    propose_rollback_hours: 0             # > 0: a critical breach soon after a deploy proposes a rollback (a person decides)
   performance:                            # once outcomes arrive: join predictions to observed churn
     enabled: true
     labels: { table: my_churn_churn_outcomes, key: customer_id, label: churned }

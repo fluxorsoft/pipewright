@@ -29,6 +29,7 @@ spec:
   pipelines:
     training:  { file: training_pipeline.py,  function: churn_training_pipeline }
     inference: { file: inference_pipeline.py, function: churn_inference_pipeline }
+    monitoring: { file: monitoring_pipeline.py, function: churn_monitoring_pipeline }   # 1.4.3: online monitoring
   components: { dir: components/, requirements: components/requirements.txt }
   # default components.base_image: null       # the environment's base (python:3.11-slim or its mirror); a CUDA
   #                                           # image for GPU training goes here, within the approved base images
@@ -38,6 +39,8 @@ spec:
     name: my-churn-classifier
     promotion: model
     serving: { enabled: false, target: vertex, machine: n1-standard-2, canary_percent: 10 }
+    # 1.4.3 (FR-98): record a sample of what the endpoint receives and answers (for monitoring.online)
+    # e.g. capture: { enabled: true, sample_rate: 0.05, max_per_day: 100000, retention_days: 30 } inside serving
     # Lines starting `# default` show what Pipewright fills in when a key is left out (a test keeps them true;
     # `pipewright resolve --env <env>` shows the merged result, `pipewright explain <key>` what a key means):
     # default model.serving.replicas: { min: 1, max: 1 }   # min 0 needs scale_to_zero

@@ -338,6 +338,21 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     serving_config.resolve((eff["model"].get("serving") or {}), ml_spec.get("monitoring") or {}, model["serving"],
                            ml["monitoring"], env.policies, env.name, problems, extra_warnings)
+    if "capture" in model["serving"]:         # 1.4.3 (FR-98): the online-window reader applies the daily cap
+        ml["serving_capture"] = dict(model["serving"]["capture"])
+    online = ml["monitoring"].get("online") or {}
+    if online.get("enabled"):
+        if "monitoring" not in pipelines:
+            problems.append("monitoring.online: needs spec.pipelines.monitoring (your monitor steps after Pipewright's "
+                            "online-window reader; the reference example has monitoring_pipeline.py)")
+        elif not any(s.get("pipeline") == "monitoring" for s in triggers["schedules"]):
+            from pipewright.serving import capture as capture_mod
+
+            dataset = resources.get("bigquery_dataset")
+            triggers["schedules"].append({
+                "name": "online-monitoring", "cron": online["schedule"], "timezone": "UTC", "pipeline": "monitoring",
+                **({"source_uri": f"bq://{env.project}.{dataset}.{capture_mod.table_name(meta['name'])}"}
+                   if dataset else {})})
     if model["serving"].get("pool"):          # FR-105 (1.4.2): only when the team asks for co-hosting
         from pipewright.serving import pools
 

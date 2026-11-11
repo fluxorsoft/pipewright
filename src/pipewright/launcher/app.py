@@ -99,7 +99,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
         params_extra: dict = {}
-        if pipeline == "inference":
+        if pipeline in ("inference", "monitoring"):         # 1.4.3 (FR-98): online monitoring loads it too
             # Phase 6 (policies.integrity.inference, off by default): score only with an approved version.
             from pipewright.models import integrity
 
