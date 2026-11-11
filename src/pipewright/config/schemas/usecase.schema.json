@@ -1389,7 +1389,7 @@
         "monitoring": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "alerts": {
+          "properties": { "online": { "$ref": "#/$defs/monitoring/properties/online" }, "health": { "$ref": "#/$defs/monitoring/properties/health" }, "alerts": {
           "type": "object",
           "additionalProperties": false,
           "description": "email notifications for Pipewright events (`pipewright alerts sync`)",
