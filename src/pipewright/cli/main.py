@@ -938,9 +938,9 @@ def cmd_model_rollback(args) -> int:
     gcp = Gcp()
     case = rollback.decide(gcp, env.artifacts_bucket, uc.name, args.case, args.approve, gcp.identity(),
                            args.reason or "")
-    from pipewright.observability import events
-
     import io
+
+    from pipewright.observability import events
 
     events.emit(events.event("rollback.decided", uc.name, env.name, uc.tenant, None, None, case_id=args.case,
                              approved=args.approve, by=gcp.identity(), version=case.get("version"),
