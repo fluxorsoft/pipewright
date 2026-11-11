@@ -208,3 +208,22 @@ def test_doctor_says_whether_runners_can_still_upload():
         doctor._check_registration(env, G(bindings), report, "s", doctor.WARN)
         result = report.sections["s"][0]
         assert result.status == getattr(doctor, level), (bindings, result)
+
+
+def test_the_answer_names_its_request_the_same_way_the_step_does():
+    # GA QA: a run that sent a refused request and then a good one must take the answer to the good one only
+    import hashlib
+    import inspect
+    import json
+
+    from pipewright.build.templates import pipewright_runtime as rt
+    from pipewright.models.registration import request_digest
+
+    body = {"display_name": "m", "artifact_uri": "gs://b/x", "env": None, "metrics": {"auc": 0.8125},
+            "evaluation": {"uri": "gs://b/x/evaluation.json", "sha256": "a" * 64}, "usecase": "u", "run_id": "r1"}
+    sent = json.loads(json.dumps(body, default=str))
+    step = hashlib.sha256(json.dumps(sent, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    assert request_digest({**sent, "kind": "model.registration", "id_token": "t"}) == step
+    assert request_digest({**sent, "artifact_uri": "gs://b/y"}) != step
+    src = inspect.getsource(rt.register_version)
+    assert 'answer.get("request") not in (None, digest)' in src            # older launchers: no digest, accepted

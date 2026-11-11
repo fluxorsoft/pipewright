@@ -25,6 +25,7 @@ which the component image already has. Owned by the platform: do not edit in the
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -1369,6 +1370,9 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
                            "launcher.url")
     token = id_token(url)
     body = {**request, "usecase": ml_config["usecase"], "run_id": run_id}
+    # The answer names the request it answers (GA QA): an answer to another request of this run is not this one's.
+    sent = json.loads(json.dumps(body, default=str))
+    digest = hashlib.sha256(json.dumps(sent, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
     topic = platform.get("run_requests_topic")
     if not topic:
         import requests
@@ -1399,6 +1403,9 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
     while time.time() < deadline:
         if blob.exists():
             answer = json.loads(blob.download_as_text())
+            if answer.get("request") not in (None, digest):     # an answer to another request of this run
+                time.sleep(15)
+                continue
             if answer.get("status") == "registered":
                 return answer
             raise RuntimeError(f"the launcher refused to register this version: {answer.get('reason')}")

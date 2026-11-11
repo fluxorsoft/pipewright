@@ -43,6 +43,15 @@ class RegistrationRefused(Exception):
         self.reason, self.status = reason, status
 
 
+def request_digest(body: dict) -> str:
+    """The digest of a registration request as the step sent it (without the transport's kind and id_token), carried
+    in the answer so a step takes only the answer to its own request: a run that sent a refused request and then a
+    good one must not read the first answer (GA QA). pipewright_runtime keeps the same rule (a test keeps them
+    equal)."""
+    keep = {k: v for k, v in body.items() if k not in ("kind", "id_token")}
+    return hashlib.sha256(json.dumps(keep, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
 def run_alias(run_id: str) -> str:
     """The version alias every registered version carries (the register step's rule)."""
     return re.sub(r"[^a-z0-9-]", "-", f"run-{run_id}".lower())[:127]
@@ -223,6 +232,7 @@ class Registrations:
         """Checks, uploads and answers. Raises RegistrationRefused (answered first) for a refusal."""
         ml = (contract.static_parameters or {}).get("ml_config") or {}
         run_id = body.get("run_id") or ""
+        digest = request_digest(body)
         bqml = body.get("engine") in ("bqml", "ai_forecast")
         try:
             self.check_caller(contract, caller)
@@ -237,10 +247,11 @@ class Registrations:
                 self.check_gates(contract, record, ml, champion_expected=bool(existing))
         except RegistrationRefused as e:
             if run_id:
-                self.answer(contract, run_id, {"status": "refused", "reason": e.reason, "run_id": run_id})
+                self.answer(contract, run_id, {"status": "refused", "reason": e.reason, "run_id": run_id,
+                                               "request": digest})
             raise
         result = self.register_bqml(contract, body, ml) if bqml else self.upload(contract, body, ml)
-        answer = {"status": "registered", "run_id": run_id, **result}
+        answer = {"status": "registered", "run_id": run_id, "request": digest, **result}
         self.answer(contract, run_id, answer)
         return answer
 
