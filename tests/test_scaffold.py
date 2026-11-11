@@ -25,7 +25,7 @@ def test_new_usecase_from_churn_example(repo):
     assert uc.ml["monitoring"]["performance"]["labels"]["table"] == "churn_nimbus_churn_outcomes"
     assert uc.ml["training"]["hyperparameters"]["epochs"] == 5 and uc.ml["training"]["tuning"]["max_trials"] == 2
     assert uc.triggers["schedules"] == [] and uc.ml["retraining"]["enabled"] is False
-    assert uc.ml["retraining"]["source_uri"] == "gs://acme-ml-dev-landing/samples/churn/churn-nimbus/customers.csv"  # samples/<tenant>/
+    assert uc.ml["retraining"]["source_uri"] == "gs://acme-ml-dev-landing/samples/churn/churn-nimbus/customers.csv"
     assert set(uc.pipelines) == {"training", "inference", "monitoring"}      # 1.4.3: online monitoring (FR-98)
     assert (dest / "data" / "sample_customers.csv").is_file() and not (dest / "example.yaml").exists()
     with pytest.raises(ConfigError, match="already exists"):

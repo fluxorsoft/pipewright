@@ -30,7 +30,7 @@ def test_the_page_shows_the_fleet_with_each_champion_s_integrity():
     page = fleet.render(data())
     assert "<title>Fleet report</title>" in page and "release <code>rel1</code>" in page
     assert "v4 auc 0.81" in page and "from test" in page and "integrity verified" in page
-    assert "Training runs: churn in prod" in page and "2 became a model" in page
+    assert "Training runs: churn in prod" in page and "2 passed the gates" in page
     assert "Drift: churn in prod" in page and "1 of 3 runs alerted" in page
     assert "v4 champion" in page and "2.5 h" in page and "1 pending" in page
 
@@ -68,3 +68,25 @@ def test_pipeline_hours_add_up_each_use_case_s_runs_only():
     churn = fleet._hours(gcp, env, "churn")
     assert churn["runs"] == 2 and abs(churn["hours"] - 0.3) < 1e-9          # 18 minutes; a running job adds a run
     assert fleet._hours(gcp, env, "churnbq") == {"hours": 10 / 60, "runs": 1}
+
+
+def test_pipeline_hours_ask_for_at_most_100_a_page_and_follow_pages():
+    # GA QA: pageSize 200 was refused by Agent Platform, so every report said 0 h
+    from types import SimpleNamespace
+
+    seen = []
+    pages = {None: ([{"displayName": "churn-r1", "startTime": "2026-11-05T19:00:00Z",
+                      "endTime": "2026-11-05T20:00:00Z"}], "t2"),
+             "t2": ([{"displayName": "churn-r2", "startTime": "2026-11-05T21:00:00Z",
+                      "endTime": "2026-11-05T21:30:00Z"}], None)}
+
+    def get(url, **k):
+        seen.append(k)
+        if k["pageSize"] > 100:
+            return SimpleNamespace(ok=False, body={})
+        jobs, nxt = pages[k.get("pageToken")]
+        return SimpleNamespace(ok=True, body={"pipelineJobs": jobs, **({"nextPageToken": nxt} if nxt else {})})
+
+    out = fleet._hours(SimpleNamespace(get=get), SimpleNamespace(region="r", project="p"), "churn")
+    assert out == {"hours": 1.5, "runs": 2}
+    assert seen[0]["filter"] == 'labels.pipewright-usecase="churn"'

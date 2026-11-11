@@ -47,15 +47,23 @@ def _api_time(value: str) -> datetime:
 
 def _hours(gcp, env, usecase: str) -> dict:
     api = f"https://{env.region}-aiplatform.googleapis.com/v1/projects/{env.project}/locations/{env.region}"
-    # No server-side filter: Agent Platform's job filter does not match a display-name prefix (found live).
-    r = gcp.get(f"{api}/pipelineJobs", pageSize=200, orderBy="create_time desc")
-    hours, runs = 0.0, 0
-    for j in (r.body or {}).get("pipelineJobs", []) if r.ok else []:
-        if not j.get("displayName", "").startswith(f"{usecase}-r"):
-            continue
-        runs += 1
-        if j.get("startTime") and j.get("endTime"):
-            hours += (_api_time(j["endTime"]) - _api_time(j["startTime"])).total_seconds() / 3600
+    # Agent Platform's job filter does not match a display-name prefix (found live), but it does match the
+    # pipewright-usecase label every run carries. At most 100 a page (GA QA: 200 was refused, so the report said 0 h).
+    hours, runs, token = 0.0, 0, None
+    for _ in range(20):
+        r = gcp.get(f"{api}/pipelineJobs", pageSize=100, orderBy="create_time desc",
+                    filter=f'labels.pipewright-usecase="{usecase}"', **({"pageToken": token} if token else {}))
+        if not r.ok:
+            break
+        for j in (r.body or {}).get("pipelineJobs", []):
+            if not j.get("displayName", "").startswith(f"{usecase}-r"):
+                continue
+            runs += 1
+            if j.get("startTime") and j.get("endTime"):
+                hours += (_api_time(j["endTime"]) - _api_time(j["startTime"])).total_seconds() / 3600
+        token = (r.body or {}).get("nextPageToken")
+        if not token:
+            break
     return {"hours": hours, "runs": runs}
 
 
@@ -266,7 +274,7 @@ def render(data: dict, masked: bool = False) -> str:
             if len(u["training"]) >= 3:
                 kept = sum(1 for r in u["training"] if r.get("decision") == "approve")
                 parts.append(f'<h2>Training runs: {esc(uc)} in {esc(env["name"])}</h2><p class="caption">'
-                             f'{len(u["training"])} runs; {kept} became a model (filled), {len(u["training"]) - kept}'
+                             f'{len(u["training"])} runs; {kept} passed the gates (filled), {len(u["training"]) - kept}'
                              f' were refused by the gates (hollow).</p>' + chart_training(u["training"], slot[uc]))
     for env in envs:
         for uc, u in env["usecases"].items():
