@@ -135,8 +135,8 @@ EVENTS: tuple[Event, ...] = (
     Event("serving.capture_silent", _L, "Traffic was served but capture recorded nothing.", ("sre", "ml"), "1.4.3"),
     Event("rollback.proposed", _L, "A critical incident soon after a deployment opened a rollback proposal for the "
           "release's approvers (never automatic).", ("governance", "sre", "product"), "1.4.3"),
-    Event("rollback.decided", _C, "A person approved or declined a rollback proposal.", ("governance", "sre", "product"),
-          "1.4.3"),
+    Event("rollback.decided", _C, "A person approved or declined a rollback proposal.",
+          ("governance", "sre", "product"), "1.4.3"),
     # retrain
     Event("retrain.requested", _S, "A pipeline released before the decision cases asked for a retrain.", ("ml",)),
     Event("retrain.proposed", _L, "Drift or performance opened (or added to) a retrain decision case.",

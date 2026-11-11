@@ -42,7 +42,8 @@ class FakeGcp:
         return Response(200, {})
 
 
-ENV = SimpleNamespace(name="prod", project="p", observability={"incidents_channel": "projects/p/notificationChannels/9"})
+CHANNEL = "projects/p/notificationChannels/9"
+ENV = SimpleNamespace(name="prod", project="p", observability={"incidents_channel": CHANNEL})
 
 
 def test_agent_platform_policies_per_version_and_severity():
@@ -75,8 +76,8 @@ def test_kserve_p95_and_the_mean_when_the_handler_has_no_histogram():
 
 
 def test_versions_no_longer_deployed_lose_their_policies_and_off_removes_all():
-    old = {"displayName": "pipewright churn prod: serving errors warning (v2, 111)", "name": "projects/p/alertPolicies/1",
-           "userLabels": {"pipewright-health": "true"}}
+    old = {"displayName": "pipewright churn prod: serving errors warning (v2, 111)",
+           "name": "projects/p/alertPolicies/1", "userLabels": {"pipewright-health": "true"}}
     g = FakeGcp(live=[old])
     plan = health.sync(uc(), ENV, [VERTEX], g)
     assert plan.delete == [old["displayName"]]
