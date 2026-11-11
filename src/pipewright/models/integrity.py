@@ -713,11 +713,15 @@ print("pipewright: %d approved files checked by SHA-256" % len(spec["files"]), f
 '''
 
 
-def inference_gate(gcp, manifest: dict, contract, version: str | None = None) -> dict:
+def inference_gate(gcp, manifest: dict, contract, version: str | None = None, candidate: bool = False) -> dict:
     """Pipewright 1.4.1 (FR-101 item 1): before a scoring run, with policies.integrity.inference warn or refuse, the
     full check of the version it will use (the default, or `version`): its approval exists, and the evaluation
     record, files, serving image and BigQuery ML model are the approved ones. With `pin` on (the default) the result
     carries the approved files for the run's `approved_files` parameter, so the run loads exactly those generations.
+
+    candidate: the closed loop's validation run of its candidate in test (GA QA): scored before anyone approves it,
+    which is the point of validating it. A candidate with no approval is not a problem (out["candidate"] says so);
+    one that has an approval is checked like any other version.
 
     Returns {"mode", "problem", "approved_files", "version"}; mode off checks nothing (as before)."""
     from types import SimpleNamespace
@@ -756,6 +760,9 @@ def inference_gate(gcp, manifest: dict, contract, version: str | None = None) ->
                        (body.get("containerSpec") or {}).get("imageUri"), model=body.get("name"))
     except Exception as e:  # noqa: BLE001 - a check that cannot run is a problem, not a pass
         out["problem"] = f"the approval of v{vid} cannot be checked: {str(e).splitlines()[0][:160]}"
+        return out
+    if candidate and not check.approval:
+        out["candidate"] = True
         return out
     if integ.get("pin", "on") == "on":
         # Pinned even when the check found problems: under warn the run then loads the approved generations (a

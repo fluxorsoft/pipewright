@@ -122,9 +122,17 @@ def create_app(registry: Registry | None = None) -> Flask:
 
             # 1.4.1 (FR-101 item 1): the full check of the version the run will use, and with pin on (the default)
             # the approved files passed to the run, which loads exactly those generations and checks each SHA-256.
+            # GA QA (found live): the loop validates its candidate before anyone approves it; test's
+            # inference: refuse refused that run, so a loop could never pass validation
             gate = integrity.inference_gate(getattr(reg(), "gcp", None), reg().manifest, contract,
-                                            (extra or {}).get("model_version") or None)
+                                            (extra or {}).get("model_version") or None,
+                                            candidate=bool(loop) and pipeline == "inference"
+                                            and bool((extra or {}).get("model_version")))
             mode, problem = gate["mode"], gate["problem"]
+            if gate.get("candidate"):
+                _event("run.integrity", contract, rid, pipeline=pipeline, trigger=trigger, mode="loop-candidate",
+                       version=gate["version"], problem=f"v{gate['version']} is case {loop}'s candidate: scored "
+                       "before approval to validate it (not approved, so not pinned)")
             if problem:
                 _event("run.integrity", contract, rid, pipeline=pipeline, trigger=trigger, mode=mode,
                        problem=problem, **({"version": gate["version"]} if gate["version"] else {}))
