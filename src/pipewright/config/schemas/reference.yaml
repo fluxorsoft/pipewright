@@ -301,6 +301,8 @@ synthetic.engine.differential_privacy.epsilon: The privacy budget; lower is more
 synthetic.engine.sampling_temperature: "mostlyai: above 1 spreads generated rows further from the training rows (more private, less faithful). Chosen at generation, so it costs no extra training."
 synthetic.engine.rare_categories: "mostlyai: rare categories become a _RARE_ token (constant) or common categories (sample)."
 synthetic.engine.epochs: "sdv deep synthesizers (ctgan, tvae, copulagan): training epochs."
+synthetic.engine.max_epochs: "mostlyai (1.4.3): train for this many epochs; max_training_minutes stays the ceiling. With seed set too, the run repeats on any machine. Default: null (time-bound training)."
+synthetic.engine.seed: "1.4.3: one seed for the engine's training and generation (synthetic.seed covers the holdout split and the rules). With max_epochs, the same rows and gate results every run; the evaluation record says whether a run repeats and why. Default: null (a new random state each run)."
 synthetic.candidates: "Variants of the engine tried side by side, each with a name; the best one that passes every gate is kept. Default for mostlyai: the engine as given and the same at sampling temperature 1.3."
 synthetic.candidates.type: As synthetic.engine.type, for this candidate.
 synthetic.candidates.model: As synthetic.engine.model, for this candidate.
@@ -310,6 +312,8 @@ synthetic.candidates.differential_privacy.epsilon: The privacy budget for this c
 synthetic.candidates.sampling_temperature: As synthetic.engine.sampling_temperature, for this candidate.
 synthetic.candidates.rare_categories: As synthetic.engine.rare_categories, for this candidate.
 synthetic.candidates.epochs: As synthetic.engine.epochs, for this candidate.
+synthetic.candidates.max_epochs: As synthetic.engine.max_epochs, for this candidate.
+synthetic.candidates.seed: As synthetic.engine.seed, for this candidate.
 synthetic.columns: "Columns decided by rules instead of learned: keys, personal data, time grids. Personal-data columns without a rule become new keys (if unique) or nulls; they are never learned."
 synthetic.columns.<name>: "One column decided by a rule instead of learned, by its name in the source table."
 synthetic.columns.<name>.rule: key (new unique keys), fake (made-up personal data), constant, drop (null), time (dates on a grid), values (a categorical with chosen frequencies) or range (uniform between min and max).

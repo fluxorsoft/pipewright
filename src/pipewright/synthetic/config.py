@@ -6,7 +6,7 @@
       tier: learned                 # learned (an engine learns from real data) | contract (rules only, no real data)
       source_uri: bq://...          # learned: what the engine learns from (read point in time like training)
       output_table: synthetic_customers   # learned: a table in outputs.bigquery.tables
-      engine: { type: mostlyai, max_training_minutes: 10 }
+      engine: { type: mostlyai, max_training_minutes: 10 }   # 1.4.3: seed and max_epochs make a run repeatable
       columns: { customer_id: { rule: key } }
 
 Never learned: personal-data columns (without a rule they become new keys if unique, else nulls) and keys (unique
@@ -39,7 +39,10 @@ DEFAULTS = {
     "holdout_fraction": 0.2,         # real rows kept back for utility and privacy checks, never learned
     "seed": None,                    # default: training.seed
     "engine": {"type": "mostlyai", "model": None, "max_training_minutes": 10, "differential_privacy": None,
-               "sampling_temperature": 1.0, "rare_categories": "constant", "epochs": 300},
+               "sampling_temperature": 1.0, "rare_categories": "constant", "epochs": 300,
+               # 1.4.3 (FR-107), off by default: a fixed amount of training (MOSTLY AI epochs; time stays the
+               # ceiling) and one seed for training and generation. Both set: the run repeats anywhere.
+               "max_epochs": None, "seed": None},
     "candidates": [],                # engine variants tried side by side; the best one passing every gate is kept
     "columns": {},                   # column rules (see pipewright.synthetic.runtime.rules)
     "sensitive_columns": [],         # what an inference attack tries to recover, besides the label
@@ -145,6 +148,14 @@ def check(ml: dict, columns: dict, label: str | None, known, problems: list[str]
             problems.append(f"{at}.sampling_temperature must be above 0 and at most 2")
         if c["max_training_minutes"] <= 0:
             problems.append(f"{at}.max_training_minutes must be above 0")
+        if c.get("max_epochs") is not None:
+            if c["engine"] != "mostlyai":
+                problems.append(f"{at}.max_epochs is for MOSTLY AI (SDV's deep synthesizers use epochs)")
+            elif not isinstance(c["max_epochs"], (int, float)) or c["max_epochs"] <= 0:
+                problems.append(f"{at}.max_epochs must be above 0")
+        if c.get("seed") is not None and (not isinstance(c["seed"], int) or isinstance(c["seed"], bool)
+                                          or c["seed"] < 0):
+            problems.append(f"{at}.seed must be a whole number, 0 or above")
         resolved_candidates.append(c)
     syn["candidates"] = resolved_candidates
     syn["gates"] = gates.effective(syn["purpose"], syn["gates"], problems)

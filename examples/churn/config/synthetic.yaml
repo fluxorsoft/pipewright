@@ -16,7 +16,13 @@ synthetic:
   tier: learned
   # source_uri: bq://${project}.${resources.bigquery_dataset}.<training table>    # read like training data
   # output_table: synthetic_customers
-  engine: { type: mostlyai, max_training_minutes: 10 }    # MOSTLY AI SDK in local mode (Apache-2.0)
+  engine:                                # MOSTLY AI SDK in local mode (Apache-2.0)
+    type: mostlyai
+    max_training_minutes: 10             # the ceiling; with max_epochs set, training normally ends sooner
+    # Repeatable runs (1.4.3): the same rows and the same gate results every time, on any machine, so an approval
+    # can be reproduced. Both null (the default) = time-bound training from a new random state, as before 1.4.3.
+    max_epochs: 3                        # a fixed amount of training (20,000 rows, Small model: about 2 minutes)
+    seed: 42                             # one seed for training and generation
   columns:                               # decided by rules, never learned
     customer_id: { rule: key, prefix: "SYN-" }
     snapshot_date: { rule: time, from: "2025-01-31", to: "2025-12-31", step: month_end }   # contract tier

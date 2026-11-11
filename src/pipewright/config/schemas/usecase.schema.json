@@ -571,7 +571,9 @@
         },
         "sampling_temperature": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
         "rare_categories": { "enum": ["constant", "sample"] },
-        "epochs": { "type": "integer", "minimum": 1 }
+        "epochs": { "type": "integer", "minimum": 1 },
+        "max_epochs": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "mostlyai (1.4.3): train for this many epochs; max_training_minutes stays the ceiling. With seed, the run repeats anywhere" },
+        "seed": { "type": ["integer", "null"], "minimum": 0, "description": "1.4.3: one seed for training and generation; null = a different random state each run" }
       }
     },
     "synthetic_min_gate": {

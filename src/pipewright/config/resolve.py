@@ -462,6 +462,11 @@ def _warnings(ml: dict) -> list[str]:
         out.append("monitoring.performance joins outcomes to each key's latest score, by key only: once a newer "
                    "batch is scored, outcomes meet the wrong scores. Set monitoring.performance.labels.time_column "
                    "(the outcome's cut-off) and write scored_for with each score (FR-78)")
+    syn = ml.get("synthetic") or {}
+    for c in syn.get("candidates") or [] if syn.get("enabled") else ():
+        if c.get("seed") is not None and c.get("max_epochs") is None and c.get("engine") == "mostlyai":
+            out.append(f"synthetic candidate {c['name']}: a seed without max_epochs repeats on the same machine only "
+                       "(training is time-bound); set max_epochs too for a run that repeats anywhere (FR-107)")
     return out
 
 
