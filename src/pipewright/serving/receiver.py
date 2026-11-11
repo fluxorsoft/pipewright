@@ -36,6 +36,7 @@ class Receiver:
         self.q: queue.Queue = queue.Queue(maxsize=size)
         self.stats = {"received": 0, "kept": 0, "sampled_out": 0, "capped": 0, "dropped": 0, "written": 0}
         self.day, self.today = time.strftime("%Y-%m-%d", time.gmtime()), {}
+        self.kept_by: dict[str, int] = {}             # for coverage: pipewright_capture_kept_total{isvc}
         self.lock = threading.Lock()
         self.out = out or (lambda line: print(line, flush=True))
 
@@ -72,6 +73,7 @@ class Receiver:
                 self.stats["capped"] += 1
                 return "capped"
             self.today[isvc] = self.today.get(isvc, 0) + 1
+            self.kept_by[isvc] = self.kept_by.get(isvc, 0) + 1
         try:
             body = json.loads(raw or b"null")
         except ValueError:
@@ -106,6 +108,19 @@ class Receiver:
 def serve(r: Receiver, port: int) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path.startswith("/metrics"):      # Prometheus text, for coverage (FR-98)
+                lines = ["# TYPE pipewright_capture_kept_total counter"]
+                lines += [f'pipewright_capture_kept_total{{isvc="{k}"}} {v}' for k, v in sorted(r.kept_by.items())]
+                for key in ("received", "sampled_out", "capped", "dropped", "written"):
+                    lines += [f"# TYPE pipewright_capture_{key}_total counter",
+                              f"pipewright_capture_{key}_total {r.stats[key]}"]
+                body = ("\n".join(lines) + "\n").encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             body = json.dumps({**r.stats, "queued": r.q.qsize(), "sample_rate": r.sample_rate,
                                "max_per_day": r.max_per_day}).encode()
             self.send_response(200)

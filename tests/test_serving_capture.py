@@ -95,3 +95,20 @@ def test_torchserve_settings_and_metrics_config():
     assert torchserve_metrics.is_torchserve("europe-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest")
     pm = torchserve_metrics.pod_monitoring("churn", "serving-churn", "churn")
     assert pm["spec"]["endpoints"][0]["port"] == "ts-metrics"
+
+
+def test_coverage_judges_gaps_and_silence_not_quiet_endpoints():
+    from pipewright.serving import coverage
+
+    assert coverage.judge(100, 0, 0.05) is None                                  # too quiet to judge
+    assert coverage.judge(10000, 0, 0.05)["event"] == "serving.capture_silent"
+    assert coverage.judge(10000, 100, 0.05)["event"] == "serving.capture_gap"   # 100 of an expected 500
+    assert coverage.judge(10000, 480, 0.05) is None
+    found = coverage.kserve(lambda q: 10000 if "Requests2XX" in q else 0, "ns", "churn", 0.05)
+    assert found["event"] == "serving.capture_silent"
+
+
+def test_receiver_metrics_for_coverage():
+    r = receiver.Receiver(out=lambda line: None)
+    r.take({"ce-id": "a", "ce-inferenceservicename": "churn"}, b"{}", {"rate": "1"})
+    assert r.kept_by == {"churn": 1}

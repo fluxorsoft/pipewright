@@ -392,8 +392,48 @@ def create_app(registry: Registry | None = None) -> Flask:
         except Exception as e:  # noqa: BLE001
             log.exception("A/B tests not checked")
             ab = {"status": "error", "reason": str(e)[:300]}
+        try:                                  # 1.4.3 (FR-98): capture coverage
+            covered = capture_coverage()
+        except Exception as e:  # noqa: BLE001
+            log.exception("capture coverage not checked")
+            covered = {"status": "error", "reason": str(e)[:300]}
         return jsonify(results=results, ray=ray, failed=failed_runs(), integrity=watched, online=online,
-                       ab=ab), 200
+                       ab=ab, coverage=covered), 200
+
+    def capture_coverage() -> list:
+        """serving.capture_gap and serving.capture_silent for live use cases with capture on (FR-98)."""
+        from pipewright.serving import capture, coverage
+
+        m, out, gcp = reg().manifest, [], Gcp()
+        for c in reg().live():
+            ml = (c.static_parameters or {}).get("ml_config") or {}
+            cap = ml.get("serving_capture") or {}
+            if not cap.get("enabled"):
+                continue
+            rate = float(cap.get("sample_rate", 0.05))
+            dataset = (ml.get("platform") or {}).get("bigquery_dataset")
+            if c.orchestrator == "kfp":
+                ns = ((m.get("kserve") or {}).get("namespaces") or {}).get(c.tenant)
+                isvc = c.usecase.lower().replace("_", "-").replace(".", "-")[:45].rstrip("-")
+
+                def prom(q, project=c.project):
+                    r = gcp.post(f"https://monitoring.googleapis.com/v1/projects/{project}/location/global/"
+                                 "prometheus/api/v1/query", {"query": q})
+                    res = ((r.body or {}).get("data") or {}).get("result") or [] if r.ok else []
+                    return float(res[0]["value"][1]) if res else None
+
+                found = coverage.kserve(prom, ns, isvc, rate) if ns else None
+            else:
+                api = f"https://{c.region}-aiplatform.googleapis.com/v1/projects/{c.project}/locations/{c.region}"
+                eps = gcp.get(f"{api}/endpoints", filter=f'display_name="{c.usecase}-endpoint"')
+                ep = ((eps.body or {}).get("endpoints") or [None])[0] if eps.ok else None
+                found = coverage.agent_platform(gcp, c.project, c.region, ep["name"].rsplit("/", 1)[-1],
+                                                f"{c.project}.{dataset}.{capture.table_name(c.usecase)}",
+                                                rate) if ep and dataset else None
+            if found:
+                _event(found.pop("event"), c, None, **found)
+                out.append({"usecase": c.usecase, **found})
+        return out
 
     @app.post("/integrity/tick")
     def integrity_tick():
