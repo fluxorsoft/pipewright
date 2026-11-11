@@ -351,7 +351,8 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
             dataset = resources.get("bigquery_dataset")
             triggers["schedules"].append({
                 "name": "online-monitoring", "cron": online["schedule"], "timezone": "UTC", "pipeline": "monitoring",
-                **({"source_uri": f"bq://{env.project}.{dataset}.{capture_mod.table_name(meta['name'])}"}
+                **({"source_uri": f"bq://{env.project}.{dataset}."
+                                  f"{capture_mod.source_table(meta['name'], model['serving'].get('target'))}"}
                    if dataset else {})})
     if model["serving"].get("pool"):          # FR-105 (1.4.2): only when the team asks for co-hosting
         from pipewright.serving import pools

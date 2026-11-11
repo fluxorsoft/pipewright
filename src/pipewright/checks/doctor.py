@@ -680,7 +680,7 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
             rows = resp.body.get("numRows")
             report.add(s, Result(OK, f"source for {where}", f"{project}.{dataset}.{table} ({resp.body.get('type', '')}"
                                  + (f", {rows} rows" if rows else "") + ")"))
-        elif resp.status == 404 and table.endswith("_online_log") and where == "schedule online-monitoring":
+        elif resp.status == 404 and (table.endswith("_online_log") or table == "stdout")                 and where == "schedule online-monitoring":
             # 1.4.3 (FR-98): Agent Platform makes the capture table at the first logged request (battle test)
             report.add(s, Result(INFO, f"source for {where}", f"{project}.{dataset}.{table} does not exist yet: "
                                  "capture creates it at the first logged request after deploy-model"))

@@ -113,3 +113,8 @@ def test_receiver_metrics_for_coverage():
     r = receiver.Receiver(out=lambda line: None)
     r.take({"ce-id": "a", "ce-inferenceservicename": "churn"}, b"{}", {"rate": "1"})
     assert r.kept_by == {"churn": 1}
+
+
+def test_the_online_window_reads_the_sink_table_on_kserve():
+    assert capture.source_table("churn-kq", "kserve") == "stdout"
+    assert capture.source_table("churn-kq", "vertex") == "churn_kq_online_log"

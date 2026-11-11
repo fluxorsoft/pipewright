@@ -26,6 +26,16 @@ def table_name(usecase: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", usecase.lower()) + "_online_log"
 
 
+# KServe's records reach the tenant's dataset through the platform's log sink, whose table is named after the log
+# (container stdout). Found in the 1.4.3 battle test: the online-monitoring schedule read the Agent Platform table.
+KSERVE_SINK_TABLE = "stdout"
+
+
+def source_table(usecase: str, target: str | None) -> str:
+    """The table the online window reads: the endpoint's log (Agent Platform) or the log sink's table (KServe)."""
+    return KSERVE_SINK_TABLE if target == "kserve" else table_name(usecase)
+
+
 def log_table(uc, env) -> str:
     dataset = (uc.platform or {}).get("bigquery_dataset")
     if not dataset:
