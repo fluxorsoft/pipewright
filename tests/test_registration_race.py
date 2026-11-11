@@ -111,6 +111,7 @@ def _register(monkeypatch, tmp_path, registry, set_default="manual"):
     events = []
     runtime.folder_files = lambda uri, project: {"count": 0}
     runtime.registry_model_id, runtime.registry_models = rt.registry_model_id, rt.registry_models
+    runtime.registration_by_launcher = rt.registration_by_launcher          # 1.4.3 (FR-100): off here
     runtime.emit_event = lambda event_type, cfg, run_id, **d: events.append((event_type, run_id, d))
     runtime.lineage_record = lambda *a, **k: {}
     runtime.write_lineage = lambda *a, **k: None

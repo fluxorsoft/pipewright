@@ -1081,6 +1081,67 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
 
 # -- the registry (Pipewright FR-124) ----------------------------------------------------------------------------------
 
+def registration_by_launcher(ml_config: dict) -> bool:
+    """policies.registration: launcher (Pipewright 1.4.3, FR-100): this runner cannot write the registry."""
+    return (ml_config.get("platform") or {}).get("registration") == "launcher"
+
+
+def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: int = 20) -> dict:
+    """Asks the launcher to register this run's model version (FR-100) and waits for its answer:
+    {"status": "registered", "resource", "version", "default", ...}. A refusal raises, saying why.
+
+    request: display_name, artifact_uri, serving_image, env (dict or None), labels, version_description,
+    evaluation {uri, sha256} (the record next to the model files), metrics, files. The launcher checks the run, the
+    files and the gates itself and decides the default from the release's policy. Over Pub/Sub inside a private
+    perimeter (the message carries this identity's ID token), otherwise by calling the launcher; the answer is also
+    written to gs://<artifacts>/runs/registration/<tenant>/run-<run_id>.json, which the step reads."""
+    import time
+
+    platform = ml_config.get("platform") or {}
+    url = (platform.get("launcher_url") or "").rstrip("/")
+    if not url:
+        raise RuntimeError("registration through the launcher needs the launcher, and the manifest has no "
+                           "launcher.url")
+    token = id_token(url)
+    body = {**request, "usecase": ml_config["usecase"], "run_id": run_id}
+    topic = platform.get("run_requests_topic")
+    if not topic:
+        import requests
+
+        r = requests.post(f"{url}/models/register", data=json.dumps(body, default=str), timeout=1200,
+                          headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code in (400, 403):
+            raise RuntimeError(f"the launcher refused to register this version: {r.json().get('reason', r.text)}")
+        log(f"registration call returned {r.status_code}: {r.text[:300]}; waiting for the answer", ml_config,
+            "WARNING", run_id)
+    else:
+        message = {"data": base64.b64encode(json.dumps({**body, "kind": "model.registration", "id_token": token},
+                                                       default=str).encode()).decode(),
+                   "attributes": {"usecase": ml_config["usecase"], "kind": "model.registration"}}
+        region = platform.get("region")
+        host = f"{region}-pubsub.googleapis.com" if region else "pubsub.googleapis.com"
+        r = _session().post(f"https://{host}/v1/{topic}:publish", json={"messages": [message]}, timeout=60)
+        if r.status_code != 200:
+            raise RuntimeError(f"registration request not sent: {r.status_code} {r.text[:300]}")
+    from google.cloud import storage
+
+    alias = re.sub(r"[^a-z0-9-]", "-", f"run-{run_id}".lower())[:127]
+    name = f"runs/registration/{platform.get('tenant')}/{alias}.json"
+    blob = storage.Client(project=platform.get("project")).bucket(platform["artifacts_bucket"]).blob(name)
+    deadline = time.time() + 60 * wait_minutes
+    while time.time() < deadline:
+        if blob.exists():
+            answer = json.loads(blob.download_as_text())
+            if answer.get("status") == "registered":
+                return answer
+            raise RuntimeError(f"the launcher refused to register this version: {answer.get('reason')}")
+        time.sleep(15)
+    raise RuntimeError(f"no answer from the launcher after {wait_minutes} minutes (gs://"
+                       f"{platform['artifacts_bucket']}/{name}): see the launcher's logs ('registration')")
+
+
 def registry_model_id(display_name: str) -> str:
     """The model ID a first version is registered under: the display name as an ID (a letter first, [a-z0-9-], at
     most 63). Fixed, so two runs registering a first version at once cannot make two models: the second one's upload

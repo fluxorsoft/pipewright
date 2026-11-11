@@ -266,6 +266,11 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
     forecast = ml_config["bqml"].get("forecast") or {}
     tags = {"pipewright-usecase": rt.base_name(ml_config["usecase"]).replace("_", "-"),
             "pipewright-run": rt.run_part(run_id), "status": "candidate"}
+    from pipewright_runtime import registration_by_launcher
+
+    if registration_by_launcher(ml_config):
+        return _register_through_launcher(project, model, run_id, primary_value, ml_config, source_uri, rows_table,
+                                          jobs, tags)
     if forecast.get("engine") == "ai_forecast":
         # No model to register: a version without files, whose evaluation record holds the settings it was measured
         # with; scoring runs AI.FORECAST with those once a person approves it.
@@ -303,6 +308,55 @@ def bqml_register(project: str, region: str, model: str, run_id: str, primary_va
     emit_event("model.registered", ml_config, run_id, model=registry_id, version=version, default=default,
                primary_metric=primary, primary_value=primary_value, bigquery_model=model or None)
     folder = rt.record_uri(ml_config, run_id)
+    write_lineage(ml_config, run_id, folder, lineage_record(
+        ml_config, run_id, source_uri, {"name": registry_id, "version": str(version),
+                                        **({"bigquery_model": model} if model else {"engine": "ai_forecast"})},
+        rt.read_record(project, folder) or {}, f"{folder}evaluation.json", rows_table or None))
+    return version
+
+
+def _register_through_launcher(project, model, run_id, primary_value, ml_config, source_uri, rows_table, jobs,
+                               tags):
+    """Pipewright 1.4.3 (FR-100), policies.registration: launcher: this runner cannot write the registry. The
+    launcher checks the run, the model's dataset, the record and the gates, runs the registration itself, labels the
+    version and moves the default by the release's policy; it records model.registered."""
+    import hashlib
+
+    import bqml_runtime as rt
+    from pipewright_runtime import lineage_record, register_version, write_lineage
+
+    registry_id = ml_config["bqml"]["registry_id"]
+    forecast = ml_config["bqml"].get("forecast") or {}
+    folder = rt.record_uri(ml_config, run_id)
+    if forecast.get("engine") == "ai_forecast":
+        request = {"engine": "ai_forecast", "labels": {**tags, "pipewright-engine": "ai-forecast"},
+                   "version_description": f"AI.FORECAST {forecast['model']}, horizon {forecast['horizon']} (no model "
+                                          "files: the settings in its evaluation record are the version)"}
+        model = ""
+    else:
+        if forecast:     # ARIMA_PLUS: the measured options refit on the whole series, so it forecasts from today
+            measured, model = model, f"{model}_refit"
+            jobs.run(rt.forecast_create_sql(ml_config, model, rows_table, int(forecast["horizon"]), refit=True),
+                     f"CREATE MODEL {model} (refit on the whole series)")
+            record = rt.read_record(project, folder) or {}
+            record["model"] = {**record.get("model", {}), "bigquery_model": model, "measured_model": measured}
+            rt.write_record(project, folder, record)
+        primary = ml_config["evaluation"]["primary_metric"]
+        request = {"engine": "bqml", "bigquery_model": model,
+                   "labels": {**tags, "pipewright-bq-model": model.rsplit(".", 1)[1], "pipewright-engine": "bqml"},
+                   "version_description": f"run {run_id}, {primary}={primary_value:.4f}"
+                   if primary_value == primary_value else f"run {run_id}"}
+    from google.cloud import storage
+
+    bucket, _, prefix = folder.removeprefix("gs://").partition("/")
+    blob = storage.Client(project=project).bucket(bucket).blob(f"{prefix.rstrip('/')}/evaluation.json")
+    text = blob.download_as_text() if blob.exists() else ""
+    request.update({"registry_id": registry_id, "display_name": registry_id,
+                    "metrics": {ml_config["evaluation"]["primary_metric"]: primary_value},
+                    "evaluation": {"uri": f"{folder.rstrip('/')}/evaluation.json",
+                                   "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None}})
+    answer = register_version(ml_config, run_id, request)
+    version = answer["version"]
     write_lineage(ml_config, run_id, folder, lineage_record(
         ml_config, run_id, source_uri, {"name": registry_id, "version": str(version),
                                         **({"bigquery_model": model} if model else {"engine": "ai_forecast"})},

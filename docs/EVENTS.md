@@ -28,9 +28,9 @@ attributes:pw_ml AND attributes.usecase = "churn"    # one team's use case
 
 | Persona | Who | Events |
 |---|---|---|
-| `ml` | data scientists and ML engineers who own a use case | 63 |
-| `sre` | the team that runs the environments, the launcher and serving | 33 |
-| `governance` | risk, model approvers and auditors | 43 |
+| `ml` | data scientists and ML engineers who own a use case | 64 |
+| `sre` | the team that runs the environments, the launcher and serving | 34 |
+| `governance` | risk, model approvers and auditors | 44 |
 | `product` | what is live and how it performs | 18 |
 | `data` | tables, features and online stores the models read | 9 |
 | `finops` | what costs money and who started it | 4 |
@@ -61,7 +61,8 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 
 | Event | When | Sent by | For | Since | |
 |---|---|---|---|---|---|
-| `model.registered` | A new model version is in the registry (and whether it is the champion). | pipeline step | ml, governance | 1.0.0 | email |
+| `model.registered` | A new model version is in the registry (and whether it is the champion). With policies.registration: launcher (1.4.3) the launcher sends it, with registered_by: launcher. | pipeline step | ml, governance | 1.0.0 | email |
+| `model.registration_refused` | The launcher refused a run's registration (wrong run, files outside the tenant's root, a changed evaluation record, failed gates), with the reason. | launcher | governance, ml, sre | 1.4.3 |  |
 | `model.registration_skipped` | The register step skipped on purpose (an exact replay ties itself). | pipeline step | ml | 1.4.3 |  |
 | `model.approved` | A person approved a model version. | CLI | governance, ml | 1.0.0 | decision |
 | `model.promoted` | A model version was copied to another environment's registry. | CLI | governance, ml, sre | 1.1.0 | decision |
@@ -187,4 +188,4 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 |---|---|---|---|---|---|
 | `policy.override` | A time-boxed break-glass exception to a platform policy is in force. | launcher | governance, sre | 1.4.1 |  |
 
-78 event types in 14 families.
+79 event types in 14 families.

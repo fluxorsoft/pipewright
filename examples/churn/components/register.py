@@ -106,7 +106,8 @@ def register_model(
     storage.Client(project=project).bucket(bucket_name).blob(f"{prefix}/model_card.md").upload_from_string(
         text, content_type="text/markdown")
     blob = storage.Client(project=project).bucket(bucket_name).blob(f"{prefix}/evaluation.json")
-    blob.upload_from_string(json.dumps(evaluation, indent=2), content_type="application/json")
+    evaluation_text = json.dumps(evaluation, indent=2)
+    blob.upload_from_string(evaluation_text, content_type="application/json")
 
     # Pipewright 1.4.1 (FR-101): the files as Agent Platform copies them now, at upload: it serves that copy, so an
     # approval can be shown to cover exactly what serves (names, generations and digests; never contents).
@@ -125,6 +126,40 @@ def register_model(
     value = evaluation["metrics"].get(primary)
     online = ml_config.get("online_features")
     manual = ml_config["registry"]["set_default"] == "manual"
+
+    from pipewright_runtime import registration_by_launcher
+
+    if registration_by_launcher(ml_config):
+        # Pipewright 1.4.3 (FR-100), policies.registration: launcher. This runner cannot write the registry: the
+        # launcher checks this run, these files and the gates, uploads, and decides the default from the release's
+        # policy. It records model.registered itself.
+        import hashlib
+
+        from pipewright_runtime import register_version
+
+        env = ({"PIPEWRIGHT_ONLINE_FEATURES": json.dumps(online, sort_keys=True, separators=(",", ":"))}
+               if online and not (ml_config.get("serving") or {}).get("pool") else None)
+        answer = register_version(ml_config, run_id, {
+            "display_name": model_display_name, "artifact_uri": model.uri, "serving_image": SERVING_IMAGE,
+            "env": env, "metrics": evaluation.get("metrics"), "files": registered_files,
+            "version_description": f"run {run_id}, {primary}={value:.4f}" if value is not None else f"run {run_id}",
+            "labels": ({"release": re.sub(r"[^a-z0-9-]", "-", os.environ["PIPEWRIGHT_RELEASE"].lower())[:63]}
+                       if os.environ.get("PIPEWRIGHT_RELEASE") else {}),
+            "evaluation": {"uri": f"gs://{bucket_name}/{prefix}/evaluation.json",
+                           "sha256": hashlib.sha256(evaluation_text.encode("utf-8")).hexdigest()}})
+        version = answer["version"]
+        vertex_model.uri = f"https://{region}-aiplatform.googleapis.com/v1/{answer['resource']}@{version}"
+        vertex_model.metadata.update({"resourceName": answer["resource"], "versionId": version,
+                                      "versionedResourceName": f"{answer['resource']}@{version}",
+                                      "default": answer.get("default"), "registeredBy": "launcher"})
+        from pipewright_runtime import lineage_record, write_lineage
+
+        write_lineage(ml_config, run_id, model.uri, lineage_record(
+            ml_config, run_id, source_uri, {"name": model_display_name, "version": str(version)},
+            evaluation, f"gs://{bucket_name}/{prefix}/evaluation.json"))
+        logging.info("the launcher registered %s version %s (%s)", answer["resource"], version,
+                     "default" if answer.get("default") else "candidate: run `pipewright model approve`")
+        return
 
     def upload(parent, fixed_id=True):
         first = parent is None

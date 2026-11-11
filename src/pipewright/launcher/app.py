@@ -24,6 +24,10 @@ Routes:
   POST /online/lookup-service {"usecase", "release"?}: create or update the use case's Cloud SQL lookup service from
                      its live release (FR-104; deploy-model calls it). A schedule with pipeline online_sync runs the
                      tenant's sync job instead of a pipeline
+  POST /models/register {"usecase", "run_id", "display_name", "artifact_uri", "serving_image", "evaluation", ...}:
+                     a training run's model version, registered by the launcher after its checks (Pipewright 1.4.3,
+                     FR-100, with policies.registration: launcher); also as kind model.registration on /pubsub/run,
+                     with the runner's "id_token". The answer is also written to runs/registration/<tenant>/
   GET  /health   live use cases and their releases (Cloud Run reserves paths ending in "z", e.g. /healthz)
 """
 
@@ -53,6 +57,7 @@ from pipewright.launcher.routing import (
     run_id,
     target_for,
 )
+from pipewright.models.registration import RegistrationRefused, Registrations, kfp_job_finder
 from pipewright.observability import events
 from pipewright.online import launcher as online_launcher
 from pipewright.ray_clusters.service import RayClusters, RayRequestError
@@ -543,6 +548,46 @@ def create_app(registry: Registry | None = None) -> Flask:
             return jsonify(status="error", reason=str(e)[:300]), 500
         return jsonify(result), 200
 
+    # ---------------------------------------------------------------- registration (1.4.3, FR-100) --
+    def registrations() -> Registrations:
+        if "registrations" not in state:
+            r = reg()
+            finder = kfp_job_finder(lambda: reg().manifest, r.gcp) if r.manifest.get("orchestrator") == "kfp" \
+                else None
+            state["registrations"] = Registrations(r.gcp, r.bucket, lambda: reg().manifest, finder)
+        return state["registrations"]
+
+    def _register(body: dict, caller: str | None):
+        contract = reg().get(body.get("usecase") or "")
+        if contract is None:
+            return jsonify(status="error", reason=f"{body.get('usecase')}: no live release"), 404
+        rid = body.get("run_id")
+        try:
+            result = registrations().register(contract, body, caller)
+        except RegistrationRefused as e:
+            log.warning("registration for %s run %s refused: %s", contract.usecase, rid, e.reason)
+            _event("model.registration_refused", contract, rid, model=body.get("display_name"), reason=e.reason,
+                   caller=caller, artifact_uri=body.get("artifact_uri"))
+            return jsonify(status="refused", reason=e.reason), e.status
+        except Exception as e:  # noqa: BLE001 - retried by the step (or Pub/Sub)
+            log.exception("registration for %s run %s failed", contract.usecase, rid)
+            return jsonify(status="error", reason=str(e)[:300]), 500
+        if not result.get("repeated"):
+            ml = (contract.static_parameters or {}).get("ml_config") or {}
+            primary = (ml.get("evaluation") or {}).get("primary_metric")
+            _event("model.registered", contract, rid, model=body.get("display_name"), version=result.get("version"),
+                   default=result.get("default"), primary_metric=primary,
+                   primary_value=(body.get("metrics") or {}).get(primary) if primary else None,
+                   files=body.get("files"), registered_by="launcher")
+        return jsonify(result), 200
+
+    @app.post("/models/register")
+    def models_register():
+        caller = identity.cloud_run_caller(request.headers.get("Authorization"))
+        if not caller:
+            return jsonify(status="refused", reason="no caller identity"), 401
+        return _register(request.get_json(silent=True) or {}, caller)
+
     @app.post("/ray/clusters")
     def ray_clusters():
         caller = identity.cloud_run_caller(request.headers.get("Authorization"))
@@ -659,6 +704,16 @@ def create_app(registry: Registry | None = None) -> Flask:
             except Exception as e:  # noqa: BLE001 - a refusal never gets better: acknowledge it
                 log.exception("removing the lookup service of %s", contract.usecase)
                 return jsonify(status="dropped", reason=str(e)[:400]), 200
+        if body.get("kind") == "model.registration":          # 1.4.3 (FR-100), from a private register step
+            try:
+                caller = identity.verify(body.get("id_token") or "", audiences())
+            except identity.NotVerified as e:
+                log.warning("registration request for %s dropped: %s", body.get("usecase"), e)
+                return jsonify(status="dropped", reason=str(e)), 200
+            response, code = _register(body, caller)
+            # A refusal is answered in runs/registration/ and never gets better: acknowledge. No live release or a
+            # failed upload: let Pub/Sub retry (a repeated request finds the version it registered).
+            return response, (200 if code in (400, 403) else 503 if code == 404 else code)
         if body.get("kind") == "ray.cluster":
             # Pub/Sub does not say who published: the message carries the runner's ID token.
             try:

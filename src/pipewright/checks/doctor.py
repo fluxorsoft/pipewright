@@ -288,6 +288,40 @@ def check_integrity(env: Environment, gcp: Gcp, report: Report) -> None:
     _check_writers(env, gcp, report, s, nudge)
     _check_audit_retention(env, gcp, report, s, nudge)
     _check_renewer(env, gcp, report, s, pol)
+    _check_registration(env, gcp, report, s, nudge)
+
+
+# Roles that let an identity upload model versions, and so move any model's default (FR-100).
+UPLOAD_ROLES = ("roles/owner", "roles/editor", "roles/aiplatform.admin", "roles/aiplatform.user")
+
+
+def _check_registration(env: Environment, gcp: Gcp, report: Report, s: str, nudge: str) -> None:
+    """Pipewright 1.4.3 (FR-100): who may write the registry. Under policies.registration: launcher, no runner may
+    upload (a runner that still can moves any model's default); under runner (the default), say what that means."""
+    mode = (env.policies or {}).get("registration") or "runner"
+    if mode != "launcher":
+        report.add(s, Result(nudge, "registration", "policies.registration runner: every runner can upload model "
+                             "versions, which moves any model's default, other tenants' too (caught after the fact, "
+                             "not prevented)", "set policies.registration: launcher once every use case is "
+                             "released with 1.4.3 or later (docs/INTEGRITY.md)"))
+        return
+    p = gcp.post(f"https://cloudresourcemanager.googleapis.com/v1/projects/{env.project}:getIamPolicy",
+                 {"options": {"requestedPolicyVersion": 3}})
+    if not p.ok:
+        report.add(s, Result(INFO, "registration", "launcher; the project's IAM policy is not readable, so the "
+                                                   "runners' roles are not checked"))
+        return
+    runners = {f"serviceAccount:{t[k]}".lower() for t in (env.tenants or {}).values() if isinstance(t, dict)
+               for k in ("runner_service_account", "service_account", "runner") if t.get(k)}
+    can = sorted({m.split(":", 1)[-1] for b in (p.body or {}).get("bindings") or [] if b.get("role") in UPLOAD_ROLES
+                  for m in b.get("members") or [] if m.lower() in runners})
+    if can:
+        report.add(s, Result(FAIL, "registration", f"launcher, but {len(can)} runner(s) can still upload model "
+                             f"versions: {', '.join(can[:5])}", "apply the environment's Terraform: runners get the "
+                             "role without models.upload, update and delete"))
+    else:
+        report.add(s, Result(OK, "registration", "launcher: no runner can write the registry; the launcher "
+                                                 "registers each version after its checks"))
 
 
 def _known_runners(env: Environment) -> set[str]:

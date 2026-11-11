@@ -290,6 +290,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     judged_warnings, judged_problems = judgement.check(ml, env, tenant)
     judged_warnings += judgement.serving_image_by_tag(directory / ((eff.get("components") or {}).get("dir") or ""))
+    if (env.policies or {}).get("registration") == "launcher":
+        judged_warnings += direct_registry_writes(directory / ((eff.get("components") or {}).get("dir") or ""),
+                                                  env.name)
     extra_warnings += judged_warnings
     problems += judged_problems
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
@@ -415,6 +418,10 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                      if env.orchestrator == "kfp" else {}),
                   "bigquery_kms_key": env.security.get("bigquery_kms_key"),
                   **({"ray": ray} if ray else {}),
+                  # 1.4.3 (FR-100): runners cannot write the registry; the register step asks the launcher. Only
+                  # present when on, so releases elsewhere compile exactly as before.
+                  **({"registration": "launcher", "artifacts_bucket": env.artifacts_bucket}
+                     if (env.policies or {}).get("registration") == "launcher" else {}),
                   # read_source refuses feature tables (and groups' tables) outside them
                   **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
                                                   .get("datasets")) is not None else {})},
@@ -448,6 +455,30 @@ def _entity_columns_as_features(ml: dict, ml_spec: dict, bqml: bool) -> list[str
             f"{'is a feature' if len(found) == 1 else 'are features'} by default; a model then learns from the "
             f"date or the ID. Add {'it' if len(found) == 1 else 'them'} to features.exclude, or list "
             f"features.include (FR-68)"]
+
+
+# Calls that write the model registry directly (FR-100): under policies.registration: launcher a runner cannot.
+_REGISTRY_WRITES = ("Model.upload(", "models:upload", "mergeVersionAliases", "upload_model(")
+
+
+def direct_registry_writes(components, env_name: str) -> list[str]:
+    """Component files that write the registry themselves and do not use the launcher's register_version: under
+    policies.registration: launcher they fail with 403 when they run (FR-100)."""
+    out = []
+    if not components or not components.is_dir():
+        return out
+    for path in sorted(components.rglob("*.py")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found = [w.rstrip("(") for w in _REGISTRY_WRITES if w in text]
+        if found and "register_version" not in text and "registration_by_launcher" not in text:
+            out.append(f"{path.relative_to(components.parent).as_posix()} writes the model registry itself "
+                       f"({', '.join(found)}): in {env_name} runners cannot (policies.registration: launcher), so it "
+                       "will fail with 403. Register through pipewright_runtime.register_version, as the reference "
+                       "example's register step does (FR-100)")
+    return out
 
 
 def _warnings(ml: dict) -> list[str]:

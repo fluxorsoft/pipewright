@@ -214,6 +214,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "registration": {
+          "enum": ["runner", "launcher"],
+          "description": "1.4.3 (FR-100): who writes the model registry. runner (default): each run's runner uploads its version. launcher: runners cannot write the registry; the launcher registers each version after checking the run, its files and the gates, and moves the default only by the release's policy"
+        },
         "ab_test": {
           "type": "object",
           "additionalProperties": false,

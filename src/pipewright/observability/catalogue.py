@@ -73,8 +73,12 @@ EVENTS: tuple[Event, ...] = (
     Event("release.rolled_back", _C, "The live release was moved back to an earlier one.",
           ("ml", "sre", "governance", "product")),
     # model
-    Event("model.registered", _S, "A new model version is in the registry (and whether it is the champion).",
+    Event("model.registered", _S, "A new model version is in the registry (and whether it is the champion). With "
+          "policies.registration: launcher (1.4.3) the launcher sends it, with registered_by: launcher.",
           ("ml", "governance")),
+    Event("model.registration_refused", _L, "The launcher refused a run's registration (wrong run, files outside "
+          "the tenant's root, a changed evaluation record, failed gates), with the reason.",
+          ("governance", "ml", "sre"), "1.4.3"),
     Event("model.registration_skipped", _S, "The register step skipped on purpose (an exact replay ties itself).",
           ("ml",), "1.4.3"),
     Event("model.approved", _C, "A person approved a model version.", ("governance", "ml")),

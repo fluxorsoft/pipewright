@@ -110,6 +110,30 @@ Set `isolate_tenant_artifacts = true` in the starter so each team's runner write
 (`pipeline-root/<team>/`); one team's runs then cannot overwrite another team's models or evaluation records. The
 Enterprise blueprint has always done this.
 
+## A runner that cannot move a model's default (1.4.3)
+
+Every runner holds `roles/aiplatform.user` across the project by default, and that includes uploading model
+versions. An upload can move a model's `default` alias, any model's, other teams' too, and no IAM role can stop an
+identity that uploads from doing it (model-level IAM cannot scope uploads). Pipewright catches a default nobody
+approved at deploy and promote, and the watch names who moved it, but the default setting does not prevent it.
+
+`policies.registration: launcher` prevents it. It is off by default (`runner`, as before 1.4.3):
+
+- Runners get a custom role: `roles/aiplatform.user` without `aiplatform.models.upload`, `update` and `delete`
+  (Terraform builds it from the predefined role at each apply).
+- The register step asks the launcher (`pipewright_runtime.register_version`). Before it uploads, the launcher checks
+  that the request comes from the run it names (the use case's runner, a running job with that run ID), that the
+  model folder is under the use case's pipeline root and the evaluation record is the one the step wrote (by
+  SHA-256), and recomputes the gates from that record. It moves the default only where the release's policy does
+  (`promote_model: auto`). A refusal is a `model.registration_refused` event and fails the run, saying why.
+- BigQuery ML registers the same way: the launcher runs the `ALTER MODEL` itself, with model metadata on each team's
+  dataset only.
+- Operators keep their roles: approving, promoting and retiring are their decisions, recorded with who made them.
+
+Turn it on after every use case is released with 1.4.3 or later: an older register step uploads directly and fails
+with 403. `pipewright validate` names components that write the registry themselves, and `pipewright doctor` fails
+while a runner can still upload. Cost: none (one request to the launcher per training run).
+
 ## Where the bytes come from (1.4.1)
 
 A live test (2026-11-06) settled where a swapped file reaches serving without a deploy:
