@@ -3,3 +3,5 @@
 *
 !dist/
 dist/*.tar.gz
+# The capture receiver image (images/capture-receiver.Dockerfile) copies this one file.
+!src/pipewright/serving/receiver.py
