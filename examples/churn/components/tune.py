@@ -11,7 +11,10 @@ BASE_IMAGE = "python:3.11-slim"
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
 def plan_trials(ml_config: dict) -> NamedTuple("Plan", [("tuning", str), ("trials", list), ("defaults", dict)]):
-    """tuning is "on" or "off"; trials are hyperparameter sets (the first is the defaults)."""
+    """tuning is "on" or "off"; trials are hyperparameter sets as JSON text (the first is the defaults). Text, not
+    dicts: Kubeflow Pipelines 2.17.2 hands a ParallelFor item over as a string and refused a step declaring a dict
+    ("expect STRUCT, got string"; FR-128, found in the 1.4.3 battle test). Agent Platform takes either."""
+    import json
     from collections import namedtuple
 
     from churn_net import DEFAULTS
@@ -21,19 +24,24 @@ def plan_trials(ml_config: dict) -> NamedTuple("Plan", [("tuning", str), ("trial
     defaults = {**DEFAULTS, **training["hyperparameters"]}
     tuning = training["tuning"]
     trials = sample_trials(tuning, defaults, training["seed"]) if tuning["enabled"] else [defaults]
-    return namedtuple("Plan", ["tuning", "trials", "defaults"])("on" if tuning["enabled"] else "off", trials, defaults)
+    return namedtuple("Plan", ["tuning", "trials", "defaults"])("on" if tuning["enabled"] else "off",
+                                                                [json.dumps(t, sort_keys=True) for t in trials],
+                                                                defaults)
 
 
 @dsl.component(base_image=BASE_IMAGE, target_image=COMPONENT_IMAGE)
 def tune_trial(
     train_data: dsl.Input[dsl.Dataset],
     validation_data: dsl.Input[dsl.Dataset],
-    hyperparameters: dict,
+    hyperparameters: str,
     ml_config: dict,
 ) -> str:
-    """Trains on train, scores tuning.metric on validation. Returns JSON {hyperparameters, score}."""
+    """Trains on train, scores tuning.metric on validation. hyperparameters: one trial as JSON text (FR-128).
+    Returns JSON {hyperparameters, score}."""
     import json
     import logging
+
+    hyperparameters = json.loads(hyperparameters) if isinstance(hyperparameters, str) else hyperparameters
 
     import pandas as pd
     from churn_net import fit, predict
