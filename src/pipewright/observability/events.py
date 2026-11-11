@@ -17,7 +17,10 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
+
+_WRITE = threading.Lock()
 
 log = logging.getLogger("pipewright.events")
 
@@ -85,7 +88,12 @@ def emit(e: dict, topic: str | None = None, gcp=None, stream=None, region: str |
     attributes: extra Pub/Sub attributes for subscription filters (e.g. decision_feed)."""
     entry = {"severity": "NOTICE", "message": f"pipewright event {e['event_type']}",
              "logging.googleapis.com/labels": _labels(e), "pipewright_event": e}
-    print(json.dumps(entry, default=str), file=stream or sys.stdout, flush=True)
+    # One write of the whole line, under a lock: two launcher threads that print at once (two incidents closing
+    # together) interleaved their lines, which Cloud Logging then kept as text, not JSON (1.4.3 battle test).
+    out = stream or sys.stdout
+    with _WRITE:
+        out.write(json.dumps(entry, default=str) + "\n")
+        out.flush()
     topic = topic or os.environ.get("PIPEWRIGHT_EVENTS_TOPIC")
     if not topic:
         return False

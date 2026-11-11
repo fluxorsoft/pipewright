@@ -1,6 +1,7 @@
 """The event catalogue lists every event the code sends (Pipewright 1.4.3): a new event without a catalogue entry
 fails here, so the docs, `pipewright events` and the personas' subscription filters never drift."""
 
+import json
 import re
 from pathlib import Path
 
@@ -116,3 +117,23 @@ def test_published_messages_carry_persona_attributes():
 def test_events_doc_is_current():
     doc = (ROOT / "docs" / "EVENTS.md").read_text(encoding="utf-8")
     assert doc == catalogue.markdown(), "regenerate: python -m pipewright.observability.catalogue > docs/EVENTS.md"
+
+
+def test_concurrent_events_stay_one_json_line_each():
+    """1.4.3 battle test: two launcher threads emitting at once interleaved their lines (kept as text, not JSON)."""
+    import io
+    import threading
+
+    from pipewright.observability import events
+
+    out = io.StringIO()
+    threads = [threading.Thread(target=lambda i=i: [events.emit(events.event("serving.recovered", "u", "e",
+                                                                                 n=i, pad="x" * 5000), stream=out)
+                                                    for _ in range(20)]) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    lines = out.getvalue().splitlines()
+    assert len(lines) == 160 and all(json.loads(line)["pipewright_event"]["event_type"] == "serving.recovered"
+                                     for line in lines)
