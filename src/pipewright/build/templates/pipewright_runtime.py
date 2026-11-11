@@ -1214,6 +1214,58 @@ def online_window(ml_config: dict, project: str, source_uri: str, features: list
     return rows, summary
 
 
+# ------------------------------------------------------------------ attribution (1.4.3, FR-98 stage 4) --
+
+def permutation_shapley(predict, rows, background, permutations: int = 2, seed: int = 42):
+    """Shapley values of each row's prediction by sampled feature permutations (each with its reverse, as SHAP's
+    permutation explainer does), against background rows. Model-agnostic: predict(array of rows) -> scores. numpy
+    only, so the component image needs no SHAP (about 165 MB). Returns an array (rows, features)."""
+    import numpy as np
+
+    x, bg = np.asarray(rows, dtype="float64"), np.asarray(background, dtype="float64")
+    n, f = x.shape
+    rng = np.random.default_rng(seed)
+    out = np.zeros((n, f))
+    orders = []
+    for _ in range(max(1, permutations)):
+        o = rng.permutation(f)
+        orders += [o, o[::-1]]
+    for i in range(n):
+        batch, marks = [], []
+        for order in orders:
+            z = bg.copy()
+            batch.append(z.copy())
+            for j in order:
+                z[:, j] = x[i, j]
+                batch.append(z.copy())
+            marks.append(order)
+        preds = np.asarray(predict(np.concatenate(batch).astype("float32")), dtype="float64").reshape(-1)
+        step = len(bg)
+        for k, order in enumerate(marks):
+            chunk = preds[k * (f + 1) * step:(k + 1) * (f + 1) * step].reshape(f + 1, step).mean(axis=1)
+            for pos, j in enumerate(order):
+                out[i, j] += chunk[pos + 1] - chunk[pos]
+        out[i] /= len(marks)
+    return out
+
+
+def attribution_shares(predict, rows, background, features: list[str], seed: int = 42) -> dict:
+    """Each feature's share of the mean absolute attribution on rows (summing to 1)."""
+    import numpy as np
+
+    values = np.abs(permutation_shapley(predict, rows, background, seed=seed)).mean(axis=0)
+    total = float(values.sum()) or 1.0
+    return {f: round(float(v) / total, 4) for f, v in zip(features, values, strict=True)}
+
+
+def attribution_drift(baseline: dict, now: dict, top: int = 3) -> tuple[float, list[dict]]:
+    """(total variation distance between the share vectors, the features that moved most)."""
+    keys = sorted(set(baseline) | set(now))
+    tvd = 0.5 * sum(abs(now.get(k, 0.0) - baseline.get(k, 0.0)) for k in keys)
+    moved = sorted(keys, key=lambda k: -abs(now.get(k, 0.0) - baseline.get(k, 0.0)))[:top]
+    return round(tvd, 4), [{"feature": k, "training": baseline.get(k, 0.0), "now": now.get(k, 0.0)} for k in moved]
+
+
 def registration_by_launcher(ml_config: dict) -> bool:
     """policies.registration: launcher (Pipewright 1.4.3, FR-100): this runner cannot write the registry."""
     return (ml_config.get("platform") or {}).get("registration") == "launcher"

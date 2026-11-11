@@ -46,7 +46,7 @@ def test_example_compiles_and_accepts_its_parameters(repo):
     assert "ml_config" in infos["inference"].parameters
     assert {"tune-trial", "train-model", "evaluate-model", "register-model"} <= set(infos["training"].tasks)
     assert {"score-batch", "check-batch", "request-retraining"} <= set(infos["inference"].tasks)
-    assert len(find_components(dest / "components")) == 18      # 1.4.3: read_online_window (FR-98)
+    assert len(find_components(dest / "components")) == 19      # 1.4.3: read_online_window, check_attribution (FR-98)
 
 
 def test_bad_names_rejected(repo):

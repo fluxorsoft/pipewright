@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "components"))
 
+from attribution import check_attribution  # noqa: E402
 from champion import load_model  # noqa: E402
 from kfp import dsl  # noqa: E402
 from monitor import check_batch, record_monitoring, request_retraining  # noqa: E402
@@ -45,6 +46,10 @@ def churn_monitoring_pipeline(
                             model=champion.outputs["model"], model_version=champion.outputs["version"],
                             ml_config=ml_config).set_display_name("check-drift-and-performance")
         check.set_caching_options(False)
+        attribution = check_attribution(run_id=run_id, scored=window.outputs["scored"],
+                                        model=champion.outputs["model"], model_version=champion.outputs["version"],
+                                        ml_config=ml_config)
+        attribution.set_display_name("check-attribution").set_caching_options(False)
         retrain = request_retraining(project=project, bq_dataset=bq_dataset, run_id=run_id,
                                      triggers=check.outputs["triggers"], summary=check.outputs["summary"],
                                      data_checks="", model_version=champion.outputs["version"],

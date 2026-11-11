@@ -53,6 +53,19 @@ def train_model(
         "prediction_baseline": psi_baseline(predict(net, x)),
         "split": prep_info,
     }
+    attribution = ((ml_config.get("monitoring") or {}).get("online") or {}).get("attribution") or {}
+    if attribution.get("enabled"):
+        # Pipewright 1.4.3 (FR-98): what drives the answers on training data, the baseline online attribution is
+        # compared with, and the background rows it is measured against (both from a fixed sample).
+        import numpy as np
+        from pipewright_runtime import attribution_shares
+
+        rng = np.random.default_rng(seed)
+        background = x[rng.choice(len(x), min(50, len(x)), replace=False)]
+        sample = x[rng.choice(len(x), min(int(attribution.get("sample_rows", 500)), len(x)), replace=False)]
+        stats["attribution_background"] = background.tolist()
+        stats["attribution_baseline"] = attribution_shares(lambda rows: predict(net, rows), sample, background,
+                                                           features, seed=seed)
 
     os.makedirs(model.path, exist_ok=True)
     model_pt = os.path.join(model.path, "model.pt")
