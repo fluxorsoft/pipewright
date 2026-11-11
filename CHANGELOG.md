@@ -5,6 +5,30 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
+Model serving observability (FR-98), a runner that cannot move a model's default (FR-100) and repeatable synthetic
+runs (FR-107). All off until turned on: a use case or environment that sets none of it releases and serves exactly as
+before. The guides are [docs/SERVING.md](docs/SERVING.md) (serving observability) and
+[docs/INTEGRITY.md](docs/INTEGRITY.md) (registration).
+
+- Serving health (`monitoring.health`): alert policies per deployed version on errors, p95 latency, ready replicas and
+  stuck scale-ups (Agent Platform metrics; KServe through Managed Prometheus), incidents to a Pub/Sub channel, the
+  launcher's `/incidents` route sends `serving.degraded` and `serving.recovered`; rollback proposals
+  (`propose_rollback_hours`), decided with `pipewright model rollbacks` and `model rollback --approve | --decline`.
+- Capture (`model.serving.capture`): Agent Platform request-response logging into `<usecase>_online_log`; KServe's
+  logger through the tenant's capture receiver (`images/capture-receiver.Dockerfile`) and a log sink; coverage in the
+  launcher's tick (`serving.capture_gap`, `serving.capture_silent`).
+- Online monitoring (`monitoring.online`, `spec.pipelines.monitoring`): your monitor steps on the live window
+  (`pipewright_runtime.online_window`), insufficient data said as such (`monitoring.insufficient_data`), never "no drift".
+- Outcomes: the caller contract `{_pw_prediction_id, _pw_unit, row}`; the lookup gateway makes the prediction ID.
+- Attribution drift (`monitoring.online.attribution`): permutation Shapley values against training
+  (`monitoring.attribution_drift`); TorchServe's latency histogram `PwPredictLatencySeconds` for KServe p95.
+- Scale to zero: `validate` warns that calls are dropped while it scales up; `policies.serving.scale_to_zero: refused`.
+- Registration through the launcher (`policies.registration: launcher`): runners lose registry writes; the launcher
+  checks the run, its files and the gates before it registers (`model.registration_refused` when it will not); BigQuery
+  ML too. `validate` and `doctor` show what still writes the registry directly.
+- Repeatable synthetic runs: `synthetic.engine.seed` and `max_epochs` (and per candidate); the evaluation record says
+  whether a candidate repeats and why; a free local port for the engine.
+
 A/B testing of models (FR-57), off until `ab_test.enabled`: a use case that sets none of it scores and serves exactly
 as in 1.4.2. The guide is [docs/AB_TESTING.md](docs/AB_TESTING.md).
 

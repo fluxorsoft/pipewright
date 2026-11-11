@@ -254,3 +254,85 @@ busy model slows the others. `doctor` shows each model's share of its pool.
 
 KServe on private GKE calls a lookup service inside the cluster directly. The guideline and a tested manifest are in
 [examples/gke-lookup/](../examples/gke-lookup/).
+
+## Serving observability (1.4.3, FR-98)
+
+Pipewright does not run a monitoring engine of its own. It turns your YAML into Cloud Monitoring alert policies,
+records what your endpoint receives, reuses your own monitor steps on that live traffic, and puts every finding on
+the events topic, where each persona subscribes to what it needs (`pipewright events --persona sre`). Everything is
+off until you turn it on.
+
+### Health: is the deployed version healthy?
+
+```yaml
+monitoring:
+  health:
+    enabled: true
+    error_rate: { warning: 0.01, critical: 0.05 }      # share of 5xx answers
+    latency_p95_ms: { warning: 500, critical: 1000 }
+    min_ready_replicas: 1
+    scaling_minutes: 5                                 # replicas wanted but not ready this long
+    propose_rollback_hours: 0                          # > 0: a critical breach this soon after a deploy proposes a rollback
+```
+
+`deploy-model` and `alerts sync` keep one set of alert policies per deployed version (and per A/B arm). Their
+incidents go to the environment's incident channel (the platform turns it on: `serving_health = true` in the starter);
+the launcher turns each one into `serving.degraded` when it opens and `serving.recovered` when it closes, with the
+version, the signal, the severity and the threshold in force.
+
+- Agent Platform: errors are 5xx `response_count` over all responses (`error_count` does not count a model's own 500s),
+  latency is the 95th percentile of `prediction_latencies`, a stuck scale-up is `target_replicas` above `replicas`.
+- KServe: TorchServe's counters and the handler's `PwPredictLatencySeconds` histogram (the reference handler records
+  it; a handler of your own adds the lines in its `handle`, or the latency policy uses the mean and says so). A policy
+  on a counter TorchServe has not created yet (no 5xx so far) waits as pending until `alerts sync` runs again.
+- With `propose_rollback_hours` set, a critical incident that soon after a deploy opens a proposal
+  (`pipewright model rollbacks`); a person decides with `pipewright model rollback --case <id> --approve | --decline`.
+  Approving makes the previous version the default through `model approve` (its gates checked again) and deploys it.
+
+### Capture and online monitoring: is the model still right on live traffic?
+
+```yaml
+spec:
+  pipelines:
+    monitoring: { file: monitoring_pipeline.py, function: churn_monitoring_pipeline }
+  model:
+    serving:
+      capture: { enabled: true, sample_rate: 0.05, max_per_day: 100000, retention_days: 30 }
+  monitoring:
+    online: { enabled: true, schedule: "0 6 * * *", window_hours: 24, min_samples: 500 }
+```
+
+Capture records a sample of requests and answers in your dataset (`<usecase>_online_log`; on KServe through the
+tenant's capture receiver and a log sink). The monitoring pipeline reads the last `window_hours` with
+`pipewright_runtime.online_window` and runs your own drift and performance steps on it, exactly as after batch
+scoring. Below `min_samples` the window is `insufficient_data`: the drift check is skipped and
+`monitoring.insufficient_data` says so, because an empty window is never "no drift". The launcher's hourly tick
+compares what capture recorded with what was served (`serving.capture_gap`, `serving.capture_silent`).
+
+Callers that want outcomes joined later send `{"_pw_prediction_id": ..., "_pw_unit": <keyed hash>, "row": [...]}`
+(the reference handler strips the IDs); the lookup gateway does this for you and returns each prediction ID.
+
+### Attribution: which features drive the answers now?
+
+`monitoring.online.attribution` (off by default) measures each feature's share of the model's answers on the window
+with permutation Shapley values and compares it with the share recorded at training. A move past `threshold` (total
+variation distance, default 0.10) sends `monitoring.attribution_drift` with the features that moved most. It needs no
+labels, so it can warn before outcomes arrive. In 1.4.3 it does not open a retrain case on its own.
+
+### Scale to zero
+
+`model.serving.scale_to_zero` is your explicit choice (an Agent Platform Preview). Every call during a scale-up is
+answered 429 and dropped (2 to 3 minutes measured), and Cloud Monitoring does not count those 429s, so `validate`
+warns, a platform can refuse it (`policies.serving.scale_to_zero: refused`), and health's scaling condition catches a
+scale-up that never finishes.
+
+### What it costs (list prices)
+
+| Item | Price | Example |
+|---|---|---|
+| Agent Platform request logging | no logging charge; BigQuery storage about $0.02 per GiB a month | 100 requests/s at 5%, 4 KiB: about $1 a month |
+| KServe capture through the log sink | Cloud Logging $0.50 per GiB after the project's free 50 GiB | $0 to $25 a month |
+| Managed Prometheus (KServe) | $0.06 per million samples | a predictor's series every 30 s: under $0.10 a month |
+| Alert policies | not charged today | 4 to 6 conditions per deployed version |
+| Monitoring pipeline | one run plus its steps' compute | daily: about $1 to $3 a month |
+| Attribution | the step's compute only | 500 rows: about 15 s on 2 vCPU |

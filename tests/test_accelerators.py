@@ -49,7 +49,8 @@ def test_scale_to_zero_is_opt_in(repo):
     uc = resolved(repo, serving={"replicas": {"min": 0, "max": 2}})
     assert any("deploys one replica (as in 1.x)" in w for w in uc.warnings)
     uc = resolved(repo, serving={"replicas": {"min": 0, "max": 2}, "scale_to_zero": True})
-    assert not uc.warnings and uc.model["serving"]["scale_to_zero"] is True
+    assert [w for w in uc.warnings if "429" in w] == list(uc.warnings)                # 1.4.3: only the FR-98 warning
+    assert uc.model["serving"]["scale_to_zero"] is True
     assert "scale_to_zero needs replicas.min 0" in problems(repo, serving={"scale_to_zero": True})
 
 

@@ -22,6 +22,9 @@ pipelines.training.function: The name of the training pipeline function in that 
 pipelines.inference: The pipeline that scores new data with the champion model.
 pipelines.inference.file: The Python file, relative to the use case folder, that defines the inference pipeline.
 pipelines.inference.function: The name of the inference pipeline function in that file.
+pipelines.monitoring: "1.4.3 (FR-98): your online monitoring pipeline: Pipewright's online-window reader, then your monitor steps, run on monitoring.online.schedule."
+pipelines.monitoring.file: The Python file that defines the monitoring pipeline, relative to the use case folder.
+pipelines.monitoring.function: The @dsl.pipeline function in that file.
 
 components: Where the pipeline components' code lives. It is built into the component image every step runs in.
 components.dir: The folder of component code, relative to the use case folder.
@@ -203,6 +206,10 @@ monitoring.health: "1.4.3 (FR-98): alert policies on each deployed version's err
 monitoring.health.enabled: Whether health policies are kept for the deployed versions. Default false.
 monitoring.health.error_rate: "The share of 5xx answers that is a warning and that is critical. Default 0.01 and 0.05."
 monitoring.health.latency_p95_ms: "The 95th percentile latency (ms) that is a warning and that is critical. Default 500 and 1000. On KServe, from the handler's latency histogram; without one, the mean, labelled so."
+monitoring.health.error_rate.warning: The share of 5xx answers that opens a warning incident.
+monitoring.health.error_rate.critical: The share of 5xx answers that opens a critical incident.
+monitoring.health.latency_p95_ms.warning: The 95th percentile latency (ms) that opens a warning incident.
+monitoring.health.latency_p95_ms.critical: The 95th percentile latency (ms) that opens a critical incident.
 monitoring.health.min_ready_replicas: Fewer ready replicas than this is degraded. Default 1.
 monitoring.health.scaling_minutes: "Replicas wanted but not ready for this long is degraded (a stuck scale-up; a normal cold start ends sooner). Default 5."
 monitoring.health.propose_rollback_hours: "Above 0: a critical breach within this many hours of a promotion opens a rollback proposal for the release's approvers. Never automatic. Default 0 (off)."
