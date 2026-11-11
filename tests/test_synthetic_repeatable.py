@@ -131,3 +131,15 @@ def test_seed_without_epochs_warns(repo):
     uc = resolve(synthetic_repo(repo, engine={"type": "mostlyai", "seed": 42}))
     warned = [w for w in uc.warnings if "FR-107" in w]
     assert warned and "same machine only" in warned[0]
+
+
+def test_a_numeric_label_is_the_positive_class_after_prepare():
+    """1.4.3 battle test: prepare() makes 1 into 1.0; utility compared "1.0" with "1" and was never measured."""
+    import pandas as pd
+
+    from pipewright.synthetic.runtime import evaluation
+
+    labels = evaluation.prepare(pd.DataFrame({"churned": [0, 1, 1, 0]}))["churned"]
+    assert list(evaluation.positive_class(labels, 1)) == [0, 1, 1, 0]
+    assert list(evaluation.positive_class(pd.Series(["yes", "no"]), "yes")) == [1, 0]
+    assert list(evaluation.positive_class(pd.Series([True, False]).astype(str), "True")) == [1, 0]

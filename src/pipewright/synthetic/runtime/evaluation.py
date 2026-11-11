@@ -106,6 +106,24 @@ def fidelity(train, syn, label: str | None) -> dict:
     return {"fidelity": round((shape + pair) / 2, 4), "column_shapes": round(shape, 4), "column_pairs": round(pair, 4)}
 
 
+def positive_class(values, positive):
+    """1 where the label is the positive class. prepare() turns numbers into floats, so a label 1 is 1.0 by then:
+    compared as text with "1" no row matched, the classifier saw one class and utility was never measured (found
+    in the 1.4.3 battle test). Numbers are compared as numbers."""
+    import pandas as pd
+
+    if positive is None:
+        return pd.to_numeric(values, errors="coerce").fillna(0).astype(int)
+    try:
+        wanted = float(positive)
+    except (TypeError, ValueError):
+        wanted = None
+    numeric = pd.to_numeric(values, errors="coerce")
+    if wanted is not None and numeric.notna().all():
+        return (numeric == wanted).astype(int)
+    return (values.astype(str) == str(positive)).astype(int)
+
+
 def utility(train, holdout, syn, label: str, positive) -> dict:
     """TSTR against TRTR with one classifier for every engine (histogram gradient boosting)."""
     import pandas as pd
@@ -119,7 +137,7 @@ def utility(train, holdout, syn, label: str, positive) -> dict:
         x = df.drop(columns=[label]).copy()
         for c, levels in cats.items():
             x[c] = pd.Categorical(x[c].astype(str), categories=levels)
-        y = (df[label].astype(str) == str(positive)).astype(int) if positive is not None else df[label].astype(int)
+        y = positive_class(df[label], positive)
         return x, y
 
     def auc(fit):
