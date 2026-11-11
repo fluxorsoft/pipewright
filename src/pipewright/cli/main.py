@@ -200,14 +200,26 @@ def cmd_alerts_sync(args) -> int:
 
 
 def _health_sync(uc, env, dry_run: bool = False) -> int:
-    """1.4.3 (FR-98): the use case's health policies for what is deployed now. Nothing when monitoring.health is not
-    set. Returns the number of errors."""
-    if "health" not in (uc.ml.get("monitoring") or {}):
-        return 0
+    """1.4.3 (FR-98): capture on the use case's endpoint (Agent Platform) and its health policies for what is
+    deployed now. Nothing when neither is set. Returns the number of errors."""
     from pipewright.gcp import Gcp
+
+    gcp, failed = Gcp(), 0
+    if "capture" in (uc.model.get("serving") or {}) and uc.model["serving"].get("target") != "kserve":
+        from pipewright.models.deploy import find_endpoint
+        from pipewright.serving import capture
+
+        endpoint = find_endpoint(uc, env, gcp)
+        if endpoint:
+            try:
+                capture.sync_endpoint(uc, env, gcp, endpoint)
+            except ConfigError as e:
+                print(f"  capture: {e}")
+                failed += 1
+    if "health" not in (uc.ml.get("monitoring") or {}):
+        return failed
     from pipewright.serving import health
 
-    gcp = Gcp()
     try:
         targets = health.deployed_targets(uc, env, gcp)
     except ConfigError as e:
@@ -215,7 +227,7 @@ def _health_sync(uc, env, dry_run: bool = False) -> int:
         return 1
     plan = health.sync(uc, env, targets, gcp, dry_run=dry_run)
     print(health.render(plan))
-    return len(plan.errors)
+    return failed + len(plan.errors)
 
 
 def cmd_new_usecase(args) -> int:

@@ -23,6 +23,7 @@ import time
 from pipewright.config import Environment, ResolvedUseCase
 from pipewright.errors import ConfigError
 from pipewright.models.names import oldest
+from pipewright.serving import capture, torchserve_metrics
 
 API = "/apis/serving.kserve.io/v1beta1"
 # Agent Platform's defaults for its prebuilt serving containers (TorchServe based), when the registry has none.
@@ -96,6 +97,30 @@ def default_version(uc: ResolvedUseCase, env: Environment, gcp) -> dict:
     return r.body
 
 
+def observed(uc: ResolvedUseCase) -> bool:
+    """1.4.3 (FR-98): health or capture is on, so the server's metrics are scraped."""
+    mon = (getattr(uc, "ml", None) or {}).get("monitoring") or {}
+    cap = ((getattr(uc, "model", None) or {}).get("serving") or {}).get("capture") or {}
+    return bool((mon.get("health") or {}).get("enabled") or cap.get("enabled"))
+
+
+def apply_pod_monitoring(k, log=print) -> None:
+    """1.4.3 (FR-98): Managed Prometheus scrapes the predictor's TorchServe metrics (port 8082)."""
+    from pipewright.kube import message
+
+    body = torchserve_metrics.pod_monitoring(k.name, k.s["namespace"], k.name)
+    path = f"/apis/monitoring.googleapis.com/v1/namespaces/{k.s['namespace']}/podmonitorings"
+    current = k.kube.get(f"{path}/{body['metadata']['name']}")
+    if current.ok:
+        body["metadata"]["resourceVersion"] = current.body["metadata"]["resourceVersion"]
+        r = k.kube.request("PUT", f"{path}/{body['metadata']['name']}", body)
+    else:
+        r = k.kube.post(path, body)
+    if not r.ok:
+        log(f"warning: the PodMonitoring for {k.name} was not applied ({r.status} {message(r)}): health and coverage "
+            "need Managed Prometheus to scrape port 8082; ask the platform team (RBAC on podmonitorings)")
+
+
 def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: dict,
                       pinned: dict | None = None, name: str | None = None, labels: dict | None = None) -> dict:
     """pinned (Pipewright 1.4.1, FR-101 item 2): the approved copy the pods load, and that an init container checks
@@ -130,10 +155,16 @@ def inference_service(uc: ResolvedUseCase, env: Environment, version: dict, s: d
         container["command"] = spec["command"]
     if spec.get("args"):
         container["args"] = spec["args"]
+    if observed(uc) and torchserve_metrics.is_torchserve(container["image"]):
+        # 1.4.3 (FR-98): TorchServe's metrics in Prometheus mode, with the handler's latency histogram
+        container = torchserve_metrics.container_settings(container)
     predictor = {"serviceAccountName": s["service_account"],
                  "minReplicas": max(int(serving["replicas"]["min"]), 1),   # Standard mode does not scale to zero
                  "maxReplicas": int(serving["replicas"]["max"]),
                  "containers": [container]}
+    logger = capture.kserve_logger(uc, s["namespace"])
+    if logger:                                    # 1.4.3 (FR-98): capture through the tenant's receiver
+        predictor["logger"] = logger
     if pinned:
         import json
 
@@ -374,7 +405,16 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     if pinned:
         body["metadata"]["annotations"]["pipewright.dev/approved-copy"] = pinned["folder"]
     same_files = _pinned_files(current) == ((pinned or {}).get("files") or None)
-    if running == _label(vid) and current_pin == (pinned or {}).get("folder") and same_files:
+    # 1.4.3 (FR-98): capture or health turned on or off changes the predictor, not the version
+    pred_now = ((current or {}).get("spec") or {}).get("predictor") or {}
+    same_obs = pred_now.get("logger") == body["spec"]["predictor"].get("logger") and \
+        [e.get("name") for c in pred_now.get("containers") or [] for e in c.get("env") or []
+         if e.get("name") == "TS_METRICS_MODE"] == \
+        [e.get("name") for c in body["spec"]["predictor"]["containers"] for e in c.get("env") or []
+         if e.get("name") == "TS_METRICS_MODE"]
+    if observed(uc):
+        apply_pod_monitoring(k, log)
+    if running == _label(vid) and current_pin == (pinned or {}).get("folder") and same_files and same_obs:
         log(f"v{vid} of {uc.model['name']} is already live on {k.name}")
         log(k.how_to_call() or "")
         return {"version": vid, "status": "live"}
