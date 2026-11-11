@@ -413,6 +413,15 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                               "identif" + ("ies" if len(personal) == 1 else "y") + " a person: list it, so it is "
                               "never a feature and `pipewright data erase` can find its rows")
 
+    # 1.4.3 (GA QA): live quality joins an outcomes table in the tenant's dataset; one the use case does not own must
+    # exist before the monitoring pipeline runs, or the performance check fails at run time.
+    outcomes = (((ml.get("monitoring") or {}).get("online") or {}).get("outcomes")) or {}
+    if isinstance(outcomes, dict) and outcomes.get("table") and outcomes["table"] not in tables:
+        extra_warnings.append(f"monitoring.online.outcomes.table {outcomes['table']!r} is not one of this use case's "
+                              "outputs.bigquery.tables: it must exist in the tenant's dataset, with columns "
+                              f"{outcomes.get('key', 'prediction_id')} and {outcomes.get('label')}, before live "
+                              "quality can be measured")
+
     if problems:
         raise ConfigError(problems, source=f"{path} ({env.name})")
 

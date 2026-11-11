@@ -90,6 +90,9 @@ EVENTS = {
                             ["served", "recorded", "expected", "share"]),
     "serving.capture_silent": ('jsonPayload.pipewright_event.event_type="serving.capture_silent"',
                                "capture silent", ["served", "expected"]),
+    # Pipewright 1.4.3 (FR-100, found in the GA QA): the launcher refused a run's registration (the team must know)
+    "model.registration_refused": ('jsonPayload.pipewright_event.event_type="model.registration_refused"',
+                                   "model registration refused", ["model", "reason", "caller"]),
 }
 
 # A configured event kept as several policies, each named for what fired (monitoring.alerts.events still lists the

@@ -73,3 +73,10 @@ def test_scale_to_zero_warns_and_a_platform_can_refuse_it(repo):
     assert any("answered 429 and dropped" in w for w in uc.warnings)
     repo.manifests["dev"]["policies"] = {"serving": {"scale_to_zero": "refused"}}
     assert "model.serving.scale_to_zero is refused in dev" in problems(repo)
+
+
+def test_an_outcomes_table_the_use_case_does_not_own_is_pointed_out(repo):
+    # GA QA: live quality joins it at run time; one that is not among the use case's tables must exist already
+    uc = resolve(serving_repo(repo, {"capture": {"enabled": False}},
+                              {"online": {"enabled": False, "outcomes": {"table": "theirs", "label": "churned"}}}))
+    assert any("outcomes.table 'theirs' is not one of" in w for w in uc.warnings)

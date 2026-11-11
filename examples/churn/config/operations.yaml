@@ -41,7 +41,7 @@ retraining:                             # drift or a performance drop opens a ca
   mode: propose                         # off (alerts only) | propose | candidate (trains, never promotes)
   when: [drift, performance]            # what opens a case
   cooldown_days: 7                      # after an approved retrain, alerts are recorded but open no new case
-  source_uri: gs://${buckets.landing}/samples/my-churn/customers.csv   # default data; approvers may choose
+  source_uri: gs://${buckets.landing}/samples/my-tenant/my-churn/customers.csv   # default data; approvers may choose
   decisions:
     notify: []                          # emailed the case summary and ID; email never approves
     publish: false                      # true: also on your team's decision feed (Pub/Sub), for your own apps

@@ -1023,7 +1023,7 @@
                         "training.rejected", "training.evaluated", "model.registered", "run.failed",
                         "run.unregistered", "model.duplicated", "serving.degraded", "serving.recovered", "rollback.proposed",
                         "monitoring.attribution_drift", "monitoring.insufficient_data", "serving.capture_gap",
-                        "serving.capture_silent"] } },
+                        "serving.capture_silent", "model.registration_refused"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         },
@@ -1413,7 +1413,7 @@
                         "training.rejected", "training.evaluated", "model.registered", "run.failed",
                         "run.unregistered", "model.duplicated", "serving.degraded", "serving.recovered", "rollback.proposed",
                         "monitoring.attribution_drift", "monitoring.insufficient_data", "serving.capture_gap",
-                        "serving.capture_silent"] } },
+                        "serving.capture_silent", "model.registration_refused"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         } }
