@@ -128,7 +128,8 @@ def conditions(t: dict, health: dict, latency: str = "p95") -> list[dict]:
 
 def policy_name(uc, t: dict, c: dict) -> str:
     who = t.get("isvc") or t.get("deployed_model_id")
-    return f"pipewright {uc.name} {uc.environment}: serving {c['signal']} {c['severity']} (v{t['version']}, {who})"
+    arm = f", {t['arm']}" if t.get("arm") else ""             # an A/B arm, by name in the email (GA QA)
+    return f"pipewright {uc.name} {uc.environment}: serving {c['signal']} {c['severity']} (v{t['version']}{arm}, {who})"
 
 
 def policy_body(uc, t: dict, c: dict, channels: list[str]) -> dict:
@@ -278,14 +279,30 @@ def deployed_targets(uc, env, gcp) -> list[dict]:
         return out
     from pipewright.models.deploy import find_endpoint
 
-    name = find_endpoint(uc, env, gcp)
-    if not name:
-        return []
-    r = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{name}")
-    out = []
-    for dm in (r.body or {}).get("deployedModels") or [] if r.ok else []:
-        res = dm.get("dedicatedResources") or {}
-        out.append({"target": "vertex", "endpoint_id": name.rsplit("/", 1)[-1], "deployed_model_id": dm["id"],
-                    "version": dm.get("modelVersionId") or "?", "pool": bool(dm.get("sharedResources")),
-                    "scale_to_zero": int(res.get("minReplicaCount", 1) or 0) == 0 and bool(res)})
-    return out
+    def read(name: str | None, arm: str | None) -> list[dict]:
+        if not name:
+            return []
+        r = gcp.get(f"https://{env.region}-aiplatform.googleapis.com/v1/{name}")
+        found = []
+        for dm in (r.body or {}).get("deployedModels") or [] if r.ok else []:
+            res = dm.get("dedicatedResources") or {}
+            found.append({"target": "vertex", "endpoint_id": name.rsplit("/", 1)[-1], "deployed_model_id": dm["id"],
+                          "version": dm.get("modelVersionId") or "?", "pool": bool(dm.get("sharedResources")),
+                          "scale_to_zero": int(res.get("minReplicaCount", 1) or 0) == 0 and bool(res),
+                          **({"arm": arm} if arm else {})})
+        return found
+
+    # GA QA (found live): an A/B treatment on Agent Platform serves from its own endpoint (<usecase>-ab-endpoint)
+    # and had no health policies, so a failing treatment paged nobody. While it serves, both arms are watched.
+    treatment = read(ab_arm_endpoint(uc, env, gcp), "treatment")
+    return read(find_endpoint(uc, env, gcp), "control" if treatment else None) + treatment
+
+
+def ab_arm_endpoint(uc, env, gcp) -> str | None:
+    """The A/B treatment's endpoint resource name (<usecase>-ab-endpoint), or None."""
+    from pipewright.abtest.online import arm_name
+
+    api = f"https://{env.region}-aiplatform.googleapis.com/v1/projects/{env.project}/locations/{env.region}"
+    found = gcp.get(f"{api}/endpoints", filter=f'display_name="{arm_name(uc)}"')
+    endpoints = (found.body or {}).get("endpoints") or [] if found.ok else []
+    return endpoints[0]["name"] if endpoints else None

@@ -164,3 +164,42 @@ def test_rollback_proposal_only_when_on_critical_and_recent(monkeypatch):
     assert p["previous_version"] == "2" and p["hours_since_deploy"] == 1.0
     assert rollback.maybe_propose(contract(24), i, G(), "b", now) is None              # one case per incident
     assert rollback.maybe_propose(contract(0.5 and 0), i, G(), "b", now) is None
+
+
+def test_an_ab_treatment_on_agent_platform_is_watched_as_its_own_arm():
+    # GA QA (found live): the treatment's endpoint had no health policies
+    from types import SimpleNamespace
+
+    from pipewright.serving import health
+
+    eps = {"churn-endpoint": "projects/p/locations/r/endpoints/1",
+           "churn-ab-endpoint": "projects/p/locations/r/endpoints/2"}
+    bodies = {"endpoints/1": [{"id": "11", "modelVersionId": "1", "dedicatedResources": {"minReplicaCount": 1}}],
+              "endpoints/2": [{"id": "22", "modelVersionId": "4", "dedicatedResources": {"minReplicaCount": 1}}]}
+
+    def get(url, **k):
+        if "filter" in k:
+            name = k["filter"].split('"')[1]
+            return SimpleNamespace(ok=True, body={"endpoints": [{"name": eps[name]}] if name in eps else []})
+        return SimpleNamespace(ok=True, body={"deployedModels": bodies[url.split("/v1/")[1].split("/", 4)[-1]]})
+
+    uc = SimpleNamespace(name="churn", environment="test", model={"serving": {"enabled": True}})
+    env = SimpleNamespace(region="r", project="p", name="test")
+    import pipewright.models.deploy as deploy
+
+    real = deploy.find_endpoint
+    deploy.find_endpoint = lambda u, e, g: eps["churn-endpoint"]
+    try:
+        targets = health.deployed_targets(uc, env, SimpleNamespace(get=get))
+    finally:
+        deploy.find_endpoint = real
+    assert [(t["version"], t.get("arm")) for t in targets] == [("1", "control"), ("4", "treatment")]
+    name = health.policy_name(uc, targets[1], {"signal": "errors", "severity": "critical"})
+    assert "(v4, treatment, 22)" in name
+    del eps["churn-ab-endpoint"]
+    deploy.find_endpoint = lambda u, e, g: eps["churn-endpoint"]
+    try:
+        alone = health.deployed_targets(uc, env, SimpleNamespace(get=get))
+    finally:
+        deploy.find_endpoint = real
+    assert [(t["version"], t.get("arm")) for t in alone] == [("1", None)]           # no test: no arm, as before

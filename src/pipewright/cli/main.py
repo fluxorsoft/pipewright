@@ -208,9 +208,12 @@ def _health_sync(uc, env, dry_run: bool = False) -> int:
     if "capture" in (uc.model.get("serving") or {}) and uc.model["serving"].get("target") != "kserve":
         from pipewright.models.deploy import find_endpoint
         from pipewright.serving import capture
+        from pipewright.serving.health import ab_arm_endpoint
 
-        endpoint = find_endpoint(uc, env, gcp)
-        if endpoint:
+        # GA QA: an A/B treatment's own endpoint captures too, into the same table (rows carry the deployed model)
+        for endpoint in (find_endpoint(uc, env, gcp), ab_arm_endpoint(uc, env, gcp)):
+            if not endpoint:
+                continue
             try:
                 capture.sync_endpoint(uc, env, gcp, endpoint)
             except ConfigError as e:
@@ -1176,6 +1179,8 @@ def cmd_ab(args) -> int:
         return 0
     elif c == "conclude":
         tests.conclude(args.winner, args.reason, who, args.approve)
+    if c in ("start", "stop", "conclude") and uc.model.get("serving", {}).get("enabled"):
+        _health_sync(uc, env)            # GA QA: the treatment arm's health policies come and go with the test
     print(ab.render_test(tests.get(None) if c not in ("stop", "conclude") else tests.store.list(uc.name)[0]))
     return 0
 
