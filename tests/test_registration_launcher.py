@@ -241,3 +241,13 @@ def test_an_image_in_the_environments_repository_is_accepted(store):
     image = "europe-west2-docker.pkg.dev/acme-ml-dev/pw-images/churn-serving@sha256:" + "b" * 64
     out = reg.Registrations(gcp, "acme-artifacts", dict, job()).register(contract(), body(serving_image=image), RUNNER)
     assert out["status"] == "registered" and gcp.uploads[0]["model"]["containerSpec"]["imageUri"] == image
+
+
+def test_a_bigquery_ml_use_case_is_not_warned_about_pipewrights_own_steps(repo):
+    # GA QA: the scan read Pipewright's bqml_runtime.py (it registers through the launcher itself)
+    from tests.test_bqml_config import bqml_repo, resolve
+
+    bqml_repo(repo)
+    repo.manifests["dev"]["policies"] = {"registration": "launcher"}
+    uc = resolve(repo)
+    assert not [w for w in uc.warnings if "FR-100" in w]
