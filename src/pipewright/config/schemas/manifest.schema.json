@@ -741,6 +741,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "incidents_channel": {
+          "type": ["string", "null"],
+          "description": "1.4.3 (FR-98): the Cloud Monitoring notification channel (Pub/Sub) health policies notify; the launcher turns its incidents into serving.degraded and serving.recovered"
+        },
         "events_topic": {
           "type": [
             "string",
