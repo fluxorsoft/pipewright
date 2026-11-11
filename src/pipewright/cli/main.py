@@ -940,10 +940,13 @@ def cmd_model_rollback(args) -> int:
                            args.reason or "")
     from pipewright.observability import events
 
+    import io
+
     events.emit(events.event("rollback.decided", uc.name, env.name, uc.tenant, None, None, case_id=args.case,
                              approved=args.approve, by=gcp.identity(), version=case.get("version"),
                              previous_version=case.get("previous_version"), reason=args.reason or ""),
-                env.observability.get("events_topic"), gcp, region=env.region)
+                env.observability.get("events_topic"), gcp, stream=io.StringIO(), region=env.region)  # GA QA: no
+    # raw JSON line in the person's terminal, as the other commands
     if not args.approve:
         print(f"declined: {args.case}; v{case.get('version')} keeps serving")
         return 0
