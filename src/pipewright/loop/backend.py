@@ -44,6 +44,11 @@ class GcpBackend:
             champion_version=body.get("champion_version"), model_version=body.get("model_version"),
             loop=body.get("loop"), loop_data=body.get("loop_data")), gcp=self.gcp)
 
+    def test_source_uri(self) -> str | None:
+        """retraining.source_uri as the environment the loop trains in resolves it (its own landing bucket)."""
+        uc = self.ucs.get(self.test.name)
+        return ((uc.ml.get("retraining") or {}).get("source_uri")) if uc else None
+
     def production_data(self) -> dict | None:
         """FR-48 phase 6 (retraining.loop.data: production in production's configuration): production's feature
         tables, resolved from its Feature Registry as the runtime would, and its label source, for the loop's

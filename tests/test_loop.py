@@ -249,3 +249,19 @@ def test_pending_decisions_name_their_gate_and_command():
     assert items["prod/churn/loop-advance/rc-d"].launchers == ["https://prod.example", "https://test.example"]
     assert items["prod/churn/retrain-approve/rc-b"].launchers == ["https://prod.example"]
     assert items["prod/churn/model-approve/v6"].launchers == []
+
+
+def test_the_loop_trains_on_tests_data_unless_an_approver_named_it():
+    # GA QA (found live): the case's default data was production's landing path, which test's runner cannot read
+    b = FakeBackend()
+    b.test_source_uri = lambda: "gs://test-landing/samples/churn/customers.csv"
+    loop(b).start()
+    assert b.submitted[-1][1]["source_uri"] == "gs://test-landing/samples/churn/customers.csv"
+    chosen = FakeBackend()
+    chosen.test_source_uri = lambda: "gs://test-landing/samples/churn/customers.csv"
+    chosen.the_case["loop"]["source_chosen"] = True                     # `retrain approve --source-uri`
+    loop(chosen).start()
+    assert chosen.submitted[-1][1]["source_uri"] == "bq://prod.d.customers"
+    older = FakeBackend()                                                # a backend without the method: as before
+    loop(older).start()
+    assert older.submitted[-1][1]["source_uri"] == "bq://prod.d.customers"

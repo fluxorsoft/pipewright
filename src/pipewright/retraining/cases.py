@@ -454,8 +454,10 @@ def decide(case: dict, action: str, by: str, group: str | None, s: Settings, now
         if s.loop:
             # The closed retrain loop (D-104): production never trains. The case waits for `pipewright loop start`,
             # which trains in the environment this one's releases come from.
-            case["loop"] = {"state": "approved", "source_uri": uri, "history": [{"at": iso(now), "state": "approved",
-                                                                              "by": by}]}
+            # source_chosen: an approver named the data (--source-uri); otherwise the loop trains on the data of
+            # the environment it trains in (GA QA: production's landing path reached test's runner)
+            case["loop"] = {"state": "approved", "source_uri": uri, "source_chosen": bool(chosen),
+                            "history": [{"at": iso(now), "state": "approved", "by": by}]}
             return Outcome(case, [("retrain.approved", {**data, "source_uri": uri, "loop": True})], None,
                            status=f"case {cid} approved: the closed retrain loop trains it where releases come from "
                                   f"(`pipewright loop start --case {cid}`)")

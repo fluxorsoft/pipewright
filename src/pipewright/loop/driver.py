@@ -85,12 +85,17 @@ class Loop:
         if busy:
             raise ConfigError(f"case {busy[0]}'s loop is still running for {self.usecase}: finish or roll it back "
                               f"first (`pipewright loop show --case {busy[0]}`)")
-        uri = source_uri or loop.get("source_uri")
-        if not uri:
-            raise ConfigError(f"case {self.case_id} has no training data: give --source-uri")
         champion = self._production_champion()
         # Phase 6 (retraining.loop.data: production): production's feature tables and label window.
         data = getattr(self.backend, "production_data", lambda: None)()
+        uri = source_uri or loop.get("source_uri")
+        if not source_uri and not loop.get("source_chosen") and not data:
+            # GA QA (found live): the case's default data was production's retraining.source_uri (production's
+            # landing bucket), which test's runner cannot read. The loop trains on test's data unless an approver
+            # named the data or loop.data is production.
+            uri = getattr(self.backend, "test_source_uri", lambda: None)() or uri
+        if not uri:
+            raise ConfigError(f"case {self.case_id} has no training data: give --source-uri")
         run_id, job_id = self.backend.run_ids("training", uri, self.case_id)
         self.backend.submit(self.test, {"usecase": self.usecase, "pipeline": "training", "source_uri": uri,
                                         "run_key": self.case_id, "loop": self.case_id,
