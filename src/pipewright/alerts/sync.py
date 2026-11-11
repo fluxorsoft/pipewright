@@ -33,8 +33,8 @@ MON = "https://monitoring.googleapis.com/v3"
 # event -> (log filter on the event entry, title, details pulled into the email)
 EVENTS = {
     "monitoring.alert": ('jsonPayload.pipewright_event.event_type="monitoring.alert"', "drift or performance alert",
-                         ["model_version_id", "drifted_features", "max_feature_psi", "prediction_psi",
-                          "performance_value", "retrain_status"]),
+                         ["triggers", "model_version_id", "drifted_features", "max_feature_psi", "prediction_psi",
+                          "performance_metric", "performance_value", "retrain_status"]),
     "retrain.requested": ('jsonPayload.pipewright_event.event_type="retrain.requested"', "retrain requested",
                           ["triggers", "job_id", "source_uri"]),
     "training.rejected": ('jsonPayload.pipewright_event.event_type="training.evaluated" AND '
@@ -85,6 +85,10 @@ EVENTS = {
                                "capture silent", ["served", "expected"]),
 }
 
+# What the email says, where the event names it (the policy keeps the general title): a monitoring alert says
+# whether it is drift, performance or both (the event's triggers: drift, performance or drift,performance).
+SUBJECTS = {"monitoring.alert": "${log.extracted_label.triggers} alert"}
+
 # Retrain decision events (pipewright.retraining): emailed to retraining.decisions.notify.
 DECISION_EVENTS = {
     "retrain.proposed": "retrain decision needed",
@@ -118,7 +122,8 @@ def policy_body(uc: ResolvedUseCase, event: str, channels: list[str], severity: 
     extractors = {d: f"EXTRACT(jsonPayload.pipewright_event.data.{d})" for d in details}
     extractors["run_id"] = 'EXTRACT(labels."run-id")'
     extractors["release"] = 'EXTRACT(labels."pipewright-release")'
-    subject = f"[{uc.environment}] {uc.name}: {title}"
+    said = SUBJECTS.get(event, title)
+    subject = f"[{uc.environment}] {uc.name}: {said}"
     if event in DECISION_EVENTS:
         subject += " (${log.extracted_label.case_id})" if event != "retrain.digest" else ""
         # A code block keeps the summary's line breaks and stops markdown turning "--env" into a dash, so the
@@ -128,7 +133,7 @@ def policy_body(uc: ResolvedUseCase, event: str, channels: list[str], severity: 
                  f"approve | decline | snooze --env {uc.environment} --usecase {uc.name} --case <case>`.",
                  f"Owner: {uc.owner}."]
     else:
-        lines = [f"**{uc.name}** ({uc.environment}): {title}.", "",
+        lines = [f"**{uc.name}** ({uc.environment}): {said}.", "",
                  *[f"- {d}: ${{log.extracted_label.{d}}}" for d in details],
                  "- run: ${log.extracted_label.run_id}, release ${log.extracted_label.release}", "",
                  f"Owner: {uc.owner}. Details: `pipewright monitor status --env {uc.environment} --usecase "

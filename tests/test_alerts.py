@@ -150,3 +150,16 @@ def test_an_address_that_left_notify_loses_its_channel(repo):
     left = sorted(c["labels"]["email_address"] for c in mon.channels.values())
     assert left == ["ml-team@example.com", "ops@example.com"]
     assert not alerts.sync(swapped, env, mon).channels_delete
+
+
+def test_a_monitoring_alert_email_says_drift_or_performance():
+    """1.4.3 battle test (user): the email says which: the event's triggers, not "drift or performance"."""
+    from types import SimpleNamespace
+
+    from pipewright.alerts import sync
+
+    uc = SimpleNamespace(name="churn", environment="prod", owner="team")
+    body = sync.policy_body(uc, "monitoring.alert", [], "WARNING")
+    assert body["documentation"]["subject"] == "[prod] churn: ${log.extracted_label.triggers} alert"
+    assert "triggers" in body["conditions"][0]["conditionMatchedLog"]["labelExtractors"]
+    assert body["displayName"].endswith("drift or performance alert")
