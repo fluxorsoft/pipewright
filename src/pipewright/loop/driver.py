@@ -78,6 +78,10 @@ class Loop:
         loop = self.record()
         # GA QA: a loop whose training failed (no candidate yet) starts again here; `retrain retry` sends loops here
         retry = loop.get("state") == "failed" and not loop.get("candidate")
+        if (loop.get("state") == "validation-failed" and loop.get("candidate")
+                and self._state(self.test, (loop.get("validation") or {}).get("job_id") or "") == "MISSING"):
+            # A validation run that never started says nothing about the candidate: submitted again (GA QA)
+            return self._validate(loop)
         if loop.get("state") != "approved" and not retry:
             return loop                                           # started already: nothing to do
         # One loop at a time per use case: two candidates racing to production would judge each other's champion.
@@ -206,7 +210,8 @@ class Loop:
     def _validate(self, loop: dict) -> dict:
         """A scoring run in test with the candidate, on the case's data (D-107)."""
         version, uri = loop["candidate"]["test_version"], loop["source_uri"]
-        key = f"{self.case_id}-validate"
+        tries = sum(1 for h in loop.get("history") or [] if h.get("state") == "validating")
+        key = f"{self.case_id}-validate" + (f"-{tries}" if tries else "")      # a new run key for a new try
         run_id, job_id = self.backend.run_ids("inference", uri, key)
         self.backend.submit(self.test, {"usecase": self.usecase, "pipeline": "inference", "source_uri": uri,
                                         "run_key": key, "loop": self.case_id, "model_version": version})

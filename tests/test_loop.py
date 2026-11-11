@@ -277,3 +277,21 @@ def test_a_loop_whose_training_failed_starts_again_with_a_new_run_key():
     again = lp.start()
     assert again["state"] == "training" and b.submitted[-1][1]["run_key"] == "rc-1-retry-1"
     assert [h["state"] for h in again["history"]] == ["training", "failed", "training"]
+
+
+def test_a_validation_run_that_never_started_is_submitted_again(monkeypatch):
+    # GA QA (found live): test's integrity gate refused the validation run; the loop ended validation-failed with
+    # no way to validate the candidate again
+    from pipewright.loop import driver
+
+    b = FakeBackend()
+    lp = loop(b)
+    lp.start()
+    b.finish("test", "training", "rc-1", register="8")
+    lp.advance()
+    assert lp.advance()["state"] == "validating"
+    b.jobs.pop(("test", "churn-r-inference-rc-1-validate"))               # the run never appeared
+    monkeypatch.setattr(driver.Loop, "_never_started", lambda self, loop, state: state == "MISSING")
+    assert lp.advance()["state"] == "validation-failed"
+    again = lp.start()
+    assert again["state"] == "validating" and b.submitted[-1][1]["run_key"] == "rc-1-validate-1"
