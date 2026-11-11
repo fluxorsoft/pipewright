@@ -292,6 +292,8 @@ def _registry_model(self, contract, registry_id: str) -> dict | None:
 def _bq_query(self, contract, sql: str, labels: dict) -> None:
     r = self.gcp.post(f"{BQ}/projects/{contract.project}/queries",
                       {"query": sql, "useLegacySql": False, "location": contract.region, "timeoutMs": 60000,
+                       **({"destinationEncryptionConfiguration": {"kmsKeyName": key}}
+                          if (key := ((self.manifest() or {}).get("security") or {}).get("bigquery_kms_key")) else {}),
                        "labels": {k: re.sub(r"[^a-z0-9_-]", "-", str(v).lower())[:63] for k, v in labels.items()}})
     if not r.ok:
         raise RuntimeError(f"registration query refused: HTTP {r.status} "

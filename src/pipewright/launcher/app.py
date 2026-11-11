@@ -427,9 +427,10 @@ def create_app(registry: Registry | None = None) -> Flask:
                 api = f"https://{c.region}-aiplatform.googleapis.com/v1/projects/{c.project}/locations/{c.region}"
                 eps = gcp.get(f"{api}/endpoints", filter=f'display_name="{c.usecase}-endpoint"')
                 ep = ((eps.body or {}).get("endpoints") or [None])[0] if eps.ok else None
-                found = coverage.agent_platform(gcp, c.project, c.region, ep["name"].rsplit("/", 1)[-1],
+                found = (coverage.agent_platform(gcp, c.project, c.region, ep["name"].rsplit("/", 1)[-1],
                                                 f"{c.project}.{dataset}.{capture.table_name(c.usecase)}",
-                                                rate) if ep and dataset else None
+                                                rate, kms_key=(m.get("security") or {}).get("bigquery_kms_key"))
+                         if ep and dataset else None)
             if found:
                 _event(found.pop("event"), c, None, **found)
                 out.append({"usecase": c.usecase, **found})

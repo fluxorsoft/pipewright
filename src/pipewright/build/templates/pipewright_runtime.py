@@ -1150,7 +1150,7 @@ def online_window(ml_config: dict, project: str, source_uri: str, features: list
     hours, min_samples = float(online.get("window_hours", 24)), int(online.get("min_samples", 500))
     cap = int(((ml_config.get("serving_capture") or {}).get("max_per_day")) or 100000)
     table = bq_table(source_uri, project)
-    client = client or bigquery.Client(project=project)
+    client = client or bigquery_client(project, ml_config)      # CMEK in private environments (battle test)
     params = [bigquery.ScalarQueryParameter("minutes", "INT64", int(hours * 60)),
               bigquery.ScalarQueryParameter("cap", "INT64", int(cap * max(hours / 24, 1)))]
     columns = {f.name for f in client.get_table(table).schema}

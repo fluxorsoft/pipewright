@@ -31,7 +31,7 @@ def judge(served: float, recorded: float, rate: float) -> dict | None:
 
 
 def agent_platform(gcp, project: str, region: str, endpoint_id: str, table: str, rate: float,
-                   now: datetime | None = None) -> dict | None:
+                   now: datetime | None = None, kms_key: str | None = None) -> dict | None:
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(hours=1)
     r = gcp.get(f"https://monitoring.googleapis.com/v3/projects/{project}/timeSeries",
@@ -46,7 +46,8 @@ def agent_platform(gcp, project: str, region: str, endpoint_id: str, table: str,
     q = gcp.post(f"https://bigquery.googleapis.com/bigquery/v2/projects/{project}/queries",
                  {"query": f"SELECT COUNT(*) AS n FROM `{table}`, UNNEST(request_payload) WHERE logging_time >= "
                            "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)", "useLegacySql": False,
-                  "location": region, "timeoutMs": 30000})
+                  "location": region, "timeoutMs": 30000,
+                  **({"destinationEncryptionConfiguration": {"kmsKeyName": kms_key}} if kms_key else {})})
     if not q.ok or not (q.body or {}).get("jobComplete"):
         return None
     recorded = float(((q.body.get("rows") or [{}])[0].get("f") or [{"v": 0}])[0]["v"] or 0)
