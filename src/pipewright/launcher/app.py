@@ -99,6 +99,23 @@ def create_app(registry: Registry | None = None) -> Flask:
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
         params_extra: dict = {}
+        if pipeline == "monitoring" and not (extra or {}).get("model_version"):
+            # GA QA: online monitoring judges the version that serves, not the registry's default, which can move
+            # without a deploy (promote_model auto): judging the default refused the run (that version was never
+            # approved) and would have read traffic it never received.
+            try:
+                from pipewright.config.environment import environment_from_dict
+                from pipewright.models import watch as served_watch
+
+                ml_cfg = (contract.static_parameters or {}).get("ml_config") or {}
+                served = served_watch.served_version(getattr(reg(), "gcp", None) or Gcp(),
+                                                     environment_from_dict(reg().manifest), contract.usecase,
+                                                     ml_cfg.get("model_name") or "")
+            except Exception:  # noqa: BLE001 - not readable: the default, as before
+                log.exception("served version of %s not readable", contract.usecase)
+                served = None
+            if served:
+                extra = {**(extra or {}), "model_version": served}
         if pipeline in ("inference", "monitoring"):         # 1.4.3 (FR-98): online monitoring loads it too
             # Phase 6 (policies.integrity.inference, off by default): score only with an approved version.
             from pipewright.models import integrity

@@ -122,6 +122,21 @@ def in_use(gcp, env, models: dict | None = None, usecases: set | None = None) ->
     return uses, notes
 
 
+def served_version(gcp, env, usecase: str, model_name: str) -> str | None:
+    """The version a use case serves now (GA QA, 1.4.3): the one taking the most traffic on its own endpoint
+    (<usecase>-endpoint) or its own InferenceService (not an A/B treatment's). None when nothing is deployed.
+    Online monitoring judges this version, not the registry's default, which may have moved since the deploy."""
+    uses, _ = in_use(gcp, env, {model_name: usecase}, {usecase})
+    isvc = usecase.lower().replace("_", "-").replace(".", "-")[:45].rstrip("-")     # as models.kserve names it
+    own = {f"endpoint:{usecase}-endpoint"} | {f"kserve:{ns}/{isvc}"
+                                              for ns in ((getattr(env, "kserve", None) or {}).get("namespaces")
+                                                         or {}).values()}
+    served = [u for u in uses if u.kind in ("vertex", "kserve") and u.where in own and u.version not in ("", "*")]
+    if not served:
+        return None
+    return max(served, key=lambda u: (u.traffic or 0, int(u.version) if u.version.isdigit() else 0)).version
+
+
 def _unlisted(tenant: str, ns: str, why: str) -> Use:
     """A namespace whose InferenceServices cannot be read: one cannot_check use, so the heartbeat and the CI gate
     show it (exit 2) instead of a clean result."""
