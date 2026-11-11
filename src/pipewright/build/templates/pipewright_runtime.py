@@ -62,6 +62,8 @@ def log(message: str, ml_config: dict, severity: str = "INFO", run_id: str | Non
 EVENT_PERSONAS = {
     "model.registered": ("governance", "ml"),
     "model.registration_skipped": ("ml",),
+    "monitoring.insufficient_data": ("ml",),                  # 1.4.3 (FR-98)
+    "monitoring.attribution_drift": ("governance", "ml"),     # 1.4.3 (FR-98)
     "model.lineage.recorded": ("governance",),
     "training.evaluated": ("governance", "ml"),
     "data.snapshot.written": ("data", "governance", "ml"),

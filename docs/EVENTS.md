@@ -28,10 +28,10 @@ attributes:pw_ml AND attributes.usecase = "churn"    # one team's use case
 
 | Persona | Who | Events |
 |---|---|---|
-| `ml` | data scientists and ML engineers who own a use case | 64 |
-| `sre` | the team that runs the environments, the launcher and serving | 34 |
-| `governance` | risk, model approvers and auditors | 44 |
-| `product` | what is live and how it performs | 18 |
+| `ml` | data scientists and ML engineers who own a use case | 70 |
+| `sre` | the team that runs the environments, the launcher and serving | 40 |
+| `governance` | risk, model approvers and auditors | 47 |
+| `product` | what is live and how it performs | 22 |
 | `data` | tables, features and online stores the models read | 9 |
 | `finops` | what costs money and who started it | 4 |
 
@@ -100,6 +100,8 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 |---|---|---|---|---|---|
 | `monitoring.recorded` | A scoring run's drift and performance were recorded. | pipeline step | ml | 1.0.0 |  |
 | `monitoring.alert` | Drift or a performance drop crossed its threshold. | pipeline step | ml, product, sre | 1.0.0 | email |
+| `monitoring.insufficient_data` | An online window had fewer usable rows than min_samples: the drift check was skipped (never recorded as no drift). | pipeline step | ml | 1.4.3 |  |
+| `monitoring.attribution_drift` | The features driving the answers moved away from training past the threshold (the top movers in the data). | pipeline step | ml, governance | 1.4.3 |  |
 
 ### retrain: Retrain decision cases
 
@@ -161,11 +163,22 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 | `online.fresh` | A stale online store is fresh again. | launcher | data, sre | 1.4.2 |  |
 | `online.billed` | Lookups billed against an online store (BigQuery bytes). | launcher | finops, data | 1.4.2 | email |
 
-### serving: Shared serving pools
+### serving: Serving health, capture and shared serving pools
 
 | Event | When | Sent by | For | Since | |
 |---|---|---|---|---|---|
+| `serving.degraded` | A deployed version's health policy opened an incident (errors, latency, replicas or a stuck scale-up), with the threshold in force. | launcher | sre, ml, product | 1.4.3 |  |
+| `serving.recovered` | That incident closed. | launcher | sre, ml, product | 1.4.3 |  |
+| `serving.capture_gap` | What capture recorded parted from what was served by more than the margin. | launcher | sre, ml | 1.4.3 |  |
+| `serving.capture_silent` | Traffic was served but capture recorded nothing. | launcher | sre, ml | 1.4.3 |  |
 | `serving.pool.change` | A shared serving pool gained or lost a model, or changed size. | CLI | sre, finops | 1.4.2 |  |
+
+### rollback: Rollback proposals from serving health
+
+| Event | When | Sent by | For | Since | |
+|---|---|---|---|---|---|
+| `rollback.proposed` | A critical incident soon after a deployment opened a rollback proposal for the release's approvers (never automatic). | launcher | governance, sre, product | 1.4.3 |  |
+| `rollback.decided` | A person approved or declined a rollback proposal. | CLI | governance, sre, product | 1.4.3 |  |
 
 ### synthetic: Synthetic data
 
@@ -188,4 +201,4 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 |---|---|---|---|---|---|
 | `policy.override` | A time-boxed break-glass exception to a platform policy is in force. | launcher | governance, sre | 1.4.1 |  |
 
-79 event types in 14 families.
+87 event types in 15 families.

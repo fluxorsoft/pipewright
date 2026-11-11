@@ -183,6 +183,7 @@ def cmd_alerts_sync(args) -> int:
         plan = alerts_sync.sync(uc, env, dry_run=args.dry_run)
         print(alerts_sync.render(uc, plan, args.dry_run))
         failed += len(plan.errors)
+        failed += _health_sync(uc, env, args.dry_run)
     if not args.usecase:        # a whole-repo sync: the policies of use cases that are gone (Pipewright 1.1)
         deleted, kept, errors = alerts_sync.prune(env, set(selected), dry_run=args.dry_run)
         if deleted or kept or errors:
@@ -196,6 +197,25 @@ def cmd_alerts_sync(args) -> int:
             print(f"  FAIL  {e}")
         failed += len(errors)
     return 1 if failed else 0
+
+
+def _health_sync(uc, env, dry_run: bool = False) -> int:
+    """1.4.3 (FR-98): the use case's health policies for what is deployed now. Nothing when monitoring.health is not
+    set. Returns the number of errors."""
+    if "health" not in (uc.ml.get("monitoring") or {}):
+        return 0
+    from pipewright.gcp import Gcp
+    from pipewright.serving import health
+
+    gcp = Gcp()
+    try:
+        targets = health.deployed_targets(uc, env, gcp)
+    except ConfigError as e:
+        print(f"  health: deployed versions not readable: {e}")
+        return 1
+    plan = health.sync(uc, env, targets, gcp, dry_run=dry_run)
+    print(health.render(plan))
+    return len(plan.errors)
 
 
 def cmd_new_usecase(args) -> int:
@@ -306,6 +326,7 @@ def cmd_deploy_model(args) -> int:
         if args.undeploy:
             kserve.undeploy(uc, env, gcp)
             _remove_lookup_service(uc, env, gcp, args)
+            _health_sync(uc, env)
             return 0
         if args.promote or args.undeploy_canary:
             raise ConfigError("model.serving.target kserve has no canary to promote or remove (KServe in Standard "
@@ -313,16 +334,20 @@ def cmd_deploy_model(args) -> int:
         if not args.dry_run:
             deploy_model.check_approval(uc, gcp.identity(), args.approve)
         kserve.deploy(uc, env, gcp, canary=args.canary, dry_run=args.dry_run)
+        if not args.dry_run:
+            _health_sync(uc, env)          # 1.4.3 (FR-98): the deployed version's health policies
         return 0
     creds = gcp.session.credentials
     if args.undeploy:
         deploy_model.undeploy(uc, env, creds)
         _remove_lookup_service(uc, env, gcp, args)
+        _health_sync(uc, env)
         return 0
     if args.promote or args.undeploy_canary:
         deploy_model.check_approval(uc, gcp.identity(), args.approve)
         (deploy_model.promote if args.promote else deploy_model.undeploy_canary)(uc, env, creds)
         _print_how_to_call(uc, env, gcp)
+        _health_sync(uc, env)
         return 0
     p = deploy_model.plan(uc, env, creds)
     print(f"model {p.model} default version v{p.version} -> endpoint {p.endpoint} ({p.machine}, replicas "
@@ -337,6 +362,7 @@ def cmd_deploy_model(args) -> int:
     deploy_model.check_approval(uc, gcp.identity(), args.approve)
     deploy_model.deploy(uc, env, creds, canary=args.canary)
     _print_how_to_call(uc, env, gcp)
+    _health_sync(uc, env)                  # 1.4.3 (FR-98): the deployed version's health policies
     return 0
 
 
@@ -869,6 +895,60 @@ def cmd_model_approve(args) -> int:
     _quiet_agent_platform_sdk()
     gcp = Gcp()
     registry.approve(uc, env, gcp.session.credentials, args.version, gcp.identity(), args.approve)
+    return 0
+
+
+def cmd_model_rollbacks(args) -> int:
+    """1.4.3 (FR-98): the rollback proposals health opened for the use case."""
+    from pipewright.gcp import Gcp
+    from pipewright.serving import rollback
+
+    uc, env = _one(args)
+    found = rollback.cases(Gcp(), env.artifacts_bucket, uc.name)
+    if not found:
+        print(f"no rollback proposals for {uc.name} in {env.name}")
+    for c in found:
+        print(f"{c['case_id']}  {c['status']:<9} v{c.get('version')} -> v{c.get('previous_version') or '?'}  "
+              f"{c.get('signal')} (threshold {c.get('threshold')}, observed {c.get('observed_value')}), "
+              f"{c.get('hours_since_deploy')} h after deploy")
+    return 0
+
+
+def cmd_model_rollback(args) -> int:
+    """1.4.3 (FR-98): decide a rollback proposal. Approving makes the previous version the default through
+    `model approve` (its gates and the released rules checked again) and deploys it; never automatic."""
+    from pipewright.gcp import Gcp
+    from pipewright.models import deploy as deploy_model
+    from pipewright.models import registry
+    from pipewright.serving import rollback
+
+    uc, env = _one(args)
+    gcp = Gcp()
+    case = rollback.decide(gcp, env.artifacts_bucket, uc.name, args.case, args.approve, gcp.identity(),
+                           args.reason or "")
+    from pipewright.observability import events
+
+    events.emit(events.event("rollback.decided", uc.name, env.name, uc.tenant, None, None, case_id=args.case,
+                             approved=args.approve, by=gcp.identity(), version=case.get("version"),
+                             previous_version=case.get("previous_version"), reason=args.reason or ""),
+                env.observability.get("events_topic"), gcp, region=env.region)
+    if not args.approve:
+        print(f"declined: {args.case}; v{case.get('version')} keeps serving")
+        return 0
+    previous = case.get("previous_version")
+    if not previous:
+        raise ConfigError(f"{args.case} names no previous version: roll back by hand (pipewright model approve, then "
+                          "pipewright deploy-model)")
+    _quiet_agent_platform_sdk()
+    registry.approve(uc, env, gcp.session.credentials, previous, gcp.identity(), True)
+    if uc.model["serving"]["target"] == "kserve":
+        from pipewright.models import kserve
+
+        kserve.deploy(uc, env, gcp)
+    else:
+        deploy_model.deploy(uc, env, gcp.session.credentials)
+    _health_sync(uc, env)
+    print(f"rolled back: v{previous} is the default and serving ({args.case})")
     return 0
 
 
@@ -1676,6 +1756,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--version", required=True)
     sp.add_argument("--confirm", action="store_true")
     sp.set_defaults(func=cmd_model_restore_files)
+    sp = msub.add_parser("rollbacks", help="rollback proposals opened by serving health (1.4.3, read only)")
+    one(sp)
+    sp.set_defaults(func=cmd_model_rollbacks)
+    sp = msub.add_parser("rollback", help="decide a rollback proposal: --approve makes the previous version the "
+                                          "default (model approve) and deploys it; --decline keeps the current one")
+    one(sp)
+    sp.add_argument("--case", required=True, help="the proposal's case ID (pipewright model rollbacks)")
+    decision = sp.add_mutually_exclusive_group(required=True)
+    decision.add_argument("--approve", action="store_true", dest="approve")
+    decision.add_argument("--decline", action="store_false", dest="approve")
+    sp.add_argument("--reason", help="recorded with the decision")
+    sp.set_defaults(func=cmd_model_rollback)
     sp = msub.add_parser("retire", help="retire a version no longer in use: its renewal stops; --release-holds "
                                         "releases its temporary holds (1.4.1; dry run without --confirm)")
     one(sp)

@@ -53,7 +53,7 @@ class CaseStore:
 
     def usecases(self) -> list[str]:
         return sorted({n.split("/")[1] for n in gcs_list(self.gcp, self.bucket, f"{CASES_PREFIX}/")
-                       if n.count("/") >= 2})
+                       if n.count("/") >= 2 and not n.split("/")[1].startswith("_")})   # _rollback: FR-98
 
     def write(self, case: dict, generation: int | None) -> int:
         return gcs_write(self.gcp, self.bucket, case_name(case["usecase"], case["case_id"]),

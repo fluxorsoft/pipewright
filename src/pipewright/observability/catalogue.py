@@ -34,7 +34,8 @@ FAMILIES = {
     "loop": "The closed retrain loop across environments",
     "ab_test": "A/B tests of models",
     "online": "Online feature stores",
-    "serving": "Shared serving pools",
+    "serving": "Serving health, capture and shared serving pools",
+    "rollback": "Rollback proposals from serving health",
     "synthetic": "Synthetic data",
     "ray": "Ray clusters",
     "policy": "Platform policy exceptions",
@@ -121,6 +122,21 @@ EVENTS: tuple[Event, ...] = (
     # monitoring
     Event("monitoring.recorded", _S, "A scoring run's drift and performance were recorded.", ("ml",)),
     Event("monitoring.alert", _S, "Drift or a performance drop crossed its threshold.", ("ml", "product", "sre")),
+    Event("monitoring.insufficient_data", _S, "An online window had fewer usable rows than min_samples: the drift "
+          "check was skipped (never recorded as no drift).", ("ml",), "1.4.3"),
+    Event("monitoring.attribution_drift", _S, "The features driving the answers moved away from training past the "
+          "threshold (the top movers in the data).", ("ml", "governance"), "1.4.3"),
+    # serving health (FR-98)
+    Event("serving.degraded", _L, "A deployed version's health policy opened an incident (errors, latency, replicas "
+          "or a stuck scale-up), with the threshold in force.", ("sre", "ml", "product"), "1.4.3"),
+    Event("serving.recovered", _L, "That incident closed.", ("sre", "ml", "product"), "1.4.3"),
+    Event("serving.capture_gap", _L, "What capture recorded parted from what was served by more than the margin.",
+          ("sre", "ml"), "1.4.3"),
+    Event("serving.capture_silent", _L, "Traffic was served but capture recorded nothing.", ("sre", "ml"), "1.4.3"),
+    Event("rollback.proposed", _L, "A critical incident soon after a deployment opened a rollback proposal for the "
+          "release's approvers (never automatic).", ("governance", "sre", "product"), "1.4.3"),
+    Event("rollback.decided", _C, "A person approved or declined a rollback proposal.", ("governance", "sre", "product"),
+          "1.4.3"),
     # retrain
     Event("retrain.requested", _S, "A pipeline released before the decision cases asked for a retrain.", ("ml",)),
     Event("retrain.proposed", _L, "Drift or performance opened (or added to) a retrain decision case.",

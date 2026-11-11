@@ -205,7 +205,8 @@ def sync(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, dry_run:
     live_by_name = {p["displayName"]: p for p in live_policies}
     wanted = {policy_name(uc, e): e for e in wanted_emails}
     for name, live in live_by_name.items():
-        if name not in wanted:
+        # 1.4.3 (FR-98): health policies are kept by pipewright.serving.health, not here
+        if name not in wanted and (live.get("userLabels") or {}).get("pipewright-health") != "true":
             plan.delete.append(live["name"])
     for name, event in wanted.items():
         event_channels = sorted(plan.channels[e] for e in wanted_emails[event] if e in plan.channels)

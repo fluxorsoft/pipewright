@@ -28,6 +28,8 @@ Routes:
                      a training run's model version, registered by the launcher after its checks (Pipewright 1.4.3,
                      FR-100, with policies.registration: launcher); also as kind model.registration on /pubsub/run,
                      with the runner's "id_token". The answer is also written to runs/registration/<tenant>/
+  POST /incidents   a Cloud Monitoring incident of a health policy (Pub/Sub push from the incident channel's topic):
+                     serving.degraded when it opens, serving.recovered when it closes (Pipewright 1.4.3, FR-98)
   GET  /health   live use cases and their releases (Cloud Run reserves paths ending in "z", e.g. /healthz)
 """
 
@@ -581,6 +583,34 @@ def create_app(registry: Registry | None = None) -> Flask:
                    files=body.get("files"), registered_by="launcher")
         return jsonify(result), 200
 
+    # ---------------------------------------------------------------- serving health (1.4.3, FR-98) --
+    def handle_incident(envelope: dict | None):
+        from pipewright.serving import incidents, rollback
+
+        try:
+            incident = incidents.parse(envelope)
+        except incidents.NotOurs as e:
+            return jsonify(status="ignored", reason=str(e)), 200
+        contract = next((c for c in reg().live() if _slug_label(c.usecase) == incident["usecase_label"]), None)
+        if contract is None:
+            log.warning("incident for %s: no live release", incident["usecase_label"])
+            return jsonify(status="ignored", reason="no live release"), 200
+        _event(incidents.event_type(incident), contract, None, **incidents.event_data(incident))
+        result = {"status": "recorded", "event": incidents.event_type(incident)}
+        try:
+            proposal = rollback.maybe_propose(contract, incident, reg().gcp, reg().bucket)
+        except Exception as e:  # noqa: BLE001 - the event is recorded; a proposal is a convenience on top
+            log.exception("rollback proposal for %s", contract.usecase)
+            proposal = {"error": str(e)[:200]}
+        if proposal and proposal.get("case_id"):
+            _event("rollback.proposed", contract, None, **proposal)
+            result["rollback"] = proposal["case_id"]
+        return jsonify(result), 200
+
+    @app.post("/incidents")
+    def incidents_push():
+        return handle_incident(request.get_json(silent=True))
+
     @app.post("/models/register")
     def models_register():
         caller = identity.cloud_run_caller(request.headers.get("Authorization"))
@@ -766,6 +796,12 @@ def create_app(registry: Registry | None = None) -> Flask:
                        errors=reg().errors)
 
     return app
+
+
+def _slug_label(value: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9_-]", "-", value.lower())[:63]
 
 
 def _startup_app() -> Flask | None:
