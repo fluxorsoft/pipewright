@@ -265,3 +265,15 @@ def test_the_loop_trains_on_tests_data_unless_an_approver_named_it():
     older = FakeBackend()                                                # a backend without the method: as before
     loop(older).start()
     assert older.submitted[-1][1]["source_uri"] == "bq://prod.d.customers"
+
+
+def test_a_loop_whose_training_failed_starts_again_with_a_new_run_key():
+    # GA QA (found live): retrain retry sends loops to `pipewright loop`, which could not start a failed one
+    b = FakeBackend()
+    lp = loop(b)
+    lp.start()
+    b.finish("test", "training", "rc-1", state="FAILED")
+    assert lp.advance()["state"] == "failed"
+    again = lp.start()
+    assert again["state"] == "training" and b.submitted[-1][1]["run_key"] == "rc-1-retry-1"
+    assert [h["state"] for h in again["history"]] == ["training", "failed", "training"]

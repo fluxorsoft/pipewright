@@ -76,7 +76,9 @@ class Loop:
     def start(self, source_uri: str | None = None) -> dict:
         """Trains in test on the case's data, comparing with the version production serves."""
         loop = self.record()
-        if loop.get("state") != "approved":
+        # GA QA: a loop whose training failed (no candidate yet) starts again here; `retrain retry` sends loops here
+        retry = loop.get("state") == "failed" and not loop.get("candidate")
+        if loop.get("state") != "approved" and not retry:
             return loop                                           # started already: nothing to do
         # One loop at a time per use case: two candidates racing to production would judge each other's champion.
         busy = [c["case_id"] for c in self.backend.other_cases()
@@ -96,9 +98,11 @@ class Loop:
             uri = getattr(self.backend, "test_source_uri", lambda: None)() or uri
         if not uri:
             raise ConfigError(f"case {self.case_id} has no training data: give --source-uri")
-        run_id, job_id = self.backend.run_ids("training", uri, self.case_id)
+        tries = sum(1 for h in loop.get("history") or [] if h.get("state") == "training")
+        key = self.case_id if not tries else f"{self.case_id}-retry-{tries}"   # a new run key: not a duplicate
+        run_id, job_id = self.backend.run_ids("training", uri, key)
         self.backend.submit(self.test, {"usecase": self.usecase, "pipeline": "training", "source_uri": uri,
-                                        "run_key": self.case_id, "loop": self.case_id,
+                                        "run_key": key, "loop": self.case_id,
                                         **({"champion_version": champion["test_version"]} if champion else {}),
                                         **({"loop_data": data} if data else {})})
         return self._step("training", source_uri=uri, champion=champion,
