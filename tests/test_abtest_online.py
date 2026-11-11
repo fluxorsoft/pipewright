@@ -485,3 +485,28 @@ def test_both_routers_are_given_the_tests_layer(monkeypatch):
     arms.apply({**KSERVE_TEST, "layer": layer})
     dep = kube.objects["/apis/apps/v1/namespaces/serving-churn/deployments/pw-ab-router-churn-x"]
     assert json.loads(dep["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"])["ab_test"]["layer"] == layer
+
+
+def test_prediction_ids_pass_through_the_router():
+    # GA QA (found live): with capture on, the router dropped the gateway's prediction IDs (lookup mode) and made
+    # none (router-only), so live quality lost the answers of an A/B test
+    class IdGateway(FakeGateway):
+        capture = True
+
+        def predict(self, ids):
+            body, f = super().predict(ids)
+            return {**body, "prediction_ids": {i: f"p-{i}" for i in ids}}, f
+
+        def call(self, instances):
+            assert all(set(x) == {"_pw_prediction_id", "row"} for x in instances)
+            return {"predictions": [x["row"][0] + 1 for x in instances], "deployedModelId": self.deployed}
+
+    base = {"name": "lapse-v7", "mode": "ab", "state": "running", "treatment_bp": 5000, "release": "R1",
+            "usecase": "churn", "tenant": "retention", "treatment_deployed_model": "T1", "breaker": {}, "feed": {}}
+    r = abrouter.ABRouter(base, IdGateway("C1"), IdGateway("T1"), Log())
+    body, _ = r.predict(UNITS[:20])
+    assert body["prediction_ids"] == {u: f"p-{u}" for u in UNITS[:20]}
+    body, _ = r.predict_instances([[k, 1] for k in range(20)], UNITS[:20])
+    assert len(set(body["prediction_ids"])) == 20 and body["predictions"] == [k + 1 for k in range(20)]
+    plain, _ = router()[0].predict_instances([[1, 1]], UNITS[:1])
+    assert "prediction_ids" not in plain                                    # capture off: as before

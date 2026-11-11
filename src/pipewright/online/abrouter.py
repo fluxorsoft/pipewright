@@ -33,6 +33,7 @@ import queue
 import threading
 import time
 import urllib.request
+import uuid
 
 SPACE = 2**56
 LOG_API = "https://logging.googleapis.com/v2/entries:write"
@@ -311,6 +312,8 @@ class ABRouter:
             g = self.control if a == "control" else self.treatment
             out, f = self._call(a, g.predict, groups[a])
             body["predictions"].update(out["predictions"])
+            if out.get("prediction_ids"):        # FR-98 (GA QA): each arm's IDs, kept through the router
+                body.setdefault("prediction_ids", {}).update(out["prediction_ids"])
             body["not_found"] += out["not_found"]
             body["deployed_model"][a], body["model_version"][a] = out.get("deployed_model"), out.get("model_version")
             deployed[a] = out.get("deployed_model")
@@ -348,12 +351,16 @@ class ABRouter:
         arms = self.split(units)
         preds: list = [None] * len(units)
         deployed = {}
+        # FR-98 (GA QA): with capture on, each instance gets a prediction ID as the gateway gives one, so outcomes
+        # can be joined to the answers of both arms (the router had dropped them)
+        pids = [uuid.uuid4().hex for _ in units] if getattr(self.control, "capture", False) else None
         for a in ("control", "treatment"):
             idx = [k for k, u in enumerate(units) if (arms[u] or "control") == a]
             if not idx:
                 continue
             g = self.control if a == "control" else self.treatment
-            batch = [instances[k] for k in idx]
+            batch = [instances[k] if pids is None else {"_pw_prediction_id": pids[k], "row": instances[k]}
+                     for k in idx]
             out = self._call(a, g.call, batch)
             deployed[a] = out.get("deployedModelId")
             self._check_model(a, deployed[a])
@@ -361,7 +368,7 @@ class ABRouter:
                 preds[k] = p
         self._exposures({u: arms[u] for u in units}, deployed)
         return ({"predictions": preds, "arms": [arms[u] for u in units], "ab_test": self.cfg["name"],
-                 "deployed_model": deployed},
+                 "deployed_model": deployed, **({"prediction_ids": pids} if pids else {})},
                 {"asked": len(units), "control": sum(a == "control" for a in arms.values()),
                  "treatment": sum(a == "treatment" for a in arms.values()), "ab_test": self.cfg["name"]})
 
