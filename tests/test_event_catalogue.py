@@ -153,3 +153,5 @@ def test_the_brief_has_only_what_the_event_has_and_both_copies_agree():
     assert text == "signal: errors\nthreshold: 0.05\ndrifted: a, b\nrelease: r1"
     assert rt.brief(data, None, "r1") == text
     assert "brief" in events.event("serving.recovered", "u", "e", signal="errors")["data"]
+    movers = {"top_movers": [{"feature": "tickets", "training": 0.2, "now": 0.31}]}
+    assert events.brief(movers) == rt.brief(movers) == "top_movers: tickets 0.2 to 0.31"

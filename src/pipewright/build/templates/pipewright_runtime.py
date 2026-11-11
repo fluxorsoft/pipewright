@@ -89,9 +89,13 @@ def brief(data: dict, run_id: str | None = None, release: str | None = None) -> 
         if k in ("brief", "approval") or v is None or v == "" or v == [] or v == {}:
             continue
         if isinstance(v, (list, tuple)):
-            if any(isinstance(x, (dict, list, tuple)) for x in v):
+            if all(isinstance(x, dict) and {"feature", "training", "now"} <= set(x) for x in v):
+                # attribution's top movers (1.4.3): which features moved, from training's share to the window's
+                v = ", ".join(f"{x['feature']} {x['training']} to {x['now']}" for x in v)
+            elif any(isinstance(x, (dict, list, tuple)) for x in v):
                 continue
-            v = ", ".join(str(x) for x in v)
+            else:
+                v = ", ".join(str(x) for x in v)
         elif isinstance(v, dict):
             continue
         elif isinstance(v, float):
