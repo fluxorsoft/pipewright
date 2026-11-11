@@ -259,7 +259,7 @@ def markdown() -> str:
     from pipewright.alerts import sync
     from pipewright.observability import events
 
-    mail = set(sync.EVENTS)
+    mail = set(sync.EVENTS) | set(sync.SPLIT)
     out = [
         "# Events",
         "",

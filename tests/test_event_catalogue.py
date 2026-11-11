@@ -56,7 +56,8 @@ def test_dynamic_families_are_listed():
 
 def test_every_emailable_and_decision_event_exists():
     alias = {"training.rejected"}                            # an email filter on training.evaluated
-    assert set(sync.EVENTS) - alias <= set(catalogue.BY_TYPE)
+    split = {k for parts in sync.SPLIT.values() for k in parts}          # monitoring.alert's two policies
+    assert set(sync.EVENTS) - alias - split | set(sync.SPLIT) <= set(catalogue.BY_TYPE)
     assert set(events.DECISIONS) <= set(catalogue.BY_TYPE)
 
 

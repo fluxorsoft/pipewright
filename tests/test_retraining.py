@@ -403,7 +403,8 @@ def test_decision_alert_policies(repo):
                         "decisions": {"notify": ["ml@x.com"], "escalate_notify": ["head@x.com"], "digest": False}})
     uc = resolve(repo)
     wanted = wanted_policies(uc)
-    assert wanted["monitoring.alert"] == ["ops@x.com"] and wanted["retrain.proposed"] == ["ml@x.com"]
+    assert wanted["monitoring.alert.drift"] == wanted["monitoring.alert.performance"] == ["ops@x.com"]
+    assert wanted["retrain.proposed"] == ["ml@x.com"]
     assert wanted["retrain.escalated"] == ["head@x.com", "ml@x.com"] and "retrain.digest" not in wanted
     body = policy_body(uc, "retrain.proposed", ["c1"], "WARNING")
     assert "```\n${log.extracted_label.summary}\n```" in body["documentation"]["content"]

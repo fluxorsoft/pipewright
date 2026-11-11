@@ -67,7 +67,8 @@ def test_sync_creates_then_is_idempotent_then_deletes(repo):
     env = load_environment(repo.root, "dev")
     plan = alerts.sync(uc, env, mon)
     assert sorted(plan.channels_create) == ["oncall-list@acme.example", "team@acme.example"]
-    assert plan.create == ["monitoring.alert", "training.rejected"] and not plan.errors
+    both = ["monitoring.alert.drift", "monitoring.alert.performance"]
+    assert plan.create == [*both, "training.rejected"] and not plan.errors
     policy = next(p for p in mon.policies.values() if "rejected" in p["displayName"])
     cond = policy["conditions"][0]["conditionMatchedLog"]
     assert 'labels."pipewright-usecase"="churn"' in cond["filter"]
@@ -78,12 +79,13 @@ def test_sync_creates_then_is_idempotent_then_deletes(repo):
     assert "primary_value" in policy["conditions"][0]["conditionMatchedLog"]["labelExtractors"]
 
     again = alerts.sync(uc, env, mon)
-    assert again.unchanged == ["monitoring.alert", "training.rejected"] and not again.create + again.update
+    assert again.unchanged == [*both, "training.rejected"] and not again.create + again.update
 
     fewer = uc_for(repo, notify=["team@acme.example"], events=["monitoring.alert"])
     plan = alerts.sync(fewer, env, mon)
-    assert plan.update == ["monitoring.alert"] and len(plan.delete) == 1
-    assert [p["displayName"] for p in mon.policies.values()] == ["pipewright churn dev: drift or performance alert"]
+    assert plan.update == ["monitoring.alert.drift", "monitoring.alert.performance"] and len(plan.delete) == 1
+    assert [p["displayName"] for p in mon.policies.values()] == ["pipewright churn dev: drift alert",
+                                                          "pipewright churn dev: performance alert"]
 
 
 def test_another_channel_for_the_same_address_changes_nothing(repo):
@@ -97,7 +99,8 @@ def test_another_channel_for_the_same_address_changes_nothing(repo):
     other = "projects/acme-ml-dev/notificationChannels/zzz-platform"
     mon.channels[other] = {"name": other, "type": "email", "labels": {"email_address": "team@acme.example"}}
     again = alerts.sync(uc, env, mon)
-    assert again.unchanged == ["monitoring.alert"] and not again.update and not again.channels_create
+    assert again.unchanged == ["monitoring.alert.drift", "monitoring.alert.performance"]
+    assert not again.update and not again.channels_create
     assert next(iter(mon.policies.values()))["notificationChannels"] == [mine]
 
 
@@ -109,7 +112,7 @@ def test_no_recipients_removes_policies_and_dry_run_changes_nothing(repo):
     calls = len(mon.calls)
     silent = uc_for(repo, notify=[])
     dry = alerts.sync(silent, env, mon, dry_run=True)
-    assert len(dry.delete) == 1 and len(mon.calls) == calls
+    assert len(dry.delete) == 2 and len(mon.calls) == calls          # monitoring.alert is two policies
     assert "no alert emails" in alerts.render(silent, dry, True)
     alerts.sync(silent, env, mon)
     assert mon.policies == {}
@@ -153,14 +156,16 @@ def test_an_address_that_left_notify_loses_its_channel(repo):
     assert not alerts.sync(swapped, env, mon).channels_delete
 
 
-def test_a_monitoring_alert_email_says_drift_or_performance():
-    """1.4.3 battle test (user): the email says which: the event's triggers, not "drift or performance"."""
+def test_a_monitoring_alert_is_a_drift_policy_and_a_performance_policy():
+    """1.4.3 battle test (user): the policy and the email name what fired, drift or performance."""
     from types import SimpleNamespace
 
     from pipewright.alerts import sync
 
     uc = SimpleNamespace(name="churn", environment="prod", owner="team")
-    body = sync.policy_body(uc, "monitoring.alert", [], "WARNING")
-    assert body["documentation"]["subject"] == "[prod] churn: ${log.extracted_label.triggers} alert"
-    assert "triggers" in body["conditions"][0]["conditionMatchedLog"]["labelExtractors"]
-    assert body["displayName"].endswith("drift or performance alert")
+    drift = sync.policy_body(uc, "monitoring.alert.drift", [], "WARNING")
+    perf = sync.policy_body(uc, "monitoring.alert.performance", [], "WARNING")
+    assert drift["displayName"].endswith(": drift alert") and perf["displayName"].endswith(": performance alert")
+    assert drift["documentation"]["subject"] == "[prod] churn: drift alert"
+    assert 'data.triggers=~"drift"' in drift["conditions"][0]["conditionMatchedLog"]["filter"]
+    assert 'data.triggers=~"performance"' in perf["conditions"][0]["conditionMatchedLog"]["filter"]

@@ -32,9 +32,16 @@ MON = "https://monitoring.googleapis.com/v3"
 
 # event -> (log filter on the event entry, title, details pulled into the email)
 EVENTS = {
-    "monitoring.alert": ('jsonPayload.pipewright_event.event_type="monitoring.alert"', "drift or performance alert",
-                         ["triggers", "model_version_id", "drifted_features", "max_feature_psi", "prediction_psi",
-                          "performance_metric", "performance_value", "retrain_status"]),
+    # monitoring.alert is two policies (user, 1.4.3 battle test: the alert names what fired): drift and performance.
+    # An alert with both triggers fires both, each saying what it is.
+    "monitoring.alert.drift": ('jsonPayload.pipewright_event.event_type="monitoring.alert" AND '
+                               'jsonPayload.pipewright_event.data.triggers=~"drift"', "drift alert",
+                               ["model_version_id", "drifted_features", "max_feature_psi", "prediction_psi",
+                                "retrain_status"]),
+    "monitoring.alert.performance": ('jsonPayload.pipewright_event.event_type="monitoring.alert" AND '
+                                     'jsonPayload.pipewright_event.data.triggers=~"performance"', "performance alert",
+                                     ["model_version_id", "performance_metric", "performance_value",
+                                      "retrain_status"]),
     "retrain.requested": ('jsonPayload.pipewright_event.event_type="retrain.requested"', "retrain requested",
                           ["triggers", "job_id", "source_uri"]),
     "training.rejected": ('jsonPayload.pipewright_event.event_type="training.evaluated" AND '
@@ -85,9 +92,9 @@ EVENTS = {
                                "capture silent", ["served", "expected"]),
 }
 
-# What the email says, where the event names it (the policy keeps the general title): a monitoring alert says
-# whether it is drift, performance or both (the event's triggers: drift, performance or drift,performance).
-SUBJECTS = {"monitoring.alert": "${log.extracted_label.triggers} alert"}
+# A configured event kept as several policies, each named for what fired (monitoring.alerts.events still lists the
+# event: the team writes monitoring.alert).
+SPLIT = {"monitoring.alert": ["monitoring.alert.drift", "monitoring.alert.performance"]}
 
 # Retrain decision events (pipewright.retraining): emailed to retraining.decisions.notify.
 DECISION_EVENTS = {
@@ -123,7 +130,7 @@ def policy_body(uc: ResolvedUseCase, event: str, channels: list[str], severity: 
     extractors["brief"] = "EXTRACT(jsonPayload.pipewright_event.data.brief)"
     extractors["run_id"] = 'EXTRACT(labels."run-id")'
     extractors["release"] = 'EXTRACT(labels."pipewright-release")'
-    said = SUBJECTS.get(event, title)
+    said = title
     subject = f"[{uc.environment}] {uc.name}: {said}"
     if event in DECISION_EVENTS:
         subject += " (${log.extracted_label.case_id})" if event != "retrain.digest" else ""
@@ -329,7 +336,8 @@ def wanted_policies(uc: ResolvedUseCase, env: Environment | None = None) -> dict
     """event -> email addresses: monitoring.alerts for its events, retraining.decisions for decision events, and
     (1.4.1) the integrity events when the environment's policies.integrity watch or inference check is on."""
     alerts = uc.ml["monitoring"]["alerts"]
-    out = {e: sorted(set(alerts["notify"])) for e in dict.fromkeys(alerts["events"])} if alerts["notify"] else {}
+    configured = [p for e in dict.fromkeys(alerts["events"]) for p in SPLIT.get(e, [e])]
+    out = {e: sorted(set(alerts["notify"])) for e in configured} if alerts["notify"] else {}
     integ = ((getattr(env, "policies", None) or {}).get("integrity") or {}) if env is not None else {}
     if alerts["notify"]:
         if integ.get("watch") == "on":
