@@ -67,3 +67,13 @@ def test_two_usecases_from_one_example_keep_their_own_images(repo):
     second = compile_all(resolve_usecase(b / "usecase.yaml", env), component_image=image_b)
     assert {i for info in first.values() for i in info.images} == {image_a}
     assert {i for info in second.values() for i in info.images} == {image_b}
+
+
+def test_the_help_names_every_example():
+    # GA QA: bqml and serving were missing from `new-usecase --help`
+    from pipewright.cli.main import build_parser
+    from pipewright.scaffold.new_usecase import list_examples
+
+    sub = next(a for a in build_parser()._subparsers._group_actions[0].choices["new-usecase"]._actions
+               if a.dest == "from_example")
+    assert all(name in sub.help for name in list_examples())
