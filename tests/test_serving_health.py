@@ -30,7 +30,7 @@ class FakeGcp:
     def post(self, url, body, **params):
         q = json.dumps(body["conditions"])
         if any(r in q for r in self.refuse):
-            return Response(400, {"error": {"message": "invalid PromQL metric: Requests5XX"}})
+            return Response(400, {"error": {"message": "The following PromQL metric(s) are invalid:  Requests5XX"}})
         self.posted.append(body)
         return Response(200, body)
 

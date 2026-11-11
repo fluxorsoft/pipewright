@@ -170,7 +170,10 @@ class HealthPlan:
 
 
 def _missing_metric(r) -> bool:
-    return r.status == 400 and "invalid promql metric" in error_text(r).lower()
+    # Two wordings seen live: "invalid PromQL metric: X" (spike 4) and "The following PromQL metric(s) are invalid:
+    # X" (the 1.4.3 battle test)
+    text = error_text(r).lower()
+    return r.status == 400 and ("invalid promql metric" in text or "promql metric(s) are invalid" in text)
 
 
 def _same(live: dict, want: dict) -> bool:
