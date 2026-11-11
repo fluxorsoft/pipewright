@@ -61,6 +61,13 @@ def _resolver_default(key: str):
               "tests.environment": ResolvedUseCase.__dataclass_fields__["tests_environment"].default}
     if key in absent:
         return absent[key]
+    if key.startswith("monitoring.online."):           # 1.4.3 (FR-98): serving_config's defaults
+        from pipewright.monitoring import serving_config
+
+        table = serving_config.ONLINE_DEFAULTS
+        for part in key.split(".")[2:]:
+            table = table[part]
+        return table
     head, *rest = key.split(".")
     table = {"model": {"serving": resolve._SERVING_DEFAULTS}, "approvals": resolve._APPROVAL_DEFAULTS}.get(head) \
         or ml.DEFAULTS[head]

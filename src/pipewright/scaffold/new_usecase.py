@@ -77,7 +77,8 @@ def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "
     for label, value in (("name", name), ("tenant", tenant)):
         if not NAME.match(value):
             raise ConfigError(f"{label} {value!r} must be lowercase letters, digits and hyphens, "
-                              "starting with a letter")
+                              "starting with a letter, at most 31 characters"
+                              + (f" (it has {len(value)})" if len(value) > 31 else ""))
     src = examples_dir() / example
     if not (src / "usecase.yaml").is_file():
         raise ConfigError(f"unknown example {example!r} (available: {', '.join(list_examples())})")

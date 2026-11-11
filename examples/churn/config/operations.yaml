@@ -19,6 +19,8 @@ monitoring:
     window_hours: 24
     min_samples: 500
     attribution: { enabled: false, sample_rows: 500, threshold: 0.10 }   # which features drive the answers
+    # default monitoring.online.outcomes: null   # live quality: { table, key: prediction_id, label }, outcomes keyed
+    #                                            # by the prediction ID the lookup gateway returned (or callers sent)
   # 1.4.3 (FR-98): alert policies on each deployed version; their incidents arrive on Pub/Sub as serving.degraded
   # and serving.recovered (the platform turns on the incident channel: serving_health in the starter)
   health:
