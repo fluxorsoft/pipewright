@@ -23,6 +23,11 @@ synthetic:
     # can be reproduced. Both null (the default) = time-bound training from a new random state, as before 1.4.3.
     max_epochs: 3                        # a fixed amount of training (20,000 rows, Small model: about 2 minutes)
     seed: 42                             # one seed for training and generation
+    # default synthetic.engine.sampling_temperature: 1.0   # lower: closer to common rows, higher: more variety
+    # default synthetic.engine.rare_categories: constant   # rare values replaced (privacy); sample keeps them
+    # default synthetic.engine.differential_privacy: null  # e.g. { epsilon: 5.0 }: training with a privacy budget
+  # default synthetic.rows: null                 # how many rows to write; null: as many as the source
+  # default synthetic.holdout_fraction: 0.2      # real rows kept out of training, to measure privacy and utility
   columns:                               # decided by rules, never learned
     customer_id: { rule: key, prefix: "SYN-" }
     snapshot_date: { rule: time, from: "2025-01-31", to: "2025-12-31", step: month_end }   # contract tier

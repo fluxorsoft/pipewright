@@ -11,6 +11,7 @@ evaluation:
     metric: auc
     min_improvement: 0.0
   slices: [contract_length_months]       # metrics per value, in the evaluation report
+  # default evaluation.fairness: null    # e.g. { attributes: [gender], gates: [...] }: fairness per group
   slice_gates:
     # Within-slice AUC is naturally lower when the slice column is itself a strong feature (contract length is
     # the strongest here), so the gap allowed is wide: it catches a slice the model fails on, not the usual dip.

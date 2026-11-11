@@ -20,6 +20,9 @@ data:
   label: { column: churned, values: [0, 1], positive: 1 }
   # default data.features_from: null      # feature tables read at each row's cut-off (see the features example)
   # default data.label_source: null       # labels from an events table and a window (see the reference)
+  # default data.label.task: binary        # also multiclass or regression (and BigQuery ML's tasks)
+  # default data.snapshot_table: null      # a table in outputs.bigquery.tables keeping exactly what each run read
+  #                                        # (run_id, source_uri, ingested_at): `pipewright run --replay <run_id>`
   split:
     strategy: time                       # train on the past, test on the latest months
     time_column: snapshot_date

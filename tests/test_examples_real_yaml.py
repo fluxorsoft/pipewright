@@ -55,6 +55,7 @@ def _resolver_default(key: str):
               "model.serving.pool": None,
               "model.serving.drain_seconds": __import__("pipewright.models.deploy", fromlist=["x"]).DRAIN_SECONDS,
               "data.label_source": None, "monitoring.performance.labels.time_column": None,
+              "data.snapshot_table": None, "data.label.task": "binary", "evaluation.fairness": None,
               "feature_contract": None,
               "components.base_image": ResolvedUseCase.__dataclass_fields__["base_image"].default,
               "tests.on_release": ResolvedUseCase.__dataclass_fields__["tests_on_release"].default,
