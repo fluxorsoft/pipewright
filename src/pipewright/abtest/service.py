@@ -43,7 +43,13 @@ RESULTS_KEPT = 200                 # analyses kept on the record in brief (FR-12
 def without_by(value):
     """The event without who acted (FR-122): every `by`, at any depth (a decision's approvals carry theirs too)."""
     if isinstance(value, dict):
-        return {k: without_by(v) for k, v in value.items() if k != "by"}
+        out = {k: without_by(v) for k, v in value.items() if k != "by"}
+        if "brief" in out and isinstance(out.get("brief"), str):
+            # 1.4.3: the brief repeats the fields, `by` among them: rebuilt from what is left (found by the test)
+            from pipewright.observability.events import brief
+
+            out["brief"] = brief({k: v for k, v in out.items() if k != "brief"})
+        return out
     if isinstance(value, list):
         return [without_by(v) for v in value]
     return value

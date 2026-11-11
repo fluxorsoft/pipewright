@@ -137,3 +137,18 @@ def test_concurrent_events_stay_one_json_line_each():
     lines = out.getvalue().splitlines()
     assert len(lines) == 160 and all(json.loads(line)["pipewright_event"]["event_type"] == "serving.recovered"
                                      for line in lines)
+
+
+def test_the_brief_has_only_what_the_event_has_and_both_copies_agree():
+    """1.4.3 battle test: emails printed (null) for fields an event does not have."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("rt2", ROOT / "src/pipewright/build/templates/pipewright_runtime.py")
+    rt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rt)
+    data = {"signal": "errors", "deployed_model": None, "threshold": 0.05, "top_movers": [{"feature": "a"}],
+            "drifted": ["a", "b"], "shares": {"a": 1}}
+    text = events.brief(data, None, "r1")
+    assert text == "signal: errors\nthreshold: 0.05\ndrifted: a, b\nrelease: r1"
+    assert rt.brief(data, None, "r1") == text
+    assert "brief" in events.event("serving.recovered", "u", "e", signal="errors")["data"]

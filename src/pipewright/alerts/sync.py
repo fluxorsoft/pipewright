@@ -120,6 +120,7 @@ def policy_body(uc: ResolvedUseCase, event: str, channels: list[str], severity: 
     log_filter = (f'labels."pipewright-usecase"="{uc.name}" AND labels."pipewright-environment"="{uc.environment}" '
                   f"AND {match}")
     extractors = {d: f"EXTRACT(jsonPayload.pipewright_event.data.{d})" for d in details}
+    extractors["brief"] = "EXTRACT(jsonPayload.pipewright_event.data.brief)"
     extractors["run_id"] = 'EXTRACT(labels."run-id")'
     extractors["release"] = 'EXTRACT(labels."pipewright-release")'
     said = SUBJECTS.get(event, title)
@@ -133,11 +134,15 @@ def policy_body(uc: ResolvedUseCase, event: str, channels: list[str], severity: 
                  f"approve | decline | snooze --env {uc.environment} --usecase {uc.name} --case <case>`.",
                  f"Owner: {uc.owner}."]
     else:
-        lines = [f"**{uc.name}** ({uc.environment}): {said}.", "",
-                 *[f"- {d}: ${{log.extracted_label.{d}}}" for d in details],
-                 "- run: ${log.extracted_label.run_id}, release ${log.extracted_label.release}", "",
-                 f"Owner: {uc.owner}. Details: `pipewright monitor status --env {uc.environment} --usecase "
-                 f"{uc.name}`, or the run in Agent Platform Pipelines."]
+        # The event's brief: only the fields it has (a template prints a missing one as "(null)": 1.4.3 battle test)
+        if event.startswith(("serving.", "rollback.")):
+            where = (f"`pipewright model list --env {uc.environment} --usecase {uc.name}`, and the deployed "
+                     "version's health policies in Cloud Monitoring")
+        else:
+            where = (f"`pipewright monitor status --env {uc.environment} --usecase {uc.name}`, or the run in your "
+                     "pipelines UI (Agent Platform Pipelines, or Kubeflow on private GKE)")
+        lines = [f"**{uc.name}** ({uc.environment}): {said}.", "", "```", "${log.extracted_label.brief}", "```", "",
+                 f"Owner: {uc.owner}. Details: {where}."]
     return {
         "displayName": policy_name(uc, event),
         "combiner": "OR",

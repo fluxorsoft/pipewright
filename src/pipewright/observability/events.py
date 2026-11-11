@@ -65,8 +65,33 @@ def event(event_type: str, usecase: str | None, environment: str | None, tenant:
           release: str | None = None, run_id: str | None = None, **data) -> dict:
     if (event_type in DECISIONS or event_type.startswith(("loop.", "ab_test."))) and "approval" not in data:
         data["approval"] = approval()
+    data.setdefault("brief", brief(data, run_id, release))      # 1.4.3: what emails show
     return {"event_type": event_type, "time": datetime.now(timezone.utc).isoformat(), "usecase": usecase,
             "environment": environment, "tenant": tenant, "release": release, "run_id": run_id, "data": data}
+
+
+def brief(data: dict, run_id: str | None = None, release: str | None = None) -> str:
+    """The event in a few lines, for emails: only the fields it has (an email template prints a missing field as
+    "(null)": found in the 1.4.3 battle test), scalars and lists of scalars, then the run and release when there are
+    ones. pipewright_runtime keeps the same rule (a test keeps them equal)."""
+    lines = []
+    for k, v in data.items():
+        if k in ("brief", "approval") or v is None or v == "" or v == [] or v == {}:
+            continue
+        if isinstance(v, (list, tuple)):
+            if any(isinstance(x, (dict, list, tuple)) for x in v):
+                continue
+            v = ", ".join(str(x) for x in v)
+        elif isinstance(v, dict):
+            continue
+        elif isinstance(v, float):
+            v = f"{v:.4g}"
+        lines.append(f"{k}: {v}")
+    if run_id:
+        lines.append(f"run: {run_id}")
+    if release:
+        lines.append(f"release: {release}")
+    return "\n".join(lines)[:1500]
 
 
 def _labels(e: dict) -> dict:

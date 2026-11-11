@@ -107,7 +107,7 @@ def test_runtime_log_and_event_lines(capsys):
     assert line["severity"] == "NOTICE" and line["pipewright_event"]["event_type"] == "monitoring.alert"
     assert line["logging.googleapis.com/labels"] == {"pipewright-usecase": "churn", "pipewright-tenant": "churn",
                                                      "pipewright-environment": "dev", "run-id": "r1"}
-    assert e["data"] == {"max_feature_psi": 0.85}
+    assert e["data"] == {"max_feature_psi": 0.85, "brief": "max_feature_psi: 0.85\nrun: r1"}
 
 
 class FakePubSub:

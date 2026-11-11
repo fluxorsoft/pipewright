@@ -74,7 +74,8 @@ def test_sync_creates_then_is_idempotent_then_deletes(repo):
     assert 'jsonPayload.pipewright_event.data.decision="reject"' in cond["filter"]
     assert cond["labelExtractors"]["champion_value"] == "EXTRACT(jsonPayload.pipewright_event.data.champion_value)"
     assert len(policy["notificationChannels"]) == 2 and policy["documentation"]["subject"].startswith("[dev] churn")
-    assert "${log.extracted_label.primary_value}" in policy["documentation"]["content"]
+    assert "${log.extracted_label.brief}" in policy["documentation"]["content"]          # 1.4.3: no (null) fields
+    assert "primary_value" in policy["conditions"][0]["conditionMatchedLog"]["labelExtractors"]
 
     again = alerts.sync(uc, env, mon)
     assert again.unchanged == ["monitoring.alert", "training.rejected"] and not again.create + again.update
