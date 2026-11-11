@@ -131,4 +131,10 @@ def render(uc: ResolvedUseCase, results: list[EraseResult], keys: int, confirm: 
         lines.append("re-run with --confirm to delete")
     lines.append("not covered: landing files and pipeline artifacts in GCS (platform retention), and models trained "
                  "on this data: retrain to remove its influence")
+    capture = (uc.model.get("serving") or {}).get("capture") or {}
+    if capture.get("enabled"):
+        # 1.4.3 (FR-98, GA QA): capture keeps what callers sent (features, no key), so it cannot be found by key
+        lines.append(f"not covered by key: online capture ({capture.get('retention_days', 30)} days) and the online "
+                     "predictions it records hold request features or prediction IDs, never the key; they expire "
+                     "with model.serving.capture.retention_days")
     return "\n".join(lines)
