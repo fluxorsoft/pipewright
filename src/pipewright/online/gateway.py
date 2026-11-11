@@ -24,7 +24,10 @@ deployed model and version, and counts; never an ID or a feature value. Standard
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
+import os
 import socket
 import ssl
 import threading
@@ -32,6 +35,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 MD = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default"
 PSC_SAN = "*.prediction.p.vertexai.goog"
@@ -165,6 +169,11 @@ class Gateway:
         self._tokens = tokens                      # access tokens for the endpoint (the gateway's identity)
         self._open = opener or urllib.request.urlopen
         self._context, self._lock = context, threading.Lock()
+        # 1.4.3 (FR-98 stage 3): with capture on, each instance carries a prediction ID the gateway makes (returned to
+        # the caller, for joining outcomes later) and, with a unit key, a keyed hash of the entity (never the ID).
+        self.capture = bool(g.get("capture"))
+        key = os.environ.get("PIPEWRIGHT_UNIT_KEY") if self.capture else None
+        self._unit_key = key.encode() if key else None
 
     def _token(self) -> str:
         if self._tokens:
@@ -225,11 +234,19 @@ class Gateway:
         found = self.source.fetch(ids)
         known = [i for i in ids if i in found]
         out, attempts = {"predictions": [], "deployedModelId": None}, 0
+        pids = {}
         if known:
-            out, attempts = self._call([[found[i].get(f) for f in self.features] for i in known])
+            rows = [[found[i].get(f) for f in self.features] for i in known]
+            if self.capture:
+                pids = {i: uuid.uuid4().hex for i in known}
+                rows = [{"_pw_prediction_id": pids[i], "row": r,
+                         **({"_pw_unit": "hmac:" + hmac.new(self._unit_key, i.encode(), hashlib.sha256)
+                             .hexdigest()[:32]} if self._unit_key else {})} for i, r in zip(known, rows, strict=True)]
+            out, attempts = self._call(rows)
         preds = dict(zip(known, out.get("predictions") or [], strict=False))
         body = {"predictions": {i: preds[i] for i in known if i in preds},
                 "not_found": [i for i in ids if i not in found],
-                "deployed_model": out.get("deployedModelId"), "model_version": out.get("modelVersionId")}
+                "deployed_model": out.get("deployedModelId"), "model_version": out.get("modelVersionId"),
+                **({"prediction_ids": {i: pids[i] for i in known if i in preds}} if pids else {})}
         return body, {"asked": len(ids), "found": len(known), "attempts": attempts,
                       "deployed_model": body["deployed_model"], "model_version": body["model_version"]}

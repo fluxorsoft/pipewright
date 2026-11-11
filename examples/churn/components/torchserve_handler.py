@@ -156,6 +156,24 @@ class TabularChurnHandler(BaseHandler):
         if (self._online or {}).get("mode") == "gateway":
             self._online = None
 
+    def handle(self, data, context):
+        """BaseHandler's, timed: Pipewright 1.4.3 (FR-98) records each request's latency as the
+        PwPredictLatencySeconds histogram (seconds: TorchServe's buckets run 5 ms to 10 s), from which KServe health
+        policies take the 95th percentile. A handler of your own needs the same lines; without them the latency
+        policy uses the mean."""
+        import time
+
+        started = time.perf_counter()
+        out = super().handle(data, context)
+        try:
+            from ts.metrics.metric_type_enum import MetricTypes
+
+            metric = context.metrics.get_metric("PwPredictLatencySeconds", MetricTypes.HISTOGRAM)
+            metric.add_or_update(time.perf_counter() - started, dimension_values=[context.model_name, "Model"])
+        except Exception:  # noqa: BLE001 - no metrics config with the histogram (Agent Platform, older releases)
+            pass
+        return out
+
     def preprocess(self, data):
         if getattr(self, "_online", None):
             return self._preprocess_online(data)
@@ -224,6 +242,10 @@ class TabularChurnHandler(BaseHandler):
             item = _decode(item)
             if isinstance(item, dict):
                 item = _decode(item.get("data", item.get("body", item)))
+            if isinstance(item, dict) and "row" in item:
+                # Pipewright 1.4.3 (FR-98): {"_pw_prediction_id", "_pw_unit", "row"}. The IDs stay in the request
+                # log (capture keeps the instance as sent) for outcome joins; the model sees the row only.
+                item = item["row"]
             if isinstance(item, dict):
                 item = item.get("instances", [])
             if item and isinstance(item[0], (list, tuple)):

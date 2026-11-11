@@ -243,3 +243,17 @@ def test_a_private_endpoint_without_an_address_is_said_plainly():
     g = gw.Gateway(cfg, Source({"c-1": {}}), Tokens(), resolver=lambda: None)
     with pytest.raises(ConnectionError, match="first deployed model"):
         g.predict(["c-1"])
+
+
+def test_with_capture_each_instance_carries_a_prediction_id_and_a_keyed_unit(monkeypatch):
+    """FR-98 stage 3 (1.4.3): the gateway makes the prediction ID, returns it, and sends a keyed hash of the entity
+    (never the ID itself) when it has a unit key."""
+    monkeypatch.setenv("PIPEWRIGHT_UNIT_KEY", "k")
+    seen = []
+    cfg = {**CFG, "gateway": {**CFG["gateway"], "capture": True}}
+    g = gw.Gateway(cfg, Source({"c-1": {"spend": 2.0, "tenure": 12.0}}), Tokens(),
+                   opener([{"predictions": [0.8], "deployedModelId": "55", "modelVersionId": "3"}], seen))
+    body, _ = g.predict(["c-1"])
+    sent = seen[0]["instances"][0]
+    assert sent["row"] == [12.0, 2.0] and sent["_pw_prediction_id"] == body["prediction_ids"]["c-1"]
+    assert sent["_pw_unit"].startswith("hmac:") and "c-1" not in json.dumps(sent)

@@ -140,3 +140,14 @@ def test_a_bare_entity_id_is_not_json():
     h = handler()
     assert h._decode_id(b"C00001") == "C00001" and h._decode_id('{"customer_id": "C1"}') == {"customer_id": "C1"}
     assert h._decode_id(b'"C00002"') == "C00002"
+
+
+def test_the_1_4_3_caller_contract_strips_the_prediction_id():
+    """FR-98 stage 3: {"_pw_prediction_id", "_pw_unit", "row"} scores the row; plain rows score as before."""
+    h = handler()
+    tensors = []
+    h.torch.tensor, h.torch.float32 = (lambda rows, dtype=None: tensors.append(rows) or rows), "float32"
+    obj = h.TabularChurnHandler()
+    obj._features, obj._medians = ["a", "b"], {"a": 0.0, "b": 0.0}
+    obj._preprocess_rows([{"_pw_prediction_id": "p1", "_pw_unit": "hmac:ab", "row": [1, 2]}, [3, 4]])
+    assert tensors[-1] == [[1.0, 2.0], [3.0, 4.0]] and not obj._errors

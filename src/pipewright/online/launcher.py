@@ -171,8 +171,9 @@ def gateway_target(contract, manifest: dict, online: dict, gcp, arm: str = "") -
     else:
         url = f"https://{region}-aiplatform.googleapis.com{path}"
     g = online.get("gateway") or {}
+    ml = contract.pipeline("training").static_parameters.get("ml_config") or {}
     return {"endpoint": resource, "predict_url": url, "private": private, "retries": int(g.get("retries", 3)),
-            "region": region}
+            "region": region, **({"capture": True} if (ml.get("serving_capture") or {}).get("enabled") else {})}
 
 
 def ab_of(contract) -> dict:
