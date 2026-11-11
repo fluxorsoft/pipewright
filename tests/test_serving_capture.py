@@ -91,6 +91,7 @@ def test_torchserve_settings_and_metrics_config():
     assert yaml.safe_load(names["PIPEWRIGHT_TS_METRICS"])["model_metrics"]["histogram"][0]["name"] == \
         "PwPredictLatencySeconds"
     assert c["ports"][-1] == {"name": "ts-metrics", "containerPort": 8082, "protocol": "TCP"}
+    assert all(p.get("name") for p in c["ports"]) and c["ports"][0]["name"] == "http1"   # KServe needs named ports
     assert "exec python entrypoint.py" in c["command"][-1]
     assert torchserve_metrics.is_torchserve("europe-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest")
     pm = torchserve_metrics.pod_monitoring("churn", "serving-churn", "churn")

@@ -61,8 +61,12 @@ def container_settings(container: dict) -> dict:
                                                                        "PIPEWRIGHT_TS_METRICS")]
     env += [{"name": "TS_METRICS_MODE", "value": "prometheus"}, {"name": "TS_METRICS_CONFIG", "value": METRICS_FILE},
             {"name": "PIPEWRIGHT_TS_METRICS", "value": METRICS_YAML}]
+    # With two ports, KServe's predictor Service needs every port named (found in the 1.4.3 battle test: "spec.ports[0].
+    # name: Required value" and the InferenceService never reconciled).
+    served = [{**p, "name": p.get("name") or ("http1" if i == 0 else f"port{i}")}
+              for i, p in enumerate(container.get("ports") or []) if p.get("containerPort") != 8082]
     out = {**container, "env": env,
-           "ports": [*(container.get("ports") or []), {"name": "ts-metrics", "containerPort": 8082, "protocol": "TCP"}]}
+           "ports": [*served, {"name": "ts-metrics", "containerPort": 8082, "protocol": "TCP"}]}
     if not container.get("command"):
         out["command"] = ["sh", "-c", f'printf "%s" "$PIPEWRIGHT_TS_METRICS" > {METRICS_FILE} && exec python '
                                       "entrypoint.py"]
