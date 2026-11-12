@@ -380,6 +380,7 @@ def connector(env, gcp, online: dict):
     """connect() for the sync: Cloud SQL over its private IP as the caller (IAM database login: the access token is
     the password), SSL verified against the instance's server CA from the Cloud SQL Admin API."""
     def connect():
+        import pg8000.exceptions
         import pg8000.native
 
         from pipewright.online.server import iam_user, ssl_context
@@ -394,9 +395,16 @@ def connector(env, gcp, online: dict):
         if not host:
             raise ConfigError(f"the Cloud SQL instance {online['instance']} has no private IP")
         ca = (r.body.get("serverCaCert") or {}).get("cert")
-        conn = pg8000.native.Connection(iam_user(gcp.identity() or ""), host=host, password=gcp.access_token(),
-                                        database=online.get("database", "features"), ssl_context=ssl_context(ca),
-                                        timeout=60)
+        try:
+            conn = pg8000.native.Connection(iam_user(gcp.identity() or ""), host=host, password=gcp.access_token(),
+                                            database=online.get("database", "features"), ssl_context=ssl_context(ca),
+                                            timeout=60)
+        except pg8000.exceptions.InterfaceError as e:
+            # GA QA: from a laptop, a private IP times out with a traceback; say where the sync runs instead
+            raise ConfigError(f"cannot reach the Cloud SQL instance at its private address {host} from here: it is "
+                              "reachable inside the environment's network only. Run the sync there: the use case's "
+                              "online_sync schedule (`pipewright run --schedule <name>`), which the launcher runs as "
+                              f"the tenant's sync job ({str(e).splitlines()[0][:120]})") from None
         return conn
     return connect
 
