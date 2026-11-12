@@ -302,9 +302,15 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     judged_warnings += judgement.serving_and_tests(ml, model)
     # BigQuery ML runs Pipewright's own steps, which register through the launcher themselves (GA QA: the scan read
     # Pipewright's bqml_runtime.py and warned the team of a 403 that cannot happen)
+    # 1.4.3 (user decision after GA QA): `validate` and `release` refuse, not warn. Such a step can only fail with
+    # 403 when it runs, and a release that lets it through makes the registration contract optional. Only those two:
+    # approving, rolling back or retiring what is already released keeps working (a warning there). A file marked as
+    # not writing the registry (a false match of the text scan) is named in a warning, so the exemption stays visible.
+    release_refusals: list[str] = []
     if (env.policies or {}).get("registration") == "launcher" and not bqml_spec:
-        judged_warnings += direct_registry_writes(directory / ((eff.get("components") or {}).get("dir") or ""),
-                                                  env.name)
+        release_refusals, exempt = direct_registry_writes(
+            directory / ((eff.get("components") or {}).get("dir") or ""), env.name)
+        judged_warnings += release_refusals + exempt
     extra_warnings += judged_warnings
     problems += judged_problems
     # Who makes a registered version the default: the pipeline (on_approval) or a person (`model approve`).
@@ -470,7 +476,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
                                                   .get("datasets")) is not None else {})},
         outputs=outputs, ray_requirements=ray_requirements, synthetic_requirements=synthetic_requirements,
-        warnings=tuple(_warnings(ml) + extra_warnings),
+        warnings=tuple(_warnings(ml) + extra_warnings), release_refusals=tuple(release_refusals),
     )
 
 
@@ -503,26 +509,44 @@ def _entity_columns_as_features(ml: dict, ml_spec: dict, bqml: bool) -> list[str
 
 # Calls that write the model registry directly (FR-100): under policies.registration: launcher a runner cannot.
 _REGISTRY_WRITES = ("Model.upload(", "models:upload", "mergeVersionAliases", "upload_model(")
+_NOT_A_WRITE = re.compile(r"#\s*pipewright:\s*not-a-registry-write\b[ \t:]*([^\n]*)")
 
 
-def direct_registry_writes(components, env_name: str) -> list[str]:
+def direct_registry_writes(components, env_name: str) -> tuple[list[str], list[str]]:
     """Component files that write the registry themselves and do not use the launcher's register_version: under
-    policies.registration: launcher they fail with 403 when they run (FR-100)."""
-    out = []
+    policies.registration: launcher they would fail with 403 when they run, so validate and release refuse them
+    (FR-100). Returns (refusals, exemptions). A file carrying the line
+    `# pipewright: not-a-registry-write <reason>` is a false match of the text scan (a comment, a helper that is
+    never called under the launcher): it is not refused, and the exemption and its reason are listed as a warning.
+    The marker changes nothing at run time: the runner still has no permission to write the registry."""
+    refused, exempt = [], []
     if not components or not components.is_dir():
-        return out
+        return refused, exempt
     for path in sorted(components.rglob("*.py")):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         found = [w.rstrip("(") for w in _REGISTRY_WRITES if w in text]
-        if found and "register_version" not in text and "registration_by_launcher" not in text:
-            out.append(f"{path.relative_to(components.parent).as_posix()} writes the model registry itself "
-                       f"({', '.join(found)}): in {env_name} runners cannot (policies.registration: launcher), so it "
-                       "will fail with 403. Register through pipewright_runtime.register_version, as the reference "
-                       "example's register step does (FR-100)")
-    return out
+        if not found or "register_version" in text or "registration_by_launcher" in text:
+            continue
+        name = path.relative_to(components.parent).as_posix()
+        marker = _NOT_A_WRITE.search(text)
+        if marker:
+            reason = marker.group(1).strip()
+            if reason:
+                exempt.append(f"{name} matches a registry write ({', '.join(found)}) but is marked "
+                              f"not-a-registry-write: {reason}. Under policies.registration: launcher the runner "
+                              "still cannot write the registry; a real write fails with 403 (FR-100)")
+                continue
+            refused.append(f"{name}: the not-a-registry-write marker needs a reason after it (FR-100)")
+            continue
+        refused.append(f"{name} writes the model registry itself ({', '.join(found)}): in {env_name} only the "
+                       "launcher registers models (policies.registration: launcher), so this step would fail with "
+                       "403. Register through pipewright_runtime.register_version, as the reference example's "
+                       "register step does. If the match is not a write, mark the file with "
+                       "'# pipewright: not-a-registry-write <reason>' (FR-100)")
+    return refused, exempt
 
 
 def _warnings(ml: dict) -> list[str]:

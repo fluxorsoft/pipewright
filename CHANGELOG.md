@@ -25,7 +25,10 @@ before. The guides are [docs/SERVING.md](docs/SERVING.md) (serving observability
 - Scale to zero: `validate` warns that calls are dropped while it scales up; `policies.serving.scale_to_zero: refused`.
 - Registration through the launcher (`policies.registration: launcher`): runners lose registry writes; the launcher
   checks the run, its files and the gates before it registers (`model.registration_refused` when it will not); BigQuery
-  ML too. `validate` and `doctor` show what still writes the registry directly.
+  ML too. `validate` and `release` refuse a component that writes the registry directly (it could only fail with
+  403 when it runs), naming the file; a false match of the text scan can be marked
+  `# pipewright: not-a-registry-write <reason>` and is then listed as a warning. `doctor` fails while a runner can
+  still upload.
 - Repeatable synthetic runs: `synthetic.engine.seed` and `max_epochs` (and per candidate); the evaluation record says
   whether a candidate repeats and why; a free local port for the engine.
 - Fixed (FR-128): the churn example's parallel tuning failed on Kubeflow Pipelines 2.17.2 ("expect STRUCT, got

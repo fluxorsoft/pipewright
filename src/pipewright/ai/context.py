@@ -87,7 +87,8 @@ def _rules_since_14(pol: dict, env) -> list[str]:
         L.append("- Registration goes through the launcher (policies.registration: launcher): a component never "
                  "writes the model registry itself (no `Model.upload`, `upload_model` or `mergeVersionAliases`); the "
                  "register step calls `pipewright_runtime.register_version`, as in the churn example's "
-                 "`components/register.py`.")
+                 "`components/register.py`. `validate` and `release` refuse a component that writes the registry "
+                 "itself.")
     ab = pol.get("ab_test") or {}
     if ab.get("allowed") is False:
         L.append("- A/B tests are not allowed here (policies.ab_test.allowed: false).")

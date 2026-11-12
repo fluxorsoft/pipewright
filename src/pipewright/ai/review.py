@@ -209,9 +209,13 @@ def bundle(root: Path, env, base: str = "main") -> str:
         L += [f"### {name}{' (new)' if old is None and not base_note else ''}", "",
               *([base_note, ""] if base_note else []), "**What a release would change in Google Cloud**", ""]
         L += [f"- {c}" for c in _cloud_changes(old, new)]
-        L += ["", "**Checks**", "", "- validate: passes" + (f", {len(new.warnings)} warning(s)" if new.warnings
-                                                               else ", no warnings")]
-        L += [f"  - {w}" for w in new.warnings]
+        if new.release_refusals:         # 1.4.3: `validate` and `release` refuse these
+            L += ["", "**Checks**", "", "- validate: **refused**, a release would be refused"]
+            L += [f"  - {w}" for w in new.release_refusals]
+        else:
+            L += ["", "**Checks**", "", "- validate: passes" + (f", {len(new.warnings)} warning(s)" if new.warnings
+                                                                   else ", no warnings")]
+            L += [f"  - {w}" for w in new.warnings]
         L += ["", f"**Features:** {_features(new)}.", ""]
         moves = _moves(old.ml if old else None, new.ml) + _moves(old.model if old else None, new.model or {},
                                                                   MODEL_WATCHED, "model.")

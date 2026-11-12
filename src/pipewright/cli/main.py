@@ -114,6 +114,8 @@ def cmd_validate(args) -> int:
 
             if refused := allowlist.check(uc, env):                 # policies.images (FR-54)
                 raise ConfigError(refused, source=f"{path} ({env.name})")
+            if uc.release_refusals:                                  # 1.4.3: release refuses these too
+                raise ConfigError(list(uc.release_refusals), source=f"{path} ({env.name})")
             print(f"OK    {name} ({env.name})")
             for warning in uc.warnings:
                 print(f"WARN  {name}: {warning}")

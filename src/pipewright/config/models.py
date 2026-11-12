@@ -60,6 +60,7 @@ class ResolvedUseCase:
     base_image: str | None = None                  # components.base_image (Pipewright 1.2.0, FR-59)
     synthetic_requirements: Path | None = None     # extra packages for the synthetic image (synthetic.requirements)
     warnings: tuple = ()                           # not problems: `validate` prints them (Pipewright 1.2.0)
+    release_refusals: tuple = ()                   # 1.4.3: `validate` and `release` refuse these; others warn
 
     @property
     def ray(self) -> dict | None:

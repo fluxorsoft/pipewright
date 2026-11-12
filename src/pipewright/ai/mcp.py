@@ -150,7 +150,10 @@ class Server:
                 continue
             try:
                 uc = resolve_usecase(found[name], self.env)
-                results[name] = {"ok": True, "warnings": list(uc.warnings)}
+                if uc.release_refusals:      # 1.4.3: what `validate` and `release` refuse (a direct registry write)
+                    results[name] = {"ok": False, "problems": list(uc.release_refusals)}
+                else:
+                    results[name] = {"ok": True, "warnings": list(uc.warnings)}
             except ConfigError as e:
                 results[name] = {"ok": False, "problems": [str(e)]}
         ok = all(r["ok"] for r in results.values())

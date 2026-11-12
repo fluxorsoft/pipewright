@@ -178,8 +178,7 @@ def test_the_launcher_routes(monkeypatch, store):
     assert r.status_code == 403 and [e["event_type"] for e in sent] == ["model.registration_refused"]
 
 
-def test_launcher_policy_reaches_the_steps_and_validate_finds_direct_writes(repo):
-    from pipewright.config import load_environment, resolve_usecase
+def _launcher_repo(repo, files):
     from tests.test_config_ml import ml_repo
 
     ml_repo(repo)
@@ -187,14 +186,85 @@ def test_launcher_policy_reaches_the_steps_and_validate_finds_direct_writes(repo
     path = repo.write()
     components = path.parent / "components"
     components.mkdir(exist_ok=True)
-    (components / "my_register.py").write_text("from google.cloud import aiplatform\naiplatform.Model.upload(x)\n",
-                                               encoding="utf-8")
-    (components / "ok_register.py").write_text("aiplatform.Model.upload(x)\nregister_version(c, r, {})\n",
-                                               encoding="utf-8")
+    for name, text in files.items():
+        (components / name).write_text(text, encoding="utf-8")
+    return path
+
+
+def test_launcher_policy_reaches_the_steps(repo):
+    from pipewright.config import load_environment, resolve_usecase
+
+    path = _launcher_repo(repo, {"ok_register.py": "aiplatform.Model.upload(x)\nregister_version(c, r, {})\n"})
     uc = resolve_usecase(path, load_environment(repo.root, "dev"))
     assert uc.platform["registration"] == "launcher" and uc.platform["artifacts_bucket"]
+    assert not [w for w in uc.warnings if "FR-100" in w]
+
+
+def test_a_direct_registry_write_is_refused_not_warned(repo):
+    # 1.4.3 (user decision after the GA QA): such a step can only fail with 403, so validate and release refuse it
+    from pipewright.config import load_environment, resolve_usecase
+    from pipewright.errors import ConfigError
+
+    path = _launcher_repo(repo, {
+        "my_register.py": "from google.cloud import aiplatform\naiplatform.Model.upload(x)\n",
+        "ok_register.py": "aiplatform.Model.upload(x)\nregister_version(c, r, {})\n"})
+    env = load_environment(repo.root, "dev")
+    uc = resolve_usecase(path, env)              # approving, rolling back, retiring keep working: no refusal here
+    assert len(uc.release_refusals) == 1
+    text = uc.release_refusals[0]
+    assert "components/my_register.py writes the model registry itself (Model.upload)" in text
+    assert "403" in text and "not-a-registry-write" in text
+    assert [w for w in uc.warnings if "FR-100" in w] == [text]
+
+    from pipewright.release import service
+
+    with pytest.raises(ConfigError, match="dev refuses this release of") as e:
+        service.release(uc, env, gcp=object())   # refused before anything touches Google Cloud
+    assert "my_register.py" in str(e.value)
+
+    from argparse import Namespace
+
+    from pipewright.cli.main import cmd_validate
+
+    assert cmd_validate(Namespace(root=str(repo.root), env="dev", usecase=None)) == 1
+
+    from pipewright.ai import mcp
+
+    server = mcp.Server(repo.root, "dev", gcp_factory=object)
+    server.log = lambda *a, **k: None
+    out = server.validate()
+    assert out["ok"] is False and "my_register.py" in str(out["usecases"])
+
+
+def test_a_marked_false_match_is_a_visible_warning(repo):
+    from pipewright.config import load_environment, resolve_usecase
+
+    path = _launcher_repo(repo, {"notes.py": "# pipewright: not-a-registry-write only quotes Model.upload( in help\n"
+                                             "HELP = 'never call Model.upload( here'\n"})
+    uc = resolve_usecase(path, load_environment(repo.root, "dev"))
     found = [w for w in uc.warnings if "FR-100" in w]
-    assert len(found) == 1 and "my_register.py" in found[0] and "403" in found[0]
+    assert len(found) == 1 and "components/notes.py" in found[0] and "only quotes Model.upload( in help" in found[0]
+    assert not uc.release_refusals
+
+
+def test_the_marker_needs_a_reason(repo):
+    from pipewright.config import load_environment, resolve_usecase
+
+    path = _launcher_repo(repo, {"r.py": "# pipewright: not-a-registry-write\naiplatform.Model.upload(x)\n"})
+    uc = resolve_usecase(path, load_environment(repo.root, "dev"))
+    assert len(uc.release_refusals) == 1 and "marker needs a reason" in uc.release_refusals[0]
+
+
+def test_without_the_launcher_policy_a_direct_write_is_fine(repo):
+    from pipewright.config import load_environment, resolve_usecase
+    from tests.test_config_ml import ml_repo
+
+    ml_repo(repo)
+    path = repo.write()
+    (path.parent / "components").mkdir(exist_ok=True)
+    (path.parent / "components" / "my_register.py").write_text("aiplatform.Model.upload(x)\n", encoding="utf-8")
+    uc = resolve_usecase(path, load_environment(repo.root, "dev"))
+    assert not [w for w in uc.warnings if "FR-100" in w]
 
 
 def test_doctor_says_whether_runners_can_still_upload():
