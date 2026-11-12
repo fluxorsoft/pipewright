@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pipewright.gcp import gcs_list, gcs_read, gcs_write
 
 PREFIX = "cases/_rollback"
+MODEL_SIGNALS = ("errors", "latency")     # what a version can cause; replicas and scaling are capacity
 
 
 def case_name(usecase: str, case_id: str) -> str:
@@ -67,6 +68,10 @@ def maybe_propose(contract, incident: dict, gcp, bucket: str, now: datetime | No
     hours = int(((ml.get("monitoring") or {}).get("health") or {}).get("propose_rollback_hours") or 0)
     if hours <= 0 or incident.get("state") != "open" or incident.get("severity") != "critical":
         return None
+    if incident.get("signal") not in MODEL_SIGNALS:
+        # GA QA: too few ready replicas or a stuck scale-up is capacity, not the version; a rollback would not help
+        # (serving.degraded is still sent)
+        return None
     now = now or datetime.now(timezone.utc)
     since = _deployed_at(contract, incident, gcp)
     if since is None or (now - since).total_seconds() > hours * 3600:
@@ -77,9 +82,12 @@ def maybe_propose(contract, incident: dict, gcp, bucket: str, now: datetime | No
     if existing:
         return None                                       # proposed already for this incident
     version = incident.get("model_version")
+    previous = _previous(contract, version, gcp)
+    if not previous:
+        return None                     # GA QA: nothing earlier to go back to (a proposal nobody could act on)
     case = {"kind": "rollback.proposal", "case_id": case_id, "usecase": contract.usecase,
             "environment": contract.environment, "release": contract.release_id, "status": "open",
-            "version": version, "previous_version": _previous(contract, version, gcp),
+            "version": version, "previous_version": previous,
             "signal": incident.get("signal"), "threshold": incident.get("threshold"),
             "observed_value": incident.get("observed_value"), "incident_id": incident.get("incident_id"),
             "hours_since_deploy": round((now - since).total_seconds() / 3600, 2),

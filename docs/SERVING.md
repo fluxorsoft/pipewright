@@ -285,8 +285,10 @@ version, the signal, the severity and the threshold in force.
 - KServe: TorchServe's counters and the handler's `PwPredictLatencySeconds` histogram (the reference handler records
   it; a handler of your own adds the lines in its `handle`, or the latency policy uses the mean and says so). A policy
   on a counter TorchServe has not created yet (no 5xx so far) waits as pending until `alerts sync` runs again.
-- With `propose_rollback_hours` set, a critical incident that soon after a deploy opens a proposal
-  (`pipewright model rollbacks`); a person decides with `pipewright model rollback --case <id> --approve | --decline`.
+- With `propose_rollback_hours` set, a critical errors or latency incident that soon after a deploy opens a proposal
+  (`pipewright model rollbacks`) to the version before it; a person decides with
+  `pipewright model rollback --case <id> --approve | --decline`. Ready replicas and a stuck scale-up are capacity, not
+  the version, and a first version has nothing to go back to: neither proposes a rollback (the incident is still sent).
   Approving makes the previous version the default through `model approve` (its gates checked again) and deploys it.
 
 ### Capture and online monitoring: is the model still right on live traffic?

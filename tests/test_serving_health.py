@@ -164,6 +164,12 @@ def test_rollback_proposal_only_when_on_critical_and_recent(monkeypatch):
     assert p["previous_version"] == "2" and p["hours_since_deploy"] == 1.0
     assert rollback.maybe_propose(contract(24), i, G(), "b", now) is None              # one case per incident
     assert rollback.maybe_propose(contract(0.5 and 0), i, G(), "b", now) is None
+    # GA QA (found live): capacity signals and a first version propose nothing
+    store.clear()
+    capacity = incidents.parse(incident(**{"pipewright-signal": "replicas"}))
+    assert rollback.maybe_propose(contract(24), capacity, G(), "b", now) is None
+    first = incidents.parse(incident(**{"pipewright-model-version": "1"}))
+    assert rollback.maybe_propose(contract(24), first, G(), "b", now) is None
 
 
 def test_an_ab_treatment_on_agent_platform_is_watched_as_its_own_arm():
