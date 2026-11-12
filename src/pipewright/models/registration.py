@@ -87,7 +87,8 @@ class Registrations:
         job = jobs[0]
         labels = job.get("labels") or {}
         return {"state": job.get("state"), "service_account": job.get("serviceAccount"),
-                "usecase": labels.get("usecase") or labels.get("pipewright-usecase"), "name": job.get("name")}
+                "usecase": labels.get("usecase") or labels.get("pipewright-usecase"), "name": job.get("name"),
+                "release": labels.get("pipewright-release")}
 
     def check_caller(self, contract, caller: str | None) -> None:
         if caller is not None and caller.lower() != contract.runner_service_account.lower():
@@ -255,7 +256,7 @@ class Registrations:
         bqml = body.get("engine") in ("bqml", "ai_forecast")
         try:
             self.check_caller(contract, caller)
-            self.check_run(contract, run_id)
+            job = self.check_run(contract, run_id)
             if bqml:
                 record = self.check_bqml(contract, body, ml)
                 self.check_gates(contract, record, ml, champion_expected=bool(
@@ -270,6 +271,11 @@ class Registrations:
                 self.answer(contract, run_id, {"status": "refused", "reason": e.reason, "run_id": run_id,
                                                "request": digest})
             raise
+        if job.get("release"):
+            # 1.4.3 GA QA (live): the release that ran, from the run's own label. The component image says the release
+            # it was built for, which for a same-commit re-release (a Pipewright upgrade, CI and a person releasing
+            # the same commit) is the earlier release: promotion then refused the version as trained by another.
+            body = {**body, "labels": {**(body.get("labels") or {}), "release": str(job["release"])[:63]}}
         result = self.register_bqml(contract, body, ml) if bqml else self.upload(contract, body, ml)
         answer = {"status": "registered", "run_id": run_id, "request": digest, **result}
         self.answer(contract, run_id, answer)
@@ -446,7 +452,7 @@ def kfp_job_finder(manifest_getter, gcp):
             same = item.get("service_account") == tenant.get("kubernetes_service_account")
             return {"state": item.get("state"), "usecase": labels.get("pipewright-usecase"),
                     "service_account": contract.runner_service_account if same else item.get("service_account"),
-                    "name": item.get("run_id")}
+                    "name": item.get("run_id"), "release": labels.get("pipewright-release")}
         return None
     return find
 

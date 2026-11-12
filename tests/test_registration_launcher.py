@@ -58,8 +58,9 @@ def store(monkeypatch):
     return objects
 
 
-def job(state="PIPELINE_STATE_RUNNING", sa=RUNNER, usecase="churn"):
-    return lambda contract, run_id: {"state": state, "service_account": sa, "usecase": usecase}
+def job(state="PIPELINE_STATE_RUNNING", sa=RUNNER, usecase="churn", release=None):
+    return lambda contract, run_id: {"state": state, "service_account": sa, "usecase": usecase,
+                                     **({"release": release} if release else {})}
 
 
 def body(**extra):
@@ -251,3 +252,12 @@ def test_a_bigquery_ml_use_case_is_not_warned_about_pipewrights_own_steps(repo):
     repo.manifests["dev"]["policies"] = {"registration": "launcher"}
     uc = resolve(repo)
     assert not [w for w in uc.warnings if "FR-100" in w]
+
+
+def test_the_version_is_labelled_with_the_release_that_ran(store):
+    # 1.4.3 GA QA (live): a same-commit re-release keeps the component image built for the earlier release, so the
+    # step's label named that one and promotion refused the version; the run's own label names the release that ran
+    gcp = FakeGcp(models=[{"name": "projects/p/locations/r/models/churn", "createTime": "1"}])
+    reg.Registrations(gcp, "acme-artifacts", dict, job(release="c9f57c514102-f0f6f3e0")).register(
+        contract("auto"), body(labels={"release": "c9f57c514102"}), RUNNER)
+    assert gcp.uploads[0]["model"]["labels"]["release"] == "c9f57c514102-f0f6f3e0"

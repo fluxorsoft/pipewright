@@ -87,6 +87,35 @@ def _number(version_id) -> int:
     return int(version_id) if str(version_id).isdigit() else 0
 
 
+def run_release(env, gcp, run: str) -> str:
+    """The release a training run ran ("" when the run cannot be found or read): the launcher's pipewright-release
+    label on the Agent Platform pipeline job, or on the Kubeflow run (1.4.3 GA QA: a version's own release label can
+    name an earlier release of the same commit, from the component image)."""
+    if not run:
+        return ""
+    try:
+        api = f"https://{env.region}-aiplatform.googleapis.com/v1"
+        jobs = gcp.get(f"{api}/projects/{env.project}/locations/{env.region}/pipelineJobs",
+                       filter=f'labels."run-id"="{run}"', pageSize=5)
+        for j in ((jobs.body or {}).get("pipelineJobs") or []) if jobs.ok else []:
+            if (j.get("labels") or {}).get("pipewright-release"):
+                return j["labels"]["pipewright-release"]
+        if getattr(env, "kubernetes", None):
+            from pipewright.adapters.kfp import api_path, run_labels
+            from pipewright.kube import KubeClient
+
+            kube = KubeClient.from_manifest({"kubernetes": env.kubernetes}, gcp, dns=True)
+            r = kube.get(f"{api_path(env.kubernetes.get('namespace') or 'kubeflow')}/runs", page_size=100,
+                         sort_by="created_at desc")
+            for item in ((r.body or {}).get("runs") or []) if r.ok else []:
+                labels = run_labels(item.get("description"))
+                if labels.get("run-id") == run:
+                    return labels.get("pipewright-release") or ""
+    except Exception:  # noqa: BLE001 - not readable: the caller keeps the version's own label
+        return ""
+    return ""
+
+
 def _kfp_run_started(env, gcp, run: str) -> str:
     """When the Kubeflow run with this run ID was created ("" when not found), through the cluster's API as the
     caller (the DNS endpoint from outside the VPC, as Fleet View reads it)."""

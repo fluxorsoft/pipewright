@@ -375,8 +375,19 @@ def source_version(gcp: Gcp, src_env: Environment, name: str, release_id: str, v
     if "default" not in chosen.get("versionAliases", []) and not loop_case:
         raise ConfigError(f"v{version} of {name} is not the default (approved) version in {src_env.name}: approve it "
                           "there first (`pipewright model approve`), so production gets only what was approved")
-    trained_by = (chosen.get("labels") or {}).get("release")
-    if trained_by and trained_by != publish._tag(release_id)[:63]:
+    labels = chosen.get("labels") or {}
+    trained_by = labels.get("release")
+    want = publish._tag(release_id)[:63]
+    if trained_by and trained_by != want:
+        # 1.4.3 GA QA (live): a same-commit re-release runs the component image built for the earlier release, whose
+        # release the step wrote on the version; the training run's own label says which release ran
+        from pipewright.models.registry import run_release
+
+        run = labels.get("pipewright-run") or str(labels.get("run_id") or "").removeprefix("run-")
+        ran = run_release(src_env, gcp, run)
+        if ran and publish._tag(ran)[:63] == want:
+            trained_by = want
+    if trained_by and trained_by != want:
         raise ConfigError(f"v{version} of {name} was trained by release {trained_by}, not {release_id}: promote the "
                           "release that trained it, or retrain")
     return str(version), chosen
