@@ -157,7 +157,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     if "machine" in serving and serving["machine"] is None:
         # GA QA: null unsets the use case's machine in one environment, to join a pool there
         if serving.get("pool"):
-            serving.pop("machine")
+            serving["machine"] = _SERVING_DEFAULTS["machine"]     # not used: the pool's machines serve
         else:
             problems.append("model.serving.machine: null only with model.serving.pool (the pool sets the machines)")
     if (bqml_spec and bqml_spec.get("transform") and model["promotion"] == "model" and env.promotion_from

@@ -240,6 +240,6 @@ def test_an_environment_unsets_the_use_cases_machine_to_join_a_pool(repo):
     # environment: the override could not remove the machine
     repo.usecase["spec"].setdefault("model", {})["serving"] = {"enabled": True, "machine": "n1-standard-4"}
     uc = setup(repo, {"pool": "shared", "machine": None}, {"shared": pool()})()
-    assert uc.model["serving"]["pool"] == "shared" and "machine" not in uc.model["serving"]
+    assert uc.model["serving"]["pool"] == "shared" and uc.model["serving"]["machine"] == "n1-standard-2"
     with pytest.raises(ConfigError, match="null only with model.serving.pool"):
         setup(repo, {"machine": None})()
