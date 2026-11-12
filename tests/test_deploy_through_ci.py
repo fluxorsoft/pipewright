@@ -30,7 +30,9 @@ def test_on_register_needs_no_person_and_nothing_is_asked_twice():
     served = {"mode": "ci", "served": {"3"}}
     assert decisions.pending_for("churn", "prod", versions(), [], deploy=served) == []
     assert decisions.pending_for("churn", "prod", versions(gates="FAIL: auc"), [], deploy={"mode": "ci"}) == []
-    assert decisions.pending_for("churn", "prod", versions(approval="pending"), [], deploy={"mode": "ci"}) == []
+    # an unapproved default is asked for approval (1.4.3), never deployed
+    (item,) = decisions.pending_for("churn", "prod", versions(approval="pending"), [], deploy={"mode": "ci"})
+    assert (item.kind, item.gate, item.key) == ("model-approve", "prod", "v3")
     assert decisions.pending_for("churn", "prod", versions(), []) == []                   # manual: as in 1.1
 
 

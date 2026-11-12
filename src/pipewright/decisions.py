@@ -95,6 +95,13 @@ def pending_for(usecase: str, env: str, versions: list, cases: list[dict],
                         ["model", "approve", "--env", env, "--usecase", usecase, "--version", str(v.version_id),
                          "--approve"], f"v{v.version_id} passes the gates; the default is "
                                        f"v{default.version_id if default else 'none'}"))
+    # 1.4.3 GA QA (live): a new version becomes the default with approval=pending (or no model.approved on record);
+    # it waited for `model approve` but was never listed, so the decisions workflow never asked anyone.
+    if not out and default and default.gates == "pass" and registry.unapproved_default(default):
+        out.append(Item("model-approve", usecase, env, env, f"v{default.version_id}",
+                        ["model", "approve", "--env", env, "--usecase", usecase, "--version",
+                         str(default.version_id), "--approve"],
+                        f"v{default.version_id} is the default and passes the gates, but nobody approved it"))
     unserved = deploy and default and str(default.version_id) not in deploy.get("served", set())
     if unserved and default.gates == "pass" and not registry.unapproved_default(default):
         ci = deploy.get("mode") == "ci"

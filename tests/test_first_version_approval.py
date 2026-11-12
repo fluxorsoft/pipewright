@@ -169,8 +169,9 @@ def test_decisions_never_deploy_an_unrecorded_default():
     from pipewright import decisions
 
     default = registry.Version("1", True, [], "run r1", "x", {"status": "champion"}, "pass", False)
-    assert decisions.pending_for("churn-gke", "ent", [default], [], deploy={"mode": "on_register",
-                                                                            "served": set()}) == []
+    (item,) = decisions.pending_for("churn-gke", "ent", [default], [], deploy={"mode": "on_register",
+                                                                               "served": set()})
+    assert (item.kind, item.key) == ("model-approve", "v1")     # 1.4.3: asked for approval, never deployed
     default.approved = True
     (item,) = decisions.pending_for("churn-gke", "ent", [default], [], deploy={"mode": "on_register",
                                                                                "served": set()})
