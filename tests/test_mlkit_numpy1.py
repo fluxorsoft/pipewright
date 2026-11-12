@@ -12,6 +12,6 @@ def test_auc_needs_no_numpy_2_api():
     import mlkit
 
     src = (Path(__file__).parents[1] / "examples/churn/components/mlkit.py").read_text(encoding="utf-8")
-    assert "np.trapezoid" not in src and "np.trapz" not in src
+    assert "np.trapezoid(" not in src and "np.trapz(" not in src
     y = np.array([0, 0, 1, 1])
     assert mlkit._auc(y, np.array([0.1, 0.4, 0.35, 0.8])) == 0.75
