@@ -199,13 +199,13 @@ def cmd_alerts_sync(args) -> int:
     return 1 if failed else 0
 
 
-def _health_sync(uc, env, dry_run: bool = False) -> int:
+def _health_sync(uc, env, dry_run: bool = False, capture: bool = True) -> int:
     """1.4.3 (FR-98): capture on the use case's endpoint (Agent Platform) and its health policies for what is
     deployed now. Nothing when neither is set. Returns the number of errors."""
     from pipewright.gcp import Gcp
 
     gcp, failed = Gcp(), 0
-    if "capture" in (uc.model.get("serving") or {}) and uc.model["serving"].get("target") != "kserve":
+    if capture and "capture" in (uc.model.get("serving") or {}) and uc.model["serving"].get("target") != "kserve":
         from pipewright.models.deploy import find_endpoint
         from pipewright.serving import capture
         from pipewright.serving.health import ab_arm_endpoint
@@ -356,7 +356,7 @@ def cmd_deploy_model(args) -> int:
     if args.undeploy:
         deploy_model.undeploy(uc, env, creds)
         _remove_lookup_service(uc, env, gcp, args)
-        _health_sync(uc, env)
+        _health_sync(uc, env, capture=False)      # GA QA: an undeploy leaves capture alone (nothing serves)
         return 0
     if args.promote or args.undeploy_canary:
         deploy_model.check_approval(uc, gcp.identity(), args.approve)
