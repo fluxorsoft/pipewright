@@ -217,3 +217,24 @@ def test_decisions_pending_asks_for_each_held_run(bucket):
     assert [i.id for i in items] == ["test/churn/score-approve/h1"]                 # the expired one is not asked
     assert items[0].gate == "test" and items[0].command[:2] == ["scoring", "approve"]
     assert held_items("churn", env, SimpleNamespace(approvals={}), None, {}) == []
+
+
+def test_the_cli_refuses_a_hold_it_can_see_is_missing_or_decided(monkeypatch, bucket):
+    # live test: an unknown hold over a private launcher's topic waited 90 s for an answer nobody could write
+    import importlib
+    from argparse import Namespace
+
+    cli = importlib.import_module("pipewright.cli.main")
+    from pipewright.runs import scoring
+
+    store = held.HeldStore(None, "artifacts")
+    store.create(record(state="rejected"))
+    sent = []
+    monkeypatch.setattr(cli, "_retrain_env", lambda args: None)
+    monkeypatch.setattr(scoring, "store", lambda env, gcp: store)
+    monkeypatch.setattr(scoring, "send", lambda *a, **k: sent.append(a) or {"status": "recorded"})
+    monkeypatch.setattr("pipewright.gcp.Gcp", lambda: None)
+    for hold in ("nope", "h1"):
+        args = Namespace(usecase="churn", hold=hold, scoring_command="approve", reason="")
+        assert cli.cmd_scoring_decide(args) == 1
+    assert sent == []

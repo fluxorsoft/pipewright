@@ -1283,7 +1283,21 @@ def cmd_scoring_decide(args) -> int:
 
     env = _retrain_env(args)
     action = args.scoring_command
-    answer = scoring.send(env, args.usecase, args.hold, action, args.reason or "", Gcp())
+    gcp = Gcp()
+    # Live test: a hold that does not exist, sent over a private launcher's topic, waited 90 s for an answer the
+    # launcher could not write anywhere. What can be known here is refused here; the launcher still decides.
+    from datetime import datetime, timezone
+
+    from pipewright.runs import held
+
+    record = scoring.store(env, gcp).get(args.usecase, args.hold)
+    if record is None:
+        print(f"REFUSED  no held scoring run {args.hold!r} for {args.usecase} (`pipewright scoring list`)")
+        return 1
+    if (state := held.state(record, datetime.now(timezone.utc))) != "held":
+        print(f"REFUSED  run {args.hold} is {state}, not held")
+        return 1
+    answer = scoring.send(env, args.usecase, args.hold, action, args.reason or "", gcp)
     if answer.get("status") == "refused":
         print(f"REFUSED  {answer.get('reason')}")
         return 1
