@@ -77,9 +77,14 @@ def setup(repo, monkeypatch, tmp_path):
     def source_version(gcp, src_env, name, rid, version, loop_case=None):
         if state.version_error:
             raise ConfigError(state.version_error)
+        if version and version != "3" and not loop_case:       # as the real one: by hand, only the default
+            raise ConfigError(f"v{version} of {name} is not the default (approved) version")
         return version or "3", {}
 
     monkeypatch.setattr(promote, "source_version", source_version)
+    monkeypatch.setattr("pipewright.models.integrity.check_source", lambda *a, **k: None)
+    state.dst_versions = []
+    monkeypatch.setattr(promote, "_versions", lambda gcp, env, model: state.dst_versions)
     monkeypatch.setattr(promote, "_find_model", lambda gcp, env, name: state.dst_model)
     monkeypatch.setattr(promote.publish, "compile_pinned", compile_pinned)
     monkeypatch.setattr(promote.publish, "upload_template", lambda info, repo_, uc, rid, creds: (
@@ -125,7 +130,9 @@ def test_a_promotion_copies_verifies_records_and_moves_the_pointer_last(setup):
 def test_the_loop_promotes_its_candidate_when_the_release_is_live(setup, monkeypatch):
     setup.run()
     setup.calls.clear()
-    assert setup.run(model_version="4").unchanged and setup.calls == []          # by hand: nothing to do, as in 1.0
+    with pytest.raises(ConfigError, match="not the default"):                   # by hand: refused (1.4.3)
+        setup.run(model_version="4")
+    assert setup.calls == []
     monkeypatch.setattr(promote, "_versions", lambda gcp, env, model: [])
     result = setup.run(model_version="4", loop_case="rc-1")
     assert setup.calls == ["copy model for rc-1", "event model.promoted"]       # no contract, no pointer moved
@@ -211,8 +218,20 @@ def test_a_failed_model_copy_leaves_the_pointer(setup):
 def test_a_repeated_promotion_is_a_no_op(setup):
     setup.run()
     setup.calls.clear()
+    setup.dst_model = {"name": "projects/p/locations/r/models/churn"}
+    setup.dst_versions = [{"versionId": "1", "labels": {"promoted-from": "dev", "source-version": "3"}}]
     again = setup.run()
-    assert again.unchanged and setup.calls == []
+    assert again.unchanged and again.model_version == "1" and setup.calls == []
+
+
+def test_with_the_release_live_a_version_approved_later_is_promoted(setup):
+    # 1.4.3 GA QA (live): the release was live, so promote said "nothing to do" and the newer default never came
+    setup.run()
+    setup.calls.clear()
+    setup.dst_model = {"name": "projects/p/locations/r/models/churn"}
+    setup.dst_versions = [{"versionId": "1", "labels": {"promoted-from": "dev", "source-version": "2"}}]
+    result = setup.run()
+    assert "copy model" in setup.calls and not result.unchanged
 
 
 def test_a_conflicting_release_is_refused(setup):

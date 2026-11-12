@@ -562,6 +562,15 @@ def promote(usecase_path: Path, src_env: Environment, dst_env: Environment, gcp:
             raise ConfigError(f"{dst_env.name} already has a different release {rid} of {uc_dst.name}: refusing to "
                               "replace it (contracts are write-once)")
         if pointer and pointer.release_id == rid:
+            if mode == "model" and not loop_case:
+                # 1.4.3 GA QA (live): with the release live, the model is still checked and promoted. An explicit
+                # version that was never approved said "nothing to do", and a version approved later under the same
+                # release could never reach the destination.
+                checked, chosen = source_version(gcp, src_env, uc_dst.model["name"], rid, model_version, None)
+                from pipewright.models import integrity
+
+                integrity.check_source(gcp, src_env, dst_env, uc_dst.name, checked, chosen, None, log)
+                return _promote_loop_model(gcp, src_env, dst_env, uc_dst, existing, name, checked, None, who, log)
             if not (loop_case and model_version and mode == "model"):
                 log(f"{uc_dst.name} release {rid} is already live in {dst_env.name}: nothing to do")
                 return Promotion(existing, f"gs://{dst_env.artifacts_bucket}/{name}", pointer.release_id,
