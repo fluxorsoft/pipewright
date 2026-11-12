@@ -177,10 +177,13 @@ def _copy_problems(gcp, copy: dict) -> list[str]:
         name = quote(prefix + "/" + f["file"], safe="")
         r = gcp.get(f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{name}")
         if not r.ok:
-            out.append(f"serving copy {f['file']}: missing (HTTP {r.status})")
+            out.append(f"serving copy {f['file']}: missing (HTTP {r.status}): the next pod will not start; "
+                       "`pipewright deploy-model` rewrites the copy from the approved files")
         elif str(r.body.get("generation")) != str(f["generation"]):
+            # 1.4.3 GA QA (live): say how to repair it (deploy-model rewrote the copy and rolled the pods)
             out.append(f"serving copy {f['file']}: generation {r.body.get('generation')} is not the approved copy "
-                       f"{f['generation']}: the next pod will not start")
+                       f"{f['generation']}: the next pod will not start; `pipewright deploy-model` rewrites the copy "
+                       "from the approved files")
     return out
 
 
