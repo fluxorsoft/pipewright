@@ -170,7 +170,9 @@ def _auc(y, p):
     if len(set(y.tolist())) < 2:
         return None
     fpr, tpr, _ = roc_curve(y, p)
-    return float(np.trapezoid(tpr, fpr))
+    # The trapezoid rule by hand (GA QA, found live): np.trapezoid is numpy 2 only, and the Ray image's numpy is 1.x,
+    # so every tuning trial on Ray failed
+    return float(np.sum(np.diff(fpr) * (tpr[1:] + tpr[:-1]) / 2))
 
 
 def _pr_auc(y, p):
