@@ -59,7 +59,8 @@ def exposures_sql(test: dict, project: str, dataset: str, output_table: str | No
     union = "\nUNION ALL\n".join(parts)
     segs = "".join(f", ANY_VALUE({q(s)}) AS {q(s)}" for s in segments)
     return (f"WITH e AS ({union}),\n"
-            f"u AS (SELECT unit, ARRAY_AGG(arm ORDER BY first_at LIMIT 1)[OFFSET(0)] AS arm, MIN(first_at) AS first_at, "
+            f"u AS (SELECT unit, ARRAY_AGG(arm ORDER BY first_at LIMIT 1)[OFFSET(0)] AS arm, "
+            f"MIN(first_at) AS first_at, "
             f"IFNULL(MIN(IF(arm = 'control', first_at, NULL)) < MIN(IF(arm = 'treatment', first_at, NULL)), FALSE) "
             f"AS switched, IFNULL(MIN(IF(arm = 'treatment', first_at, NULL)) <= MIN(IF(arm = 'control', first_at, "
             f"NULL)), FALSE) AS moved{segs} FROM e GROUP BY unit)\n")
