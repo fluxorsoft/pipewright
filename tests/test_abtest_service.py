@@ -81,7 +81,22 @@ def test_a_split_off_plan_blocks_the_decision():
                           T0 + timedelta(days=30))
     assert r["status"] == "blocked" and "sample ratio mismatch" in r["blocked"][0]
     r = analysis.evaluate(_test(), _section(), _primary(4000, 1200, 1000, 350, switched=3), {}, T0 + timedelta(days=30))
-    assert any("both arms" in b for b in r["blocked"])
+    assert any("control and later the treatment" in b for b in r["blocked"])
+
+
+def test_units_moved_to_the_control_are_reported_and_do_not_block():
+    # 1.4.3 GA QA (live, KServe): a lowered allocation and a pause sent treatment units to the control; the analysis
+    # read them as a broken assignment and blocked the test
+    primary = {**_primary(4000, 1200, 4000, 1300), "moved": 177}
+    r = analysis.evaluate(_test(), _section(), primary, {}, T0 + timedelta(days=30))
+    assert r["moved"] == 177 and not any("broken" in b for b in r.get("blocked") or [])
+
+
+def test_the_exposure_sql_takes_the_first_arm_and_tells_moves_from_switches():
+    sql = analysis.exposures_sql({"name": "t", "unit": "customer_id"}, "p", "d", None, True, [])
+    assert "ARRAY_AGG(arm ORDER BY first_at LIMIT 1)[OFFSET(0)] AS arm" in sql
+    assert "MIN(IF(arm = 'control', first_at, NULL)) < MIN(IF(arm = 'treatment', first_at, NULL))" in sql   # switched
+    assert "MIN(IF(arm = 'treatment', first_at, NULL)) <= MIN(IF(arm = 'control', first_at, NULL))" in sql  # moved
 
 
 def test_no_decision_before_min_days_then_the_sample_decides():

@@ -2,8 +2,11 @@
 
 Exposures: a unit's first exposure is its first score with this test (batch: inference.output_table rows with ab_test
 = the test) or its first logged call (online: the gateway's exposure lines, copied into the tenant's dataset by the
-platform's log sink). A unit seen in both arms is counted as switched (it should never happen; it means the
-assignment was broken, for example a renamed test) and left out.
+platform's log sink). A unit counts in the arm of its first exposure (intention to treat). Lowering the allocation,
+a pause or the treatment's circuit breaker sends treatment units to the control, so a unit first seen in the
+treatment and later in the control has moved: counted and kept in the treatment (1.4.3 GA QA: these were read as a
+broken assignment and blocked the test). A unit first seen in the control and later in the treatment never happens
+by design (the allocation only goes down); it is counted as switched, left out, and blocks the test.
 
 Outcomes: events in the metric's source within window_days after the unit's first exposure. Only units whose window
 has closed by the newest event in the source count, so slow outcomes are not read as failures (the label-window rule
@@ -56,8 +59,10 @@ def exposures_sql(test: dict, project: str, dataset: str, output_table: str | No
     union = "\nUNION ALL\n".join(parts)
     segs = "".join(f", ANY_VALUE({q(s)}) AS {q(s)}" for s in segments)
     return (f"WITH e AS ({union}),\n"
-            f"u AS (SELECT unit, ANY_VALUE(arm) AS arm, MIN(first_at) AS first_at, COUNT(DISTINCT arm) > 1 AS "
-            f"switched{segs} FROM e GROUP BY unit)\n")
+            f"u AS (SELECT unit, ARRAY_AGG(arm ORDER BY first_at LIMIT 1)[OFFSET(0)] AS arm, MIN(first_at) AS first_at, "
+            f"IFNULL(MIN(IF(arm = 'control', first_at, NULL)) < MIN(IF(arm = 'treatment', first_at, NULL)), FALSE) "
+            f"AS switched, IFNULL(MIN(IF(arm = 'treatment', first_at, NULL)) <= MIN(IF(arm = 'control', first_at, "
+            f"NULL)), FALSE) AS moved{segs} FROM e GROUP BY unit)\n")
 
 
 def metric_sql(test: dict, metric: dict, exposures: str, cuped: dict | None, segment: str | None = None) -> str:
@@ -97,17 +102,19 @@ SELECT arm, seg, COUNT(*) AS exposed, COUNTIF(matured) AS n,
   SUM(IF(matured, d, 0)) AS d, SUM(IF(matured, d * d, 0)) AS dd, SUM(IF(matured, y * d, 0)) AS yd,
   {"SUM(IF(matured, c, 0))" if cuped else "0.0"} AS c, {"SUM(IF(matured, c * c, 0))" if cuped else "0.0"} AS cc,
   {"SUM(IF(matured, y * c, 0))" if cuped else "0.0"} AS yc,
-  (SELECT COUNTIF(switched) FROM u) AS switched, MIN(first_at) AS first_exposure, (SELECT newest FROM anchor) AS newest
+  (SELECT COUNTIF(switched) FROM u) AS switched, (SELECT COUNTIF(moved) FROM u) AS moved,
+  MIN(first_at) AS first_exposure, (SELECT newest FROM anchor) AS newest
 FROM per GROUP BY arm, seg"""
 
 
 def aggs(rows: list[dict]) -> dict:
     """{segment: {arm: (Agg, exposed)}} and the shared facts (switched, first exposure, newest outcome)."""
-    out, facts = {}, {"switched": 0, "first_exposure": None, "newest_outcome": None}
+    out, facts = {}, {"switched": 0, "moved": 0, "first_exposure": None, "newest_outcome": None}
     for r in rows:
         a = stats.Agg(int(r["n"] or 0), *(float(r[k] or 0) for k in ("y", "yy", "d", "dd", "yd", "c", "cc", "yc")))
         out.setdefault(str(r["seg"]), {})[r["arm"]] = (a, int(r["exposed"] or 0))
         facts["switched"] = int(r["switched"] or 0)
+        facts["moved"] = int(r.get("moved") or 0)
         fe = r.get("first_exposure")
         facts["first_exposure"] = min(filter(None, [facts["first_exposure"], fe])) if fe else facts["first_exposure"]
         facts["newest_outcome"] = r.get("newest") or facts["newest_outcome"]
@@ -141,6 +148,7 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
     (c, c_exp), (t, t_exp) = seg_all.get("control", (stats.Agg(), 0)), seg_all.get("treatment", (stats.Agg(), 0))
     out = {"at": now.isoformat(timespec="seconds"), "exposed": {"control": c_exp, "treatment": t_exp},
            "matured": {"control": c.n, "treatment": t.n}, "switched": primary["switched"],
+           "moved": primary.get("moved", 0),
            "first_exposure": str(primary["first_exposure"]) if primary["first_exposure"] else None,
            "newest_outcome": str(primary["newest_outcome"]) if primary["newest_outcome"] else None}
     # 1. integrity of the split: the chi-square and the direct bound (spike S6: the chi-square alone is weak)
@@ -159,7 +167,8 @@ def evaluate(test: dict, section: dict, primary: dict, guardrails: dict[str, dic
     elif share is not None and total >= 100 and len(test.get("allocation") or []) <= 1 and not lo <= share <= hi:
         blocked.append(f"the treatment share {share:.4f} is outside its expected range {lo:.4f} to {hi:.4f}")
     if primary["switched"]:
-        blocked.append(f"{primary['switched']} unit(s) were exposed to both arms: the assignment was broken")
+        blocked.append(f"{primary['switched']} unit(s) were served the control and later the treatment: the "
+                       "assignment was broken (the allocation only goes down)")
     for k in ("unassigned", "dropped", "mismatched_model", "bypassed"):
         if (test.get("router") or {}).get(k):
             blocked.append(LOSSES[k].format(n=test["router"][k]))
@@ -258,6 +267,9 @@ def render(result: dict, test: dict) -> str:
         lines.append(f"  shares: treatment {sh['observed']:.4f} (planned {sh['planned']:.4f}, expected "
                      f"{sh['bound'][0]:.4f} to {sh['bound'][1]:.4f}" +
                      (f", SRM p {sh['srm_p']:.3g})" if sh.get("srm_p") is not None else ")"))
+    if result.get("moved"):
+        lines.append(f"  moved to the control: {result['moved']} treatment unit(s) (a lower allocation, a pause or the "
+                     "breaker); analysed in the treatment, their first arm")
     lines.append(f"  exposed: control {result['exposed']['control']}, treatment {result['exposed']['treatment']}; "
                  f"outcome window closed: control {result['matured']['control']}, treatment "
                  f"{result['matured']['treatment']}")
