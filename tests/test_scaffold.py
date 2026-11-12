@@ -77,3 +77,9 @@ def test_the_help_names_every_example():
     sub = next(a for a in build_parser()._subparsers._group_actions[0].choices["new-usecase"]._actions
                if a.dest == "from_example")
     assert all(name in sub.help for name in list_examples())
+
+
+def test_the_serving_example_names_the_tenants_schema(tmp_path):
+    # GA QA: the Cloud SQL schema stayed the sample's my_team in every new use case
+    dest = new_usecase(tmp_path, "acme-serve", "risk-team", "x", example="serving")
+    assert "schema: risk_team" in (dest / "usecase.yaml").read_text(encoding="utf-8")

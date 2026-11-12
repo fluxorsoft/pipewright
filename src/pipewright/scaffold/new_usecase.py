@@ -88,7 +88,9 @@ def new_usecase(root: Path, name: str, tenant: str, owner: str, example: str = "
 
     prefix = table_prefix if table_prefix is not None else name.replace("-", "_") + "_"
     values = {"usecase": name, "tenant": tenant, "owner": owner, "table_prefix": prefix,
-              "model_name": model_name or f"{name}-classifier"}
+              "model_name": model_name or f"{name}-classifier",
+              # GA QA: a name that must be an SQL identifier (a Cloud SQL schema per team): the tenant, underscored
+              "tenant_schema": tenant.replace("-", "_")}
 
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pipewright", ".pytest_cache", EXAMPLE_FILE, "README.md")
     dest.mkdir(parents=True)

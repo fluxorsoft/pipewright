@@ -31,7 +31,7 @@ spec:
       online_store:                      # without it: the tenant's Bigtable online store (1.1)
         type: cloudsql                   # bigtable (the default) | bigquery | cloudsql | http
         cloudsql:
-          schema: my_team                # default public; a schema per team in a shared instance
+          schema: my_tenant              # default public; a schema per team (the tenant) in a shared instance
           # default model.serving.online_store.cloudsql.table: pw_online_<use case>
         lookup:
           mode: gateway                  # TOGGLE: lookup (the default): the endpoint calls the lookup service

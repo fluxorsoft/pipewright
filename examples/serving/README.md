@@ -43,7 +43,7 @@ Everything is off until it is set. Each case below changes only the lines shown;
 ```yaml
 online_store:
   type: cloudsql
-  cloudsql: { schema: my_team }
+  cloudsql: { schema: my_tenant }
   lookup:
     mode: gateway
     callers: [serviceAccount:my-app@my-project.iam.gserviceaccount.com]

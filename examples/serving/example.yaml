@@ -19,6 +19,7 @@ sample:
   owner: my-team
   table_prefix: my_churn_serving_
   model_name: my-churn-serving-classifier
+  tenant_schema: my_tenant
 templated:
   - config/data.yaml
   - usecase.yaml
