@@ -293,7 +293,7 @@ class KServe:
         route = (isvc["metadata"].get("annotations") or {}).get("pipewright.dev/predict-route") or \
             DEFAULT_ROUTES["predict"]
         r = self.kube.post(f"/api/v1/namespaces/{self.s['namespace']}/services/{self.name}-predictor:80/proxy"
-                           f"{route}", {"instances": instances})
+                           f"{route}", {"instances": instances}, retry=True)   # a prediction is safe to repeat
         if not r.ok:
             raise ConfigError(f"prediction from {self.name} failed: {r.status} {message(r)}")
         return r.body

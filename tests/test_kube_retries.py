@@ -34,3 +34,9 @@ def test_a_create_is_not_repeated(monkeypatch):
     with pytest.raises(requests.ConnectionError):
         k.post("/x", {})
     assert calls == ["POST"]
+
+
+def test_a_prediction_is_retried(monkeypatch):
+    # 1.4.3 GA QA: model predict on KServe failed on the first call after an idle minute (a dropped connection)
+    k, calls = _client(monkeypatch, 2)
+    assert k.post("/x", {"instances": []}, retry=True).status == 200 and calls == ["POST"] * 3

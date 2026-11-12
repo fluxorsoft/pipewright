@@ -56,14 +56,16 @@ class KubeClient:
             raise KubeError(0, "the environment manifest has no kubernetes.endpoint (orchestrator kfp)")
         return cls(k["endpoint"], k.get("ca_certificate"), gcp)
 
-    def request(self, method: str, path: str, body: dict | None = None, **params) -> Response:
+    def request(self, method: str, path: str, body: dict | None = None, retry: bool = False, **params) -> Response:
         import requests
 
         headers = {"Authorization": f"Bearer {self.gcp.access_token()}", "Accept": "application/json"}
         # a dropped connection is retried only where repeating is safe: reads, deletes (a second answers 404) and
         # whole-object writes (found in the A/B battle test: the cluster's DNS endpoint drops connections, and a stop
         # left its router running)
-        attempts = 3 if method in ("GET", "DELETE", "PUT") else 1
+        # left its router running). `retry`: a POST the caller knows is safe to repeat, a prediction (1.4.3 GA QA:
+        # model predict and A/B router calls on KServe failed on the first call after an idle minute)
+        attempts = 3 if method in ("GET", "DELETE", "PUT") or retry else 1
         for attempt in range(attempts):
             try:
                 r = requests.request(method, f"{self.endpoint}{path}", json=body, params=params or None,
@@ -81,8 +83,8 @@ class KubeClient:
     def get(self, path: str, **params) -> Response:
         return self.request("GET", path, **params)
 
-    def post(self, path: str, body: dict, **params) -> Response:
-        return self.request("POST", path, body, **params)
+    def post(self, path: str, body: dict, retry: bool = False, **params) -> Response:
+        return self.request("POST", path, body, retry=retry, **params)
 
     def delete(self, path: str) -> Response:
         return self.request("DELETE", path)

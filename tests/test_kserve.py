@@ -79,7 +79,7 @@ class FakeKube:
                                                                        "replicas": 1}})
         return Response(404, {})
 
-    def post(self, path, body):
+    def post(self, path, body, **k):
         self.posted.append((path, body))
         if path.endswith("/inferenceservices"):
             self.isvc = {**body, "metadata": {**body["metadata"], "resourceVersion": "1"},
