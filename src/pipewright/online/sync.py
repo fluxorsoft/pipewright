@@ -405,6 +405,15 @@ def connector(env, gcp, online: dict):
                               "reachable inside the environment's network only. Run the sync there: the use case's "
                               "online_sync schedule (`pipewright run --schedule <name>`), which the launcher runs as "
                               f"the tenant's sync job ({str(e).splitlines()[0][:120]})") from None
+        except pg8000.exceptions.DatabaseError as e:
+            # 1.4.3 GA QA (live, a rebuilt environment): a raw traceback said 'database "features" does not exist';
+            # the platform's setup creates the database and each team's schema once, after Terraform builds Cloud SQL
+            if "3D000" not in str(e):
+                raise
+            raise ConfigError(f"the online store's database {online.get('database', 'features')!r} does not exist yet: "
+                              "the platform team runs the online store setup once after building it (Enterprise: "
+                              "`gcloud run jobs execute <prefix>-online-setup --wait`; the starter: `pipewright "
+                              "features online-setup`)") from None
         return conn
     return connect
 
