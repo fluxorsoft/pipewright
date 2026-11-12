@@ -118,6 +118,11 @@ From the FR-57 QA round:
 - Pools: an environment's file can set `model.serving.machine: null` to join a pool when the use case sets a machine;
   the same version on dedicated machines is not "already live" for a pool; the plan names the pool.
 - `report fleet` counts pipeline hours (Agent Platform refused a page of 200, so it said 0 h).
+- Capture coverage on KServe counts inference requests only (TorchServe's `Requests2XX` counted readiness pings) and
+  judges only counters that existed at the start of the hour: a receiver counter first seen inside it lost its
+  earlier records, so every deploy raised a false `serving.capture_gap`.
+- The churn example's AUC no longer needs numpy 2 (`np.trapezoid`): on the Ray image's numpy 1.x every tuning trial on
+  Ray failed. `validate` says KServe needs Kubeflow on the environment's cluster (it named the blueprint).
 - `data erase` says capture holds features and prediction IDs, never the key. `features sync` from outside the network
   says to run the `online_sync` schedule. `model rollback` prints no raw event line.
 - Examples and scaffolding: sample paths under `samples/<tenant>/` (the only samples prefix a runner reads); the churn
