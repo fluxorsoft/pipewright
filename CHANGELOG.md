@@ -111,6 +111,13 @@ AI build assistance for what 1.4 added (FR-129), additive: coding agents knew th
   than half or with nobody named to decide; capture of more than half of live calls.
 - The starter and Enterprise let the agent identity read `ab-tests/` and `cases/` in the artifacts bucket (and, in
   the starter, list object names), so the tools can read tests and proposals.
+- Found in its live test (pw-ebook, as the agent identity): `lineage` was refused since 1.3.0 (the agent could not
+  read a run's `lineage.json`; it now reads `lineage.json` and `evaluation.json`, never model files); `doctor` as the
+  agent failed on the renewer job (`run.jobs.get` added to its role); `monitor_status` answered with BigQuery's Access
+  Denied (now a refusal that says where the facts are); `bootstrap_usecase` drafted an invalid use case from a feature
+  group whose table was gone without saying why; the review bundle called a use case new when the base version did not
+  resolve, and listed every default of a section switched on. The starter's `serving_policy` failed to plan whenever it
+  was set (fixed: the rules as JSON text).
 
 ### Fixed (found in the 1.4.3 GA QA, live)
 
