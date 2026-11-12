@@ -152,3 +152,11 @@ def test_promote_workflow_can_accept_a_template_change():
     t = (Path(__file__).parents[1] / "src/pipewright/scaffold/ci_templates/pipewright-promote.yml").read_text(
         encoding="utf-8")
     assert "accept_template_change:" in t and "--accept-template-change" in t
+
+
+def test_gate_refuses_an_id_that_is_not_a_decision():
+    # 1.4.3 GA QA: a malformed ID passed as "decided elsewhere"; it must fail before the pending lookup
+    steps = yaml.safe_load(ci.render(["dev"])[".github/workflows/pipewright-gate.yml"])["jobs"]["decide"]["steps"]
+    run = next(s for s in steps if s.get("name") == "Still pending")["run"]
+    assert run.index("is not a decision in") < run.index("pipewright decisions pending")
+    assert '[ "$id_env" != "$ENV" ]' in run and '[ ! -d "usecases/$id_uc" ]' in run

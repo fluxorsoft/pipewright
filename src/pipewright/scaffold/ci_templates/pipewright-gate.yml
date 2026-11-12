@@ -59,6 +59,13 @@ jobs:
       - name: Still pending
         id: item
         run: |
+          # 1.4.3: an ID that cannot be a decision (a typo, another environment, an unknown use case) fails, so it is
+          # never reported as "decided elsewhere". IDs are environment/usecase/kind/key, from pipewright-decisions.
+          IFS=/ read -r id_env id_uc id_kind id_key <<<"$ID"
+          if [ -z "$id_key" ] || [ "$id_env" != "$ENV" ] || [ ! -d "usecases/$id_uc" ]; then
+            echo "::error::'$ID' is not a decision in '$ENV': IDs are environment/usecase/kind/key, as pipewright decisions pending lists them"
+            exit 1
+          fi
           pipewright decisions pending --env "$ENV" --json > "$RUNNER_TEMP/pending.json"
           if ! jq -e --arg id "$ID" '.[] | select(.id == $id)' "$RUNNER_TEMP/pending.json" > "$RUNNER_TEMP/item.json"; then
             echo "$ID is no longer pending (decided elsewhere): nothing to do" | tee -a "$GITHUB_STEP_SUMMARY"
