@@ -21,7 +21,7 @@ from datetime import datetime
 LATENCY_FLOOR_MS = 20           # a canary is slower only by more than this as well as by the ratio
 
 DEFAULTS = {"percent": 10, "soak_minutes": 30, "max_error_rate_increase": 0.01, "max_latency_increase": 0.2,
-            "min_requests": 50, "probe": True}
+            "max_latency_increase_ms": LATENCY_FLOOR_MS, "min_requests": 50, "probe": True}
 METRICS = "aiplatform.googleapis.com/prediction/online/"
 PROBE_ROWS = 12
 
@@ -54,7 +54,8 @@ def judge(canary: dict, current: dict, cfg: dict, probe: dict | None) -> tuple[b
         elif lat is not None and cur:
             # GA QA (found live): 24 ms against 12 ms failed a canary (a new replica's first minutes); a difference
             # under LATENCY_FLOOR_MS is noise at any ratio
-            if lat > cur * (1 + cfg["max_latency_increase"]) and lat - cur > LATENCY_FLOOR_MS:
+            floor = cfg.get("max_latency_increase_ms", LATENCY_FLOOR_MS)
+            if lat > cur * (1 + cfg["max_latency_increase"]) and lat - cur > floor:
                 reasons.append(f"median latency {lat:.0f} ms against {cur:.0f} ms (at most "
                                f"{cfg['max_latency_increase']:.0%} slower)")
             else:

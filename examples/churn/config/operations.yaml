@@ -61,5 +61,5 @@ retraining:                             # drift or a performance drop opens a ca
   #                            # { max_loops: 1, per_days: 7, pause_after_failures: 2, drift_runs: 2 }
   #   canary:                  # 1.4.0, served on an Agent Platform endpoint: canary, check, promote or roll back
   #     { percent: 10, soak_minutes: 30, max_error_rate_increase: 0.01, max_latency_increase: 0.2,
-  #       min_requests: 50, probe: true }
+  #       max_latency_increase_ms: 20, min_requests: 50, probe: true }
   #   data: test               # 1.4.0: or production (its feature tables and label window, read in place)

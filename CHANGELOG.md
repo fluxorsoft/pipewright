@@ -106,15 +106,17 @@ From the FR-57 QA round:
   so, and the starter and Enterprise take `endpoints.<use case>.capture.sample_rate`. An undeploy leaves capture alone.
 - Health: an A/B treatment on Agent Platform is watched like the control (both arms named in the policies); a model on a
   shared pool gets errors and latency policies only (a pool's replicas are reported at the pool); Agent Platform
-  latency reads the total series (one breach opened three incidents). A rollback is proposed only for an errors or
-  latency incident and only when an earlier version exists.
+  latency reads the total series (one breach opened three incidents). A rollback is proposed only when an earlier
+  version exists, and only for an errors or latency incident, or ready replicas missing in the first hour after a
+  deploy (a version that does not start).
 - The A/B router keeps the prediction IDs (lookup mode) and makes them (router-only), so live quality follows A/B
   traffic. The launcher's tick refreshes a lookup service or router that runs another image than the environment's.
 - The closed retrain loop: trains on test's `retraining.source_uri` (not production's landing path) unless an approver
   named the data; restarts a loop whose training failed and resubmits a validation that never started; scores its
   unapproved candidate for validation under `inference: refuse` (`run.integrity` mode `loop-candidate`); promotes the
   release that trained the candidate; counts the approval it just made; keeps the version production served before it;
-  a canary must also be more than 20 ms slower to fail on latency.
+  a canary must also be slower by more than `retraining.loop.canary.max_latency_increase_ms` (default 20) to fail on
+  latency (0 keeps the ratio alone).
 - Pools: an environment's file can set `model.serving.machine: null` to join a pool when the use case sets a machine;
   the same version on dedicated machines is not "already live" for a pool; the plan names the pool.
 - `report fleet` counts pipeline hours (Agent Platform refused a page of 200, so it said 0 h).

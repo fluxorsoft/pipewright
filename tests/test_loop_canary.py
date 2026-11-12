@@ -202,3 +202,16 @@ def test_a_few_milliseconds_never_fail_a_canary():
     bad, why = canary.judge({"predictions": 300, "errors": 0, "latency_ms": 80},
                             {"predictions": 3000, "errors": 0, "latency_ms": 40}, CFG, {"ok": True, "note": "fine"})
     assert not bad and "median latency 80 ms against 40 ms" in why
+
+
+def test_the_latency_floor_is_a_setting():
+    # GA QA decision: max_latency_increase_ms (default 20); 0 judges by the ratio alone
+    cfg = canary.settings({})
+    assert cfg["max_latency_increase_ms"] == 20
+    ok, _ = canary.judge({"predictions": 300, "errors": 0, "latency_ms": 15},
+                         {"predictions": 3000, "errors": 0, "latency_ms": 5}, cfg, {"ok": True, "note": "fine"})
+    assert ok
+    strict = canary.settings({"max_latency_increase_ms": 0})
+    bad, why = canary.judge({"predictions": 300, "errors": 0, "latency_ms": 15},
+                            {"predictions": 3000, "errors": 0, "latency_ms": 5}, strict, {"ok": True, "note": "fine"})
+    assert not bad and "median latency 15 ms against 5 ms" in why

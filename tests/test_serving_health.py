@@ -166,8 +166,14 @@ def test_rollback_proposal_only_when_on_critical_and_recent(monkeypatch):
     assert rollback.maybe_propose(contract(0.5 and 0), i, G(), "b", now) is None
     # GA QA (found live): capacity signals and a first version propose nothing
     store.clear()
-    capacity = incidents.parse(incident(**{"pipewright-signal": "replicas"}))
+    capacity = incidents.parse(incident(**{"pipewright-signal": "scaling"}))
     assert rollback.maybe_propose(contract(24), capacity, G(), "b", now) is None
+    # GA QA decision: replicas missing in the first hour after a deploy is a version that does not start
+    starting = incidents.parse(incident(**{"pipewright-signal": "replicas"}))
+    assert rollback.maybe_propose(contract(24), starting, G(), "b", now)["previous_version"] == "2"
+    store.clear()
+    later = now + timedelta(hours=2)
+    assert rollback.maybe_propose(contract(24), starting, G(), "b", later) is None
     first = incidents.parse(incident(**{"pipewright-model-version": "1"}))
     assert rollback.maybe_propose(contract(24), first, G(), "b", now) is None
 

@@ -18,6 +18,7 @@ from pipewright.gcp import gcs_list, gcs_read, gcs_write
 
 PREFIX = "cases/_rollback"
 MODEL_SIGNALS = ("errors", "latency")     # what a version can cause; replicas and scaling are capacity
+STARTUP_SECONDS = 3600                     # replicas missing this soon after a deploy: the version does not start
 
 
 def case_name(usecase: str, case_id: str) -> str:
@@ -68,13 +69,15 @@ def maybe_propose(contract, incident: dict, gcp, bucket: str, now: datetime | No
     hours = int(((ml.get("monitoring") or {}).get("health") or {}).get("propose_rollback_hours") or 0)
     if hours <= 0 or incident.get("state") != "open" or incident.get("severity") != "critical":
         return None
-    if incident.get("signal") not in MODEL_SIGNALS:
-        # GA QA: too few ready replicas or a stuck scale-up is capacity, not the version; a rollback would not help
-        # (serving.degraded is still sent)
-        return None
     now = now or datetime.now(timezone.utc)
     since = _deployed_at(contract, incident, gcp)
     if since is None or (now - since).total_seconds() > hours * 3600:
+        return None
+    if incident.get("signal") not in MODEL_SIGNALS and not (
+            incident.get("signal") == "replicas" and (now - since).total_seconds() <= STARTUP_SECONDS):
+        # GA QA: too few ready replicas or a stuck scale-up is capacity, not the version, and a rollback would not
+        # help (serving.degraded is still sent); except replicas missing in the first hour after a deploy, which is
+        # a version that does not start
         return None
     case_id = f"rb-{incident.get('incident_id') or now.strftime('%Y%m%d%H%M%S')}"[:60].replace(".", "-")
     name = case_name(contract.usecase, case_id)
