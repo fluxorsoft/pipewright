@@ -105,8 +105,11 @@ def test_coverage_judges_gaps_and_silence_not_quiet_endpoints():
     assert coverage.judge(10000, 0, 0.05)["event"] == "serving.capture_silent"
     assert coverage.judge(10000, 100, 0.05)["event"] == "serving.capture_gap"   # 100 of an expected 500
     assert coverage.judge(10000, 480, 0.05) is None
-    found = coverage.kserve(lambda q: 10000 if "Requests2XX" in q else 0, "ns", "churn", 0.05)
+    found = coverage.kserve(lambda q: 10000 if "ts_inference_requests_total" in q else 0, "ns", "churn", 0.05)
     assert found["event"] == "serving.capture_silent"
+    # GA QA: counters Prometheus first saw inside the hour are too new to judge (a false gap after a deploy)
+    young = coverage.kserve(lambda q: None if "offset 1h" in q else 10000, "ns", "churn", 0.05)
+    assert young is None
 
 
 def test_receiver_metrics_for_coverage():

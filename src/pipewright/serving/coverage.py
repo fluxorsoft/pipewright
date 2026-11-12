@@ -60,8 +60,15 @@ def agent_platform(gcp, project: str, region: str, endpoint_id: str, table: str,
 
 def kserve(prom_query, namespace: str, isvc: str, rate: float) -> dict | None:
     """prom_query(promql) -> a number or None (Cloud Monitoring's PromQL API)."""
-    served = prom_query(f'sum(increase(Requests2XX{{namespace="{namespace}",pod=~"{isvc}-predictor.*"}}[1h]))')
-    recorded = prom_query(f'sum(increase(pipewright_capture_kept_total{{namespace="{namespace}",isvc="{isvc}"}}[1h]))')
+    # GA QA (found live, a false capture_gap after a deploy): inference requests only (Requests2XX counts the
+    # readiness pings too), and only when both counters existed at the start of the hour: a counter Prometheus first
+    # sees inside the window has no zero to start from, so increase() drops what came before its first scrape.
+    srv = f'ts_inference_requests_total{{namespace="{namespace}",pod=~"{isvc}-predictor.*"}}'
+    kept = f'pipewright_capture_kept_total{{namespace="{namespace}",isvc="{isvc}"}}'
+    if prom_query(f"sum({srv} offset 1h)") is None or prom_query(f"sum({kept} offset 1h)") is None:
+        return None                                  # too new to judge over the hour
+    served = prom_query(f"sum(increase({srv}[1h]))")
+    recorded = prom_query(f"sum(increase({kept}[1h]))")
     if served is None:
         return None
     # The receiver keeps a request and its answer: two records per request.
