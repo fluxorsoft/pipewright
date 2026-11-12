@@ -97,7 +97,10 @@ def conditions(t: dict, health: dict, latency: str = "p95") -> list[dict]:
             err = _threshold(_ap_filter(t, "response_count", ' AND metric.label.response_code=monitoring.regex.'
                                                               'full_match("5..")'),
                              rate, denominator=_ap_filter(t, "response_count"), reducer="REDUCE_SUM")
-            lat = _threshold(_ap_filter(t, "prediction_latencies"), ms, aligner="ALIGN_PERCENTILE_95")
+            # latency_type total only (GA QA, found live): the metric has a series each for model, overhead and
+            # total, and each opened its own incident (three events and emails for one breach)
+            lat = _threshold(_ap_filter(t, "prediction_latencies", ' AND metric.label.latency_type="total"'), ms,
+                             aligner="ALIGN_PERCENTILE_95")
             out.append({"signal": "errors", "severity": sev, "threshold": rate, "kind": "threshold",
                         "condition": err})
             out.append({"signal": "latency", "severity": sev, "threshold": ms, "kind": "threshold",

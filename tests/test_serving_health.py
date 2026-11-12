@@ -221,3 +221,15 @@ def test_a_model_on_a_shared_pool_gets_errors_and_latency_only():
     assert {c["signal"] for c in pooled} == {"errors", "latency"}
     own = health.conditions({"target": "vertex", "endpoint_id": "1", "deployed_model_id": "2", "pool": False}, h)
     assert {"replicas", "scaling"} <= {c["signal"] for c in own}
+
+
+def test_agent_platform_latency_reads_the_total_series_only():
+    # GA QA (found live): one breach opened three incidents (model, overhead and total series)
+    from pipewright.monitoring import serving_config
+    from pipewright.serving import health
+
+    c = health.conditions({"target": "vertex", "endpoint_id": "1", "deployed_model_id": "2"},
+                          serving_config.HEALTH_DEFAULTS)
+    lat = [x for x in c if x["signal"] == "latency"]
+    assert lat and all('metric.label.latency_type="total"' in x["condition"]["filter"]
+                       for x in lat)
