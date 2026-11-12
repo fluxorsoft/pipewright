@@ -172,7 +172,10 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         problems.append("model.serving.replicas: min is greater than max")
     if serving["enabled"]:
         if serving["target"] == "kserve" and env.orchestrator != "kfp":
-            problems.append(f"model.serving.target kserve is only available on private-gke (this is {env.blueprint})")
+            # GA QA: the old message named the blueprint, which read "only on private-gke (this is private-gke)"
+            problems.append(f"model.serving.target kserve needs Kubeflow on the environment's private GKE cluster "
+                            f"(orchestrator kfp); {env.name} runs its pipelines on {env.orchestrator} "
+                            f"({env.blueprint})")
         if not resources.get("online_serving", False):
             problems.append(f"tenant {tenant!r} is not enabled for online serving in {env.name!r}")
 

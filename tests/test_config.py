@@ -94,7 +94,7 @@ def test_environment_file_must_agree_with_manifest(repo):
 
 def test_kserve_needs_private_gke(repo):
     repo.usecase["spec"]["environments"]["dev"]["model"] = {"serving": {"enabled": True, "target": "kserve"}}
-    assert "kserve is only available on private-gke" in problems_of(repo)
+    assert "kserve needs Kubeflow on the environment's private GKE cluster" in problems_of(repo)
 
 
 def test_serving_needs_tenant_permission(repo):
