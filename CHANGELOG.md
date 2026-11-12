@@ -133,6 +133,28 @@ From the FR-57 QA round:
   schema; `new-usecase --help` names every example and says when a name is too long; `validate` warns when the
   outcomes table is not the use case's and no longer warns a BigQuery ML use case about Pipewright's own steps.
 
+- Promotion of a same-commit re-release: the component image keeps the release it was built for, so every version
+  such a release trained was labelled with the earlier release and promotion refused it. The launcher now labels a
+  version with the release that ran (from the run), and `promote` checks the training run when the label differs.
+- `promote` with the release already live in the destination still checks and promotes the model: an explicit version
+  that was never approved is refused (it said "nothing to do"), and a version approved later under the same release
+  reaches production.
+- The A/B analysis counts a unit in its first arm. Lowering the allocation, a pause or the breaker send treatment units
+  to the control; these were read as a broken assignment and blocked the test. They are reported as moved; only a
+  control-then-treatment unit (impossible by design) blocks.
+- The decisions workflow lists a default version nobody approved (`model-approve`); the gate workflow refuses an ID that
+  is not a decision of its environment (it passed green as "decided elsewhere"). The PR workflow installs the use
+  case's component requirements before its unit tests; the promote workflow takes `accept_template_change`.
+- KServe predictions retry a dropped connection (the cluster's DNS endpoint drops idle ones; `model predict` failed on
+  the first call after a quiet minute).
+- Scheduled online monitoring of a use case with no capture table yet (not serving, or nothing logged since deploy)
+  is insufficient data, not a 404 crash.
+- An approval younger than ten minutes whose Cloud Audit Logs entry has not appeared yet is a note, not a refusal:
+  scheduled and API runs right after an approval were refused as "may not be genuine" for several minutes.
+- `doctor`: a source in another project the checking identity may not read (the closed loop's production data, from
+  CI) is a warning naming the runner. A missing online store database says to run the platform's online setup. A
+  changed KServe serving copy says `deploy-model` rewrites it.
+
 ### Upgrading
 
 Teams' own component steps are theirs: update `components/register.py` from the churn example (the fixed model ID)
