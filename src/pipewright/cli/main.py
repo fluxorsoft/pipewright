@@ -1257,6 +1257,49 @@ def cmd_retrain_decide(args) -> int:
     return 0
 
 
+def cmd_scoring_list(args) -> int:
+    """FR-130: the use case's held scoring runs, newest first."""
+    from pipewright.gcp import Gcp
+    from pipewright.runs import scoring
+
+    env = _retrain_env(args)
+    records = scoring.store(env, Gcp()).list(args.usecase)[: args.limit]
+    if args.json:
+        import json
+
+        from pipewright.runs import held
+
+        now = held.datetime.now(held.timezone.utc)
+        print(json.dumps([{**r, "state": held.state(r, now)} for r in records], indent=2, default=str))
+        return 0
+    print(scoring.render(records))
+    return 0
+
+
+def cmd_scoring_decide(args) -> int:
+    """FR-130: approve (the launcher submits the run) or reject a held scoring run."""
+    from pipewright.gcp import Gcp
+    from pipewright.runs import scoring
+
+    env = _retrain_env(args)
+    action = args.scoring_command
+    answer = scoring.send(env, args.usecase, args.hold, action, args.reason or "", Gcp())
+    if answer.get("status") == "refused":
+        print(f"REFUSED  {answer.get('reason')}")
+        return 1
+    if answer.get("status") != "recorded":
+        print(answer.get("reason") or answer)
+        return 0
+    run = answer.get("run") or {}
+    if action == "approve" and run:
+        print(f"approved: {args.usecase} scoring run {args.hold} {run.get('status')}"
+              + (f", job {run['job_id']}" if run.get("job_id") else "")
+              + (f" ({run['reason']})" if run.get("reason") else ""))
+        return 0 if run.get("status") in ("submitted", "duplicate") else 1
+    print(f"{action}{'d' if action.endswith('e') else 'ed'}: {args.usecase} scoring run {args.hold}")
+    return 0
+
+
 def cmd_run(args) -> int:
     from pipewright.runs import launch
 
@@ -1295,6 +1338,11 @@ def cmd_run(args) -> int:
     if result.get("status") == "requested":
         print(f"requested: {result['usecase']} {pipeline} over Pub/Sub (run key {result['run_key']}, "
               f"message {result['message_id']}). The launcher submits it; the run.submitted event has the job.")
+        return 0
+    if result.get("status") == "held":                 # FR-130: approvals.batch_scoring manual
+        print(f"held: {result['usecase']} {pipeline} run {result['hold_id']} waits for a person until "
+              f"{result['expires_at']}. Decide with `{result['decide']} --reason ...` (or reject), or the "
+              "pipewright-gate workflow")
         return 0
     print(f"{result.get('status')}: {result.get('usecase')} {pipeline} job {result.get('job_id')}"
           + (f" (release {result['release']})" if result.get("release") else ""))
@@ -1816,12 +1864,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true", help="machine-readable output (stable field names)")
     sp.set_defaults(func=cmd_monitor_status)
 
-    def retrain_target(sp, case_required: bool = False):
+    def retrain_target(sp, case_required: bool = False, case: bool = True):
         sp.add_argument("--root", default=".")
         sp.add_argument("--env", help="environment (with the MLOps repo)")
         sp.add_argument("--manifest", help="or the environment manifest, gs://... (approvers without the repo)")
         sp.add_argument("--usecase", required=True)
-        sp.add_argument("--case", required=case_required, help="case ID (default: the open case)")
+        if case:
+            sp.add_argument("--case", required=case_required, help="case ID (default: the open case)")
 
     sp = sub.add_parser("decisions", help="what waits for a person: model approvals, retrain cases, loops")
     dsub = sp.add_subparsers(dest="decisions_command", required=True)
@@ -1931,6 +1980,21 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--days", type=int, required=action == "snooze",
                             help="until it re-opens" + (" (default: snooze.max_days)" if action == "decline" else ""))
         sp.set_defaults(func=cmd_retrain_decide)
+
+    sp = sub.add_parser("scoring", help="held scoring runs (approvals.batch_scoring manual): list, approve, reject")
+    ssub = sp.add_subparsers(dest="scoring_command", required=True)
+    sp = ssub.add_parser("list", help="held, approved, rejected and expired scoring runs, newest first")
+    retrain_target(sp, case=False)
+    sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--json", action="store_true", help="the records as stored, with their state now")
+    sp.set_defaults(func=cmd_scoring_list)
+    for action, text in (("approve", "approve a held scoring run: the launcher submits it as it was asked for"),
+                         ("reject", "reject a held scoring run: it never starts")):
+        sp = ssub.add_parser(action, help=text)
+        retrain_target(sp, case=False)
+        sp.add_argument("--hold", required=True, help="the held run's ID (`pipewright scoring list`)")
+        sp.add_argument("--reason", required=action == "reject", help="recorded with your name")
+        sp.set_defaults(func=cmd_scoring_decide)
 
     sp = sub.add_parser("run", help="start a pipeline through the launcher (file-free: give a gs:// source)")
     one(sp)

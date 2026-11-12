@@ -66,6 +66,10 @@ EVENTS: tuple[Event, ...] = (
     Event("run.failed", _L, "A run ended failed or cancelled (the launcher's tick).", ("ml", "sre"), "1.2.0"),
     Event("run.unregistered", _L, "A training run the gates approved ended succeeded without registering its model.",
           ("ml", "sre", "governance"), "1.4.3"),
+    Event("run.held", _L, "A scoring run waits for a person (approvals.batch_scoring manual): nothing was submitted.",
+          ("governance", "ml"), "1.4.3"),
+    Event("run.hold_decided", _L, "A person approved (the run was submitted) or rejected a held scoring run, or a "
+          "decision on one was refused.", ("governance", "ml", "sre"), "1.4.3"),
     # release
     Event("release.live", _C, "A release became the live one, with who released it.", ("ml", "sre", "governance",
                                                                                          "product")),
@@ -218,7 +222,7 @@ BY_TYPE = {e.type: e for e in EVENTS}
 
 # Message kinds sent on the run-requests topic: commands to the launcher, not events.
 REQUEST_KINDS = ("retrain.proposal", "retrain.decision", "ab.decision", "online.lookup_service",
-                 "online.lookup_service.delete", "ray.cluster")
+                 "online.lookup_service.delete", "ray.cluster", "scoring.decision")
 
 
 def attributes(event_type: str) -> dict:

@@ -88,6 +88,87 @@ def create_app(registry: Registry | None = None) -> Flask:
                                  contract.release_id, rid, **data), topic, getattr(reg(), "gcp", None),
                     region=contract.region, attributes=attributes)
 
+    def _held_store():
+        from pipewright.runs.held import HeldStore
+
+        return HeldStore(getattr(reg(), "gcp", None) or Gcp(), reg().manifest["artifacts_bucket"])
+
+    def _hold(contract, source_uri, rid, trigger, hint, extra, ml, recorded) -> dict | None:
+        """FR-130: holds the scoring run when the use case or the platform says manual; None to submit it."""
+        from datetime import datetime, timezone
+
+        from pipewright.runs import held as held_mod
+
+        approvals = (contract.metadata or {}).get("approvals") or {}
+        if held_mod.mode(approvals, reg().manifest.get("policies")) != "manual":
+            return None
+        request = {"source_uri": source_uri, "rid": rid, "trigger": trigger, "hint": hint, "extra": extra or {},
+                   "ml": ml, "recorded": recorded or {}, "release": contract.release_id}
+        record, created = _held_store().create(held_mod.new_record(
+            contract.usecase, rid, request, trigger, held_mod.hold_hours(approvals), datetime.now(timezone.utc)))
+        if created:
+            _event("run.held", contract, rid, pipeline="inference", trigger=trigger, hold_id=rid,
+                   source_uri=source_uri, expires_at=record["expires_at"])
+            log.info("held %s scoring run %s (%s) for a person", contract.usecase, rid, trigger)
+        return {"usecase": contract.usecase, "pipeline": "inference", "status": "held", "hold_id": rid,
+                "expires_at": record["expires_at"], "state": held_mod.state(record, datetime.now(timezone.utc)),
+                "decide": f"pipewright scoring approve --env {contract.environment} --usecase {contract.usecase} "
+                          f"--hold {rid}"}
+
+    def _scoring_decide(message: dict, by: str | None, via: str):
+        """FR-130: a person's decision on a held scoring run. An approval submits the run as it was asked for, with
+        the release it was asked for. Runners and the launcher itself may not decide."""
+        from datetime import datetime, timezone
+
+        from pipewright.runs import held as held_mod
+
+        usecase, hold_id = message.get("usecase") or "", message.get("hold_id") or ""
+        contract = reg().get(usecase)
+        if contract is None:
+            return {"status": "error", "reason": f"{usecase}: no live release"}, 404
+        manifest = reg().manifest
+        not_allowed = {((manifest.get("launcher") or {}).get("service_account") or "").lower()}
+        not_allowed |= {(t.get("runner_service_account") or "").lower()
+                        for t in (manifest.get("tenants") or {}).values()}
+        not_allowed.discard("")
+        approval = message.get("approval") if isinstance(message.get("approval"), dict) else None
+        now, out = datetime.now(timezone.utc), {}
+
+        def change(record):
+            try:
+                out["record"] = held_mod.decide(record, message.get("action") or "", by or "", now,
+                                                message.get("reason") or "", approval, not_allowed)
+                return out["record"]
+            except held_mod.Refused as e:
+                out["refused"] = str(e)
+                return {**record, "history": [*record.get("history", []), {
+                    "at": held_mod.iso(now), "action": "refused", "asked": message.get("action"), "by": by,
+                    "reason": str(e), "via": via}]}
+
+        record = _held_store().update(usecase, hold_id, change)
+        if record is None:
+            return {"status": "refused", "reason": f"no held scoring run {hold_id!r} for {usecase}"}, 404
+        common = {"hold_id": hold_id, "by": by, "via": via, **({"approval": approval} if approval else {})}
+        if "refused" in out:
+            _event("run.hold_decided", contract, hold_id, action="refused", asked=message.get("action"),
+                   reason=out["refused"], **common)
+            log.warning("decision on held run %s by %s refused: %s", hold_id, by, out["refused"])
+            return {"status": "refused", "hold_id": hold_id, "reason": out["refused"]}, 403
+        if record["state"] == "rejected":
+            _event("run.hold_decided", contract, hold_id, action="reject", reason=message.get("reason"), **common)
+            return {"status": "recorded", "action": "reject", "hold_id": hold_id}, 200
+        req = record["request"]
+        asked = reg().get(usecase, release=req.get("release")) or contract
+        result = start(asked, "inference", req["source_uri"], req["rid"], req["trigger"], req.get("hint") or "",
+                       req.get("extra") or None, None, req.get("ml"),
+                       {**(req.get("recorded") or {}), "held": {"hold_id": hold_id, "approved_by": by,
+                                                                **({"approval": approval} if approval else {})}},
+                       released=hold_id)
+        _event("run.hold_decided", contract, hold_id, action="approve", job_id=result.get("job_id"),
+               run_status=result.get("status"), release_asked=req.get("release"),
+               release_used=asked.release_id, **common)
+        return {"status": "recorded", "action": "approve", "hold_id": hold_id, "run": result}, 200
+
     def _policy_env(contract: ReleaseContract):
         from types import SimpleNamespace
 
@@ -95,7 +176,14 @@ def create_app(registry: Registry | None = None) -> Flask:
 
     def start(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str,
               hint: str = "", extra: dict | None = None, loop: str | None = None, ml: dict | None = None,
-              recorded: dict | None = None) -> dict:
+              recorded: dict | None = None, released: str | None = None) -> dict:
+        # FR-130 (1.4.3, off by default): with approvals.batch_scoring manual a scoring run waits for a person.
+        # Every trigger reaches here, so a schedule, a landing file, the API and the CLI are all held. Retrain loops
+        # are not: their runs belong to a case a person approved. released: the hold a person just approved.
+        if pipeline == "inference" and not loop and not released:
+            held_answer = _hold(contract, source_uri, rid, trigger, hint, extra, ml, recorded)
+            if held_answer:
+                return held_answer
         target = target_for(contract, pipeline)
         jid = job_id(contract.usecase, rid, hint if pipeline == "training" else f"{pipeline}-{hint}")
         params_extra: dict = {}
@@ -771,6 +859,19 @@ def create_app(registry: Registry | None = None) -> Flask:
             return jsonify(status="error", reason=str(e)), 500
         return jsonify(result), 200
 
+    @app.post("/scoring/decide")
+    def scoring_decide():
+        """FR-130: a direct decision (the caller's identity from Cloud Run's verified token)."""
+        caller = identity.cloud_run_caller(request.headers.get("Authorization"))
+        if not caller:
+            return jsonify(status="refused", reason="no caller identity"), 401
+        try:
+            answer, code = _scoring_decide(request.get_json(silent=True) or {}, caller, "direct")
+        except Exception as e:  # noqa: BLE001
+            log.exception("scoring decision failed")
+            return jsonify(status="error", reason=str(e)[:300]), 500
+        return jsonify(answer), code
+
     @app.post("/run")
     def run():
         return _run(request.get_json(silent=True) or {})
@@ -827,6 +928,19 @@ def create_app(registry: Registry | None = None) -> Flask:
             # A refusal is answered in runs/registration/ and never gets better: acknowledge. No live release or a
             # failed upload: let Pub/Sub retry (a repeated request finds the version it registered).
             return response, (200 if code in (400, 403) else 503 if code == 404 else code)
+        if body.get("kind") == "scoring.decision":          # FR-130, from outside a private perimeter
+            try:
+                caller = identity.verify(body.get("id_token") or "", [*audiences(), identity.GCLOUD_CLIENT_ID])
+            except identity.NotVerified as e:
+                log.warning("scoring decision for %s dropped: %s", body.get("usecase"), e)
+                return jsonify(status="dropped", reason=str(e)), 200
+            try:
+                answer, code = _scoring_decide(body, caller, "run-requests")
+            except Exception as e:  # noqa: BLE001 - Pub/Sub redelivers
+                log.exception("scoring decision failed")
+                return jsonify(status="error", reason=str(e)[:300]), 500
+            # A refusal is recorded on the hold and never gets better: acknowledge. No live release: retry.
+            return jsonify(answer), (503 if code == 404 and "no live release" in str(answer) else 200)
         if body.get("kind") == "ray.cluster":
             # Pub/Sub does not say who published: the message carries the runner's ID token.
             try:

@@ -463,6 +463,8 @@ approvals: Which changes need a person.
 approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.
 approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation; ci (Pipewright 1.2.0) - `pipewright decisions pending` lists a deploy-approve item for each new default version that passes its gates and is not served, and a pipewright-gate run deploys it once the GitHub environment's reviewers approve; on_register (1.2.0) - the pipewright-decisions workflow deploys such a version without a person.
 approvals.approvers: Who may approve, as user:<email> or group:<email>.
+approvals.batch_scoring: auto (the default) - a scoring run starts when it is triggered; manual (Pipewright 1.4.3) - the launcher holds every scoring run, whatever triggered it, until a person approves it with `pipewright scoring approve` or a pipewright-gate run (score-approve in `pipewright decisions pending`); rejected or expired runs never start. The platform can require manual (policies.batch_scoring).
+approvals.batch_scoring_hold_hours: How long a held scoring run waits for a decision before it expires (1 to 168, default 24).
 
 features_store: Reserved for a later version; leave it out.
 environments: Per-environment overrides, by environment name. Usually kept in environments/<env>.yaml instead.

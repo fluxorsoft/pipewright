@@ -1326,7 +1326,9 @@
       "properties": {
         "promote_model": { "$ref": "#/$defs/approval_mode" },
         "deploy_model": { "enum": ["manual", "auto", "ci", "on_register"], "description": "manual (the default): someone runs deploy-model --approve; auto: no confirmation; ci (Pipewright 1.2.0): a GitHub gate per new default version that passes its gates, approved by the environment's reviewers; on_register (1.2.0): the decisions workflow deploys such a version without a person" },
-        "approvers": { "type": "array", "items": { "$ref": "#/$defs/principal" } }
+        "approvers": { "type": "array", "items": { "$ref": "#/$defs/principal" } },
+        "batch_scoring": { "enum": ["auto", "manual"], "description": "Pipewright 1.4.3 (FR-130). auto (the default): scoring runs start when they are triggered; manual: the launcher holds each scoring run (schedule, landing file, API, CLI) until a person approves it (`pipewright scoring approve`, or the pipewright-gate workflow)" },
+        "batch_scoring_hold_hours": { "type": "integer", "minimum": 1, "maximum": 168, "description": "Pipewright 1.4.3 (FR-130): how long a held scoring run waits for a decision before it expires (default 24)" }
       }
     },
     "overrides": {

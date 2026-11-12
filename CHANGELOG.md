@@ -36,6 +36,15 @@ before. The guides are [docs/SERVING.md](docs/SERVING.md) (serving observability
   its `components/tune.py` (`plan_trials` returns `json.dumps` of each trial; `tune_trial` takes a string and parses
   it).
 
+Batch scoring that waits for a person (FR-130), off until `approvals.batch_scoring: manual` (or the platform's
+`policies.batch_scoring: manual`). The guide is [docs/BATCH_SCORING.md](docs/BATCH_SCORING.md).
+
+- The launcher holds every scoring run, whatever triggered it (schedule, landing file, API, CLI, workflow) and
+  whatever runs it, sends `run.held`, and submits it only when a person approves (`pipewright scoring approve`, or
+  the pipewright-gate workflow: `decisions pending` lists `score-approve`). `pipewright scoring reject` closes it;
+  a hold expires after `approvals.batch_scoring_hold_hours` (default 24). `run.hold_decided` records who decided
+  and the GitHub reviewers. Runners and the launcher may not decide. Retrain loops are not held.
+
 A/B testing of models (FR-57), off until `ab_test.enabled`: a use case that sets none of it scores and serves exactly
 as in 1.4.2. The guide is [docs/AB_TESTING.md](docs/AB_TESTING.md).
 

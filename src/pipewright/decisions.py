@@ -40,6 +40,29 @@ class Item:
         return {"id": self.id, **asdict(self)}
 
 
+def held_items(usecase: str, env, uc, gcp, launchers: dict) -> list[Item]:
+    """FR-130: scoring runs the launcher holds for a person (approvals.batch_scoring manual). Expired, approved and
+    rejected ones are not asked about."""
+    from datetime import datetime, timezone
+
+    from pipewright.runs import held
+
+    if held.mode(uc.approvals, env.policies) != "manual" or not env.artifacts_bucket:
+        return []
+    now = datetime.now(timezone.utc)
+    own = [u for u in (launchers.get("production"),) if u]
+    out = []
+    for r in held.HeldStore(gcp, env.artifacts_bucket).list(usecase):
+        if held.state(r, now) != "held":
+            continue
+        out.append(Item("score-approve", usecase, env.name, env.name, r["hold_id"],
+                        ["scoring", "approve", "--env", env.name, "--usecase", usecase, "--hold", r["hold_id"],
+                         "--reason", "approved in GitHub (see the run)"],
+                        f"scoring run {r['hold_id']} ({r.get('trigger')}) on {r.get('source_uri')}, held since "
+                        f"{r.get('requested_at')}; expires {r.get('expires_at')}", own))
+    return out
+
+
 def ab_items(usecase: str, env: str, tests: list[dict]) -> list[Item]:
     """FR-57: tests waiting for a person."""
     out = []
@@ -163,6 +186,7 @@ def pending(root, env_name: str, usecases: list[str] | None = None) -> list[Item
         except Exception:  # noqa: BLE001 - no model yet: nothing to approve
             versions = []
         out += pending_for(name, env.name, versions, store.list(name), _launchers(root, env), _deploy(uc, env, gcp))
+        out += held_items(name, env, uc, gcp, _launchers(root, env))       # FR-130
         if (uc.ml or {}).get("ab_test"):                # FR-57
             from pipewright.abtest.store import TestStore
 

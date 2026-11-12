@@ -125,6 +125,7 @@ pipewright retrain show   --env <env> --usecase <usecase>                  # the
 pipewright retrain approve --env <env> --usecase <usecase> --reason "..."  # or decline / snooze --because ... --days N
 pipewright retrain retry --env <env> --usecase <usecase> --case <id> --reason "..."  # after a failed training
 pipewright decisions pending --env <env>                                   # what waits for a person
+pipewright scoring list --env <env> --usecase churn                       # scoring runs held for a person (FR-130)
 pipewright lineage --env <env> --usecase <usecase> --version N             # a version back to its data and release, and its integrity
 pipewright loop pause --env <prod> --usecase <usecase> --reason "..."      # stop automatic retraining (then loop resume)
 pipewright report fleet --out fleet.html                                    # every use case and environment on one page

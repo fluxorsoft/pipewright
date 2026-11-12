@@ -278,6 +278,13 @@
             }
           }
         },
+        "batch_scoring": {
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "description": "Pipewright 1.4.3 (FR-130). manual: every scoring run in this environment waits for a person (approvals.batch_scoring manual for every use case; a use case may not set auto); auto or unset: each use case decides"
+        },
         "deploy_model": {
           "enum": [
             "manual",

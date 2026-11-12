@@ -28,9 +28,9 @@ attributes:pw_ml AND attributes.usecase = "churn"    # one team's use case
 
 | Persona | Who | Events |
 |---|---|---|
-| `ml` | data scientists and ML engineers who own a use case | 70 |
-| `sre` | the team that runs the environments, the launcher and serving | 40 |
-| `governance` | risk, model approvers and auditors | 47 |
+| `ml` | data scientists and ML engineers who own a use case | 72 |
+| `sre` | the team that runs the environments, the launcher and serving | 41 |
+| `governance` | risk, model approvers and auditors | 49 |
 | `product` | what is live and how it performs | 22 |
 | `data` | tables, features and online stores the models read | 9 |
 | `finops` | what costs money and who started it | 4 |
@@ -48,6 +48,8 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 | `run.integrity` | A run was checked against what was approved before it was submitted (refused or warned). | launcher | governance, sre, ml | 1.4.0 | email |
 | `run.failed` | A run ended failed or cancelled (the launcher's tick). | launcher | ml, sre | 1.2.0 | email |
 | `run.unregistered` | A training run the gates approved ended succeeded without registering its model. | launcher | ml, sre, governance | 1.4.3 | email |
+| `run.held` | A scoring run waits for a person (approvals.batch_scoring manual): nothing was submitted. | launcher | governance, ml | 1.4.3 |  |
+| `run.hold_decided` | A person approved (the run was submitted) or rejected a held scoring run, or a decision on one was refused. | launcher | governance, ml, sre | 1.4.3 |  |
 
 ### release: Releases going live, promoted, rolled back
 
@@ -201,4 +203,4 @@ Decision events carry who decided and how it was approved. Email: `monitoring.al
 |---|---|---|---|---|---|
 | `policy.override` | A time-boxed break-glass exception to a platform policy is in force. | launcher | governance, sre | 1.4.1 |  |
 
-87 event types in 15 families.
+89 event types in 15 families.

@@ -183,6 +183,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     for key, minimum in env.policies.items():
         if key in _APPROVAL_DEFAULTS and minimum == "manual" and approvals.get(key) in ("auto", "on_register"):
             problems.append(f"approvals.{key}: {approvals.get(key)} is not allowed in {env.name} (platform policy)")
+        if key == "batch_scoring" and minimum == "manual" and approvals.get(key) == "auto":     # 1.4.3 (FR-130)
+            problems.append(f"approvals.batch_scoring: auto is not allowed in {env.name}: every scoring run there "
+                            "waits for a person (platform policy batch_scoring manual)")
         if key == "deploy_model" and minimum == "ci" and approvals.get(key) != "ci":     # Pipewright 1.2.0 (FR-63)
             problems.append(f"approvals.deploy_model: {env.name} deploys models only through a GitHub-approved gate "
                             "(platform policy ci): set approvals.deploy_model: ci")
