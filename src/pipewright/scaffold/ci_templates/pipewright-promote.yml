@@ -26,6 +26,10 @@ on:
         description: "Also make the promoted model the destination's champion"
         type: boolean
         default: false
+      accept_template_change:
+        description: "Promote although the destination compiles the pipelines differently (an override changes their shape; recorded)"
+        type: boolean
+        default: false
 
 # bash -eo pipefail: a failing pipewright command fails its step even when its output is piped to tee.
 defaults:
@@ -73,7 +77,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           trap 'echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"' EXIT
           pipewright promote --from "$SOURCE" --to "$ENV" --usecase "$UC" ${RELEASE:+--release "$RELEASE"} \
-              ${{ inputs.approve_model && '--approve' || '' }} 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+              ${{ inputs.approve_model && '--approve' || '' }}               ${{ inputs.accept_template_change && '--accept-template-change' || '' }} 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           # A use case that retrains here (model.promotion: retrain) has no model until it trains.
           pipewright model list --env "$ENV" --usecase "$UC" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
       - name: Schedules

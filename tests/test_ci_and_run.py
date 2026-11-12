@@ -143,3 +143,12 @@ def test_pr_unit_tests_install_the_components_requirements():
     step = t.split("- name: Unit tests", 1)[1].split("- name:", 1)[0]
     assert "components/requirements.txt" in step
     assert step.index("pip install") < step.rindex('pipewright test --env "$ENV"')
+
+
+def test_promote_workflow_can_accept_a_template_change():
+    # GA QA (found live): a test override that changes a pipeline's shape made promotion from CI impossible
+    from pathlib import Path
+
+    t = (Path(__file__).parents[1] / "src/pipewright/scaffold/ci_templates/pipewright-promote.yml").read_text(
+        encoding="utf-8")
+    assert "accept_template_change:" in t and "--accept-template-change" in t
