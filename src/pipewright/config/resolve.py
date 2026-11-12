@@ -388,7 +388,10 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
         if endpoints.is_private(env, meta["name"]):
             extra_warnings.append(f"model.serving: {meta['name']}'s endpoint is private in {env.name} (created by "
                                   f"the platform's Terraform): {prices.private_endpoint_cost()}; callers must be "
-                                  "inside the network")
+                                  "inside the network"
+                                  + ("; capture on a private endpoint is set when it is created: ask the platform "
+                                     f"team for endpoints.{meta['name']}.capture.sample_rate in its Terraform"
+                                     if (model["serving"].get("capture") or {}).get("enabled") else ""))
     # Two 1.2.0 fixes on the container path live in the team's own components, copied from the churn example before
     # 1.2.0 (found live): validate says when the setting they serve is on but no component carries the fix.
     if not bqml_spec and components_dir.is_dir():

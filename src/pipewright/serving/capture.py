@@ -67,6 +67,19 @@ def sync_endpoint(uc, env, gcp, endpoint: str, log=print) -> str:
     same = (bool(have.get("enabled")) == want["enabled"] and (not want["enabled"] or (
         abs(float(have.get("samplingRate") or 0) - want["samplingRate"]) < 1e-9
         and (have.get("bigqueryDestination") or {}).get("outputUri") == want["bigqueryDestination"]["outputUri"])))
+    body = r.body or {}
+    fixed = bool((body.get("privateServiceConnectConfig") or {}).get("enablePrivateServiceConnect")
+                 or body.get("dedicatedEndpointEnabled"))
+    if not same and fixed:
+        # GA QA (found live): Agent Platform sets a private or dedicated endpoint's logging only when it is created
+        uc_name = uc.name
+        raise ConfigError(f"capture on {endpoint}: a private (or dedicated) endpoint takes request-response logging "
+                          "only when it is created. The platform team sets it in Terraform: serving.yaml "
+                          f"endpoints.{uc_name}.capture.sample_rate: {want.get('samplingRate', 0):g} (the starter; "
+                          "Enterprise: serving.endpoints), which recreates the endpoint (undeploy first)"
+                          if want["enabled"] else
+                          f"capture off on {endpoint}: a private endpoint's logging is set when it is created; remove "
+                          f"endpoints.{uc_name}.capture in the platform's Terraform")
     if same:
         result = "unchanged"
     else:

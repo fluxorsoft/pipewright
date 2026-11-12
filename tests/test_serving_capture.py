@@ -137,3 +137,14 @@ def test_agent_platform_coverage_says_when_capture_cannot_be_read():
         ok=False, status=403, body={"error": {"message": "Access Denied: Table p:d.t"}}))
     with pytest.raises(RuntimeError, match="not readable: HTTP 403 Access Denied"):
         coverage.agent_platform(denied, "p", "r", "1", "p.d.t", 1.0)
+
+
+def test_a_private_endpoint_says_where_its_capture_is_set():
+    # GA QA (found live): Agent Platform refuses to change a PSC endpoint's logging after it is created
+    psc = {"privateServiceConnectConfig": {"enablePrivateServiceConnect": True}}
+    g = G(psc)
+    with pytest.raises(ConfigError, match="endpoints.churn.capture.sample_rate: 0.05"):
+        capture.sync_endpoint(uc(), ENV, g, "e", log=lambda m: None)
+    assert not g.patched
+    created_with_it = {**psc, "predictRequestResponseLoggingConfig": capture.wanted_logging(uc(), ENV)}
+    assert capture.sync_endpoint(uc(), ENV, G(created_with_it), "e", log=lambda m: None) == "unchanged"
