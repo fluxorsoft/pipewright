@@ -111,6 +111,11 @@ def conditions(t: dict, health: dict, latency: str = "p95") -> list[dict]:
         out.append({"signal": "scaling", "severity": "warning", "threshold": minutes, "kind": "promql",
                     "condition": _promql(f"kube_deployment_spec_replicas{{{dep}}} - "
                                          f"kube_deployment_status_replicas_available{{{dep}}} > 0", minutes)})
+    elif t.get("pool"):
+        # GA QA (found live): a model on a shared pool has no replicas of its own (Agent Platform reports the pool's
+        # machines at the pool, not per deployed model), so replicas and scaling policies would never see data.
+        # Errors and latency are the model's and stay; the pool's capacity is the platform team's.
+        pass
     else:
         if minimum > 0 and not t.get("scale_to_zero"):
             out.append({"signal": "replicas", "severity": "critical", "threshold": minimum, "kind": "threshold",

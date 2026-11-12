@@ -209,3 +209,15 @@ def test_an_ab_treatment_on_agent_platform_is_watched_as_its_own_arm():
     finally:
         deploy.find_endpoint = real
     assert [(t["version"], t.get("arm")) for t in alone] == [("1", None)]           # no test: no arm, as before
+
+
+def test_a_model_on_a_shared_pool_gets_errors_and_latency_only():
+    # GA QA (found live): Agent Platform reports a pool's machines at the pool, never per deployed model
+    from pipewright.monitoring import serving_config
+    from pipewright.serving import health
+
+    h = serving_config.HEALTH_DEFAULTS
+    pooled = health.conditions({"target": "vertex", "endpoint_id": "1", "deployed_model_id": "2", "pool": True}, h)
+    assert {c["signal"] for c in pooled} == {"errors", "latency"}
+    own = health.conditions({"target": "vertex", "endpoint_id": "1", "deployed_model_id": "2", "pool": False}, h)
+    assert {"replicas", "scaling"} <= {c["signal"] for c in own}
