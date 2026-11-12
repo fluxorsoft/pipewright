@@ -11,6 +11,7 @@ Messages name records, files, digests, metrics and gates: never a row, a feature
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -544,6 +545,9 @@ def who_wrote(gcp, env: Environment, record: str, after: str) -> dict:
         "note": "no Data Access audit entry (Cloud Storage data access logs off, or kept elsewhere)"}
 
 
+AUDIT_LAG = datetime.timedelta(minutes=10)   # how long Cloud Audit Logs may take to show an approval's entry
+
+
 def approval_audit(gcp, env: Environment, model: str, at: str, by: str | None, promoted: bool = False) -> dict:
     """The Admin Activity entry (always on, cannot be turned off) for the change an approval made: the `default`
     alias moved (MergeVersionAliases) or a first version's approval label (UpdateModel). Compares the principal with
@@ -794,7 +798,13 @@ def _audit_problem(gcp, env: Environment, model: str, version: str, approval: di
                 days=audit_kept_days(env))
         except ValueError:
             within = False
-        if within:
+        fresh = within and datetime.datetime.now(datetime.timezone.utc) - at < AUDIT_LAG
+        if fresh:
+            # 1.4.3 GA QA (live): Cloud Audit Logs showed the approval's entry about two minutes after it, and a
+            # scheduled run in between was refused as "may not be genuine". The integrity watch checks again later.
+            check.notes.append(f"the approval of v{version} ({approval.get('at')}) is too recent for its Cloud Audit "
+                               "Logs entry to show (they can take a few minutes): not cross-checked yet")
+        elif within:
             check.problems.append(f"the approval of v{version} ({approval.get('at')}, by {approval.get('by')}) has "
                                   "no Admin Activity entry in Cloud Audit Logs: the event may not be genuine")
         else:

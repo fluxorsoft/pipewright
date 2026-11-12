@@ -569,7 +569,8 @@ def test_deploy_and_promote_cross_check_the_approval_with_cloud_audit_logs(monke
     before 1.3.1) passed the checks that gate deploy and promote; only lineage flagged it."""
     import datetime
 
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    fmt = "%Y-%m-%d %H:%M:%S"
+    now = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=20)).strftime(fmt)
     approval = {"at": now, "by": "lead@example.com", "version": "2"}
     env = SimpleNamespace(name="prod", project="p", policies={})
     monkeypatch.setattr(integrity, "approval_events", lambda *a: [approval])
@@ -592,6 +593,10 @@ def test_deploy_and_promote_cross_check_the_approval_with_cloud_audit_logs(monke
     assert not old.problems and "older than Cloud Audit Logs keep" in old.notes[0]
     approval["at"] = now
     assert not integrity.verify(None, env, "churn", "2", None, None).problems     # no model given: as before
+    # 1.4.3 GA QA (live): an approval minutes old may not show in Cloud Audit Logs yet: a note, not a refusal
+    approval["at"] = datetime.datetime.now(datetime.timezone.utc).strftime(fmt)
+    fresh = audited("no entry", note="x")
+    assert not fresh.problems and "too recent" in fresh.notes[0]
 
 
 def test_lineage_calls_a_candidate_nobody_approved_not_approved_yet(monkeypatch):
