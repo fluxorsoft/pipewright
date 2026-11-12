@@ -132,3 +132,14 @@ def test_self_hosted_runners_and_optional_federation():
     assert ".github/actionlint.yaml" not in ci.render(["dev"])            # GitHub-hosted: no label config
     with pytest.raises(ConfigError, match="runner labels"):
         ci.render(["dev"], ["self hosted"])
+
+
+def test_pr_unit_tests_install_the_components_requirements():
+    # GA QA: the book's CI fixed this only in its repository; `ci init` 1.4.3 dropped it again (lapse-risk: no numpy)
+    from pathlib import Path
+
+    t = (Path(__file__).parents[1] / "src/pipewright/scaffold/ci_templates/pipewright-pr.yml").read_text(
+        encoding="utf-8")
+    step = t.split("- name: Unit tests", 1)[1].split("- name:", 1)[0]
+    assert "components/requirements.txt" in step
+    assert step.index("pip install") < step.rindex('pipewright test --env "$ENV"')
