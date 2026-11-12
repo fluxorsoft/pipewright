@@ -154,6 +154,12 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
             model["promotion"] = "retrain"
     model["serving"] = deep_merge(_SERVING_DEFAULTS, eff["model"].get("serving", {}))
     serving = model["serving"]
+    if "machine" in serving and serving["machine"] is None:
+        # GA QA: null unsets the use case's machine in one environment, to join a pool there
+        if serving.get("pool"):
+            serving.pop("machine")
+        else:
+            problems.append("model.serving.machine: null only with model.serving.pool (the pool sets the machines)")
     if (bqml_spec and bqml_spec.get("transform") and model["promotion"] == "model" and env.promotion_from
             and serving["enabled"]):
         # Found live in phase 6 (ent-prod): a version promoted by files is the exported model, its TRANSFORM a

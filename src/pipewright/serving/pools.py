@@ -138,7 +138,9 @@ def resolve(name: str, explicit: dict, env, tenant: str, usecase: str, problems:
     if pool.get("tenant") != tenant:
         problems.append(f"{where} {name}: the pool belongs to tenant {pool.get('tenant')!r}, not {tenant!r} "
                         "(pools are per tenant)")
-    sized = [k for k in ("machine", "replicas", "accelerator", "scale_to_zero") if k in (explicit or {})]
+    # A key set to null (an environment unsetting the use case's machine to join the pool) is not set (GA QA)
+    sized = [k for k in ("machine", "replicas", "accelerator", "scale_to_zero")
+             if (explicit or {}).get(k) is not None]
     if sized:
         problems.append(f"{where}: the pool sets the machines; remove model.serving.{', model.serving.'.join(sized)}")
     if (explicit or {}).get("target", "vertex") != "vertex":

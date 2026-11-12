@@ -1094,7 +1094,7 @@
         "enabled": { "type": "boolean" },
         "target": { "enum": ["vertex", "kserve"] },
         "features": { "enum": ["request", "online"], "description": "online: the endpoint takes entity IDs and reads the features from the tenant's online store (Pipewright 1.1); request (the default): callers send the features" },
-        "machine": { "type": "string", "minLength": 1 },
+        "machine": { "type": ["string", "null"], "minLength": 1, "description": "null in an environment's file: unset (GA QA: to join model.serving.pool there when the use case sets a machine)" },
         "replicas": {
           "type": "object",
           "additionalProperties": false,

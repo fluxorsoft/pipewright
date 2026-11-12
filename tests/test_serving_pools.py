@@ -233,3 +233,13 @@ def test_a_pool_models_settings_stay_in_its_files():
     assert 'and not serving.get("pool")' in handler and '.get("mode") == "gateway"' in handler
     train = open(path.replace("register.py", "train.py"), encoding="utf-8").read()
     assert 'serving["pool"] = ml_config["serving"]["pool"]' in train
+
+
+def test_an_environment_unsets_the_use_cases_machine_to_join_a_pool(repo):
+    # GA QA (found live): a use case that sets a machine (the churn example does) could not join a pool in one
+    # environment: the override could not remove the machine
+    repo.usecase["spec"].setdefault("model", {})["serving"] = {"enabled": True, "machine": "n1-standard-4"}
+    uc = setup(repo, {"pool": "shared", "machine": None}, {"shared": pool()})()
+    assert uc.model["serving"]["pool"] == "shared" and "machine" not in uc.model["serving"]
+    with pytest.raises(ConfigError, match="null only with model.serving.pool"):
+        setup(repo, {"machine": None})()
