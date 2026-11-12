@@ -31,3 +31,6 @@ data:
 
 features:
   exclude: [customer_id]                 # every other contract column except the label and time is a feature
+
+data_protection:
+  personal_data_columns: [customer_id]   # never a feature; `pipewright data erase` finds its rows
