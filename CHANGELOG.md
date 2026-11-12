@@ -151,6 +151,9 @@ From the FR-57 QA round:
   is insufficient data, not a 404 crash.
 - An approval younger than ten minutes whose Cloud Audit Logs entry has not appeared yet is a note, not a refusal:
   scheduled and API runs right after an approval were refused as "may not be genuine" for several minutes.
+- The starter: promotion readers may run BigQuery jobs and read the evidence dataset, so `promote` from CI can show
+  the source version's approval; `serving_policy` (off by default) sets the platform's serving rules (capture limits,
+  health required, scale to zero refused), which the starter could not set.
 - `doctor`: a source in another project the checking identity may not read (the closed loop's production data, from
   CI) is a warning naming the runner. A missing online store database says to run the platform's online setup. A
   changed KServe serving copy says `deploy-model` rewrites it.
