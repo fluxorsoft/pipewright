@@ -63,7 +63,7 @@ fails when the pack is stale, and the pull request workflow from `ci init` runs 
 ## 3. Connect the agent
 
 ```bash
-pip install "pipewright-mlops[gcp,mcp]==1.4.2"
+pip install "pipewright-mlops[gcp,mcp]==1.4.3"
 pipewright mcp --env test --tenant retail --print-config
 ```
 
@@ -78,9 +78,18 @@ agent account (or as you, if the manifest names none, and it says so).
 | `inspect_table` | schema, row count, partitioning; personal columns flagged; descriptions marked untrusted |
 | `list_features` | Feature Store feature groups (features, online views) and the team's feature tables: definitions only |
 | `status`, `runs`, `model_list`, `monitor_status`, `retrain_list`, `lineage` | what is live, the latest runs (failed steps and their value-free first error line; step logs are not read), and how models are doing |
+| `ab_status` | 1.4.3: a use case's A/B test: state, arms, allocation, the newest analysis per arm (results per value of a column are withheld), the decision and the next step. Read only: a person starts, changes and decides a test |
+| `serving_health` | 1.4.3: how a served use case is watched: health, capture and online monitoring as resolved, the platform's serving rules, the health alert policies in force and rollback proposals waiting for a person |
+| `features_check` | 1.4.3: the feature contract against the live feature sources (definitions and schemas), as `features contract --check` |
 | `bootstrap_usecase` | drafts a use case from an entity table and chosen feature sources (schemas only) |
 | `review_bundle` | the pull request description for the current branch |
 | `sample_rows`, `profile` | always refuse: rows never reach an agent; aggregates are not offered |
+
+There is no integrity tool: `pipewright integrity check` reads model files and audit logs, which an agent identity
+must not read. People and CI run it.
+
+The agent account reads `ab-tests/` and `cases/` in the artifacts bucket from the 1.4.3 platform files (starter and
+Enterprise); with older platform files `ab_status` and `serving_health` say which grant is missing.
 
 Every call is logged in `.pipewright/mcp-log.jsonl`: transparency for you, not evidence (Cloud Audit Logs on the agent
 account are the record).
@@ -96,7 +105,14 @@ account are the record).
 - A platform can tighten what reaches an agent in the manifest's `ai.data_classes`: `offline: true` (no tool calls
   Google Cloud; agents work from the manifest, the repository and the context pack) and `deny_names` (table and
   column names withheld, as patterns such as `*ssn*`).
-- Agents never merge, release, approve or deploy: their identity cannot, and the playbooks say so.
+- Since 1.4.3 the context pack also states the environment's rules for what 1.4 added: integrity, registration
+  through the launcher, `policies.ab_test`, `policies.serving` (capture limits, health required, scale to zero), the
+  online store and the lookup gateway, and how a served model is watched; playbooks cover preparing an A/B test,
+  watching a served model, serving with online features and a changed feature source. Judgement checks warn about an
+  A/B test without a business guardrail, shorter than a week, giving the treatment more than half, or with nobody
+  named to decide, and about capturing more than half of live calls.
+- Agents never merge, release, approve or deploy: their identity cannot, and the playbooks say so. An agent prepares
+  an A/B test; a person runs `ab start`, `ab set`, `ab decide` and `ab conclude`.
 
 ## 5. Review
 
@@ -104,7 +120,9 @@ account are the record).
 pipewright review --env test --base main > PR.md
 ```
 
-What a release would change in Google Cloud, the settings that moved, the checks and their warnings, the feature
+What a release would change in Google Cloud (since 1.4.3 also an A/B test and who decides it, serving health,
+capture, online monitoring, a pool move, scale to zero and a new feature contract), the settings that moved (including
+`model.serving`, `ab_test` and `feature_contract`), the checks and their warnings, the feature
 sources, and a section for the author's judgement calls. The `ci init` pull request workflow writes it to the run's
 summary.
 

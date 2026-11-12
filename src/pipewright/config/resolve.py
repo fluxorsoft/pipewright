@@ -299,6 +299,7 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
 
     judged_warnings, judged_problems = judgement.check(ml, env, tenant)
     judged_warnings += judgement.serving_image_by_tag(directory / ((eff.get("components") or {}).get("dir") or ""))
+    judged_warnings += judgement.serving_and_tests(ml, model)
     # BigQuery ML runs Pipewright's own steps, which register through the launcher themselves (GA QA: the scan read
     # Pipewright's bqml_runtime.py and warned the team of a 403 that cannot happen)
     if (env.policies or {}).get("registration") == "launcher" and not bqml_spec:

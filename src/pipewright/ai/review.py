@@ -17,7 +17,8 @@ from pathlib import Path
 
 WATCHED = ("data.contract", "data.label", "data.split", "data.features_from", "features", "data_protection",
            "evaluation.gates", "evaluation.champion", "evaluation.slice_gates", "evaluation.fairness",
-           "monitoring", "retraining", "inference.output_table")
+           "monitoring", "retraining", "inference.output_table", "ab_test", "feature_contract")
+MODEL_WATCHED = ("serving",)                # FR-129: model.serving (capture, pool, lookup, scale to zero) moves too
 
 
 def _git(root: Path, *args: str) -> str:
@@ -66,13 +67,13 @@ def _section(ml: dict, dotted: str):
     return node
 
 
-def _moves(old_ml: dict | None, new_ml: dict) -> list[str]:
+def _moves(old_ml: dict | None, new_ml: dict, watched: tuple = WATCHED, prefix: str = "") -> list[str]:
     lines = []
-    for key in WATCHED:
+    for key in watched:
         old, new = (_section(old_ml, key) if old_ml else None), _section(new_ml, key)
         if old == new:
             continue
-        fo, fn = _flat(old, key), _flat(new, key)
+        fo, fn = _flat(old, prefix + key), _flat(new, prefix + key)
         for k in sorted(set(fo) | set(fn)):
             if fo.get(k) != fn.get(k):
                 a, b = fo.get(k), fn.get(k)
@@ -101,7 +102,54 @@ def _cloud_changes(old, new) -> list[str]:
     serving_old = ((old.model or {}).get("serving") or {}).get("enabled") if old else False
     if ((new.model or {}).get("serving") or {}).get("enabled") and not serving_old:
         out.append("+ online serving (an endpoint, once `deploy-model` is approved)")
+    out += _changes_since_14(old, new)
     out.append("= no IAM, network or project changes (Pipewright never makes them)")
+    return out
+
+
+def _on(section) -> bool:
+    return bool(isinstance(section, dict) and section.get("enabled"))
+
+
+def _changes_since_14(old, new) -> list[str]:
+    """FR-129: what the 1.4 settings would change, so a reviewer sees an A/B test, serving health, capture, a pool or
+    a new feature contract as a change to production and not as a few lines of YAML."""
+    out = []
+    o_ml, n_ml = (old.ml if old else {}), new.ml
+    o_srv = ((old.model or {}).get("serving") or {}) if old else {}
+    n_srv = (new.model or {}).get("serving") or {}
+    o_ab, n_ab = o_ml.get("ab_test") or {}, n_ml.get("ab_test") or {}
+    if _on(n_ab) and (not _on(o_ab) or o_ab.get("name") != n_ab.get("name")):
+        trt = ((n_ab.get("arms") or {}).get("treatment") or {}).get("model_version", "?")
+        bp = (n_ab.get("allocation") or {}).get("treatment_bp")
+        out.append(f"+ A/B test `{n_ab.get('name')}` ({n_ab.get('mode', 'ab')}): treatment v{trt}"
+                   + (f" for {bp / 100:g}% of `{n_ab.get('unit')}`" if bp else "") + "; a person starts it "
+                   "(`pipewright ab start`, a deploy of the treatment for online use cases) and approver groups "
+                   f"{', '.join(((n_ab.get('decision') or {}).get('approvals') or {}).get('required') or []) or '-'} "
+                   "decide it")
+    elif _on(o_ab) and not _on(n_ab):
+        out.append(f"- A/B test `{o_ab.get('name')}` switched off (a running test is stopped by a person: `ab stop`)")
+    o_mon, n_mon = o_ml.get("monitoring") or {}, n_ml.get("monitoring") or {}
+    if _on(n_mon.get("health")) and not _on(o_mon.get("health")):
+        out.append("+ serving health: alert policies per deployed version (errors, latency, replicas, scale-ups), "
+                   "after the merge with `pipewright alerts sync` or the next `deploy-model`")
+    cap_o, cap_n = o_srv.get("capture") or {}, n_srv.get("capture") or {}
+    if _on(cap_n) and (not _on(cap_o) or cap_o != cap_n):
+        out.append(f"+ request capture into `{new.name}_online_log`: a sample of {cap_n.get('sample_rate', '?')} of "
+                   f"live calls, kept {cap_n.get('retention_days', 30)} days (requests hold features of real people)")
+    if _on(n_mon.get("online")) and not _on(o_mon.get("online")):
+        out.append("+ online monitoring: the use case's monitor steps on the live window, on "
+                   f"`{(n_mon.get('online') or {}).get('schedule', '?')}`")
+    if n_srv.get("pool") != o_srv.get("pool") and (n_srv.get("pool") or o_srv.get("pool")):
+        out.append(f"~ serving moves {'to pool `' + n_srv['pool'] + '`' if n_srv.get('pool') else 'off its pool'}: "
+                   "the next deploy changes the pool, which restarts its machines (its neighbours are told)")
+    if n_srv.get("scale_to_zero") and not o_srv.get("scale_to_zero"):
+        out.append("+ scale to zero: calls during a scale-up are refused and dropped (2 to 3 minutes measured)")
+    fc_o, fc_n = (o_ml.get("feature_contract") or {}), (n_ml.get("feature_contract") or {})
+    if fc_n and fc_n.get("version") != fc_o.get("version"):
+        out.append(f"~ feature contract {fc_o.get('version', 'none')} -> {fc_n.get('version')}: the next training "
+                   "reads the new definitions; the served model keeps its approved ones until a new version is "
+                   "approved")
     return out
 
 
@@ -156,7 +204,8 @@ def bundle(root: Path, env, base: str = "main") -> str:
                                                                else ", no warnings")]
         L += [f"  - {w}" for w in new.warnings]
         L += ["", f"**Features:** {_features(new)}.", ""]
-        moves = _moves(old.ml if old else None, new.ml)
+        moves = _moves(old.ml if old else None, new.ml) + _moves(old.model if old else None, new.model or {},
+                                                                  MODEL_WATCHED, "model.")
         if moves and old is not None:
             L += ["**Settings that moved**", "", *moves, ""]
     if base_root:

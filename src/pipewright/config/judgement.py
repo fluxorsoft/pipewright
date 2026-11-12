@@ -151,3 +151,31 @@ def _gate_minimums(ml: dict, env, task: str) -> list[str]:
                 out.append(f"evaluation.gates: {env.name} requires a gate on {metric} with {want} "
                            f"(policies.evaluation.min_gates); this use case has {got}")
     return out
+
+
+def serving_and_tests(ml: dict, model: dict) -> list[str]:
+    """FR-129 (1.4.3): A/B tests and serving settings that validate and still mislead. Warnings only: the platform's
+    own rules (policies.ab_test, policies.serving) refuse in validate as before."""
+    out: list[str] = []
+    t = ml.get("ab_test") or {}
+    if t.get("enabled") and t.get("mode", "ab") == "ab":
+        if not ((t.get("guardrails") or {}).get("business")):
+            out.append("ab_test: no business guardrail (guardrails.business): a treatment that wins its metric by "
+                       "doing harm elsewhere (complaints, refunds, unsubscribes) would still win. Declare at least one "
+                       "(judgement check)")
+        days = (t.get("duration") or {}).get("min_days", 14)
+        if days < 7:
+            out.append(f"ab_test.duration.min_days is {days}: shorter than a weekly cycle, so the result can be a "
+                       "weekday effect. Run at least 7 days (judgement check)")
+        bp = (t.get("allocation") or {}).get("treatment_bp", 1000)
+        if bp > 5000:
+            out.append(f"ab_test.allocation.treatment_bp is {bp}: most units get an unproven model. Tests usually "
+                       "give the treatment 50% or less (judgement check)")
+        if not (((t.get("decision") or {}).get("approvals") or {}).get("required")):
+            out.append("ab_test.decision.approvals.required is empty: name the approver groups who decide the test "
+                       "before it starts, not after the result (judgement check)")
+    cap = ((model or {}).get("serving") or {}).get("capture") or {}
+    if cap.get("enabled") and float(cap.get("sample_rate") or 0) > 0.5:
+        out.append(f"model.serving.capture.sample_rate is {cap['sample_rate']}: capture keeps features of real people, "
+                   "and drift needs a sample, not every call (0.01 to 0.1 is usually enough) (judgement check)")
+    return out

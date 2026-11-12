@@ -75,6 +75,59 @@ def _how_to_connect(env) -> list[str]:
             "Never run commands that print table data."]
 
 
+def _rules_since_14(pol: dict, env) -> list[str]:
+    """FR-129: the platform rules 1.4 added, as an agent must respect them when it drafts (validate refuses the same,
+    later and with less context)."""
+    L = []
+    integ = pol.get("integrity") or {}
+    L.append(f"- What runs is what was approved (integrity mode `{integ.get('mode', 'refuse')}`): never change a "
+             "model's files, its default version or an approval by hand. People and CI check with "
+             "`pipewright integrity check`; an agent has no tool for it, because it reads model files and audit logs.")
+    if pol.get("registration") == "launcher":
+        L.append("- Registration goes through the launcher (policies.registration: launcher): a component never "
+                 "writes the model registry itself (no `Model.upload`, `upload_model` or `mergeVersionAliases`); the "
+                 "register step calls `pipewright_runtime.register_version`, as in the churn example's "
+                 "`components/register.py`.")
+    ab = pol.get("ab_test") or {}
+    if ab.get("allowed") is False:
+        L.append("- A/B tests are not allowed here (policies.ab_test.allowed: false).")
+    elif ab:
+        parts = [f"the treatment at most {ab['max_treatment_bp']} basis points" if ab.get("max_treatment_bp") else "",
+                 f"`duration.min_days` at least {ab['min_days']}" if ab.get("min_days") else "",
+                 ("business guardrails " + ", ".join(f"`{g}`" for g in ab["required_guardrails"]))
+                 if ab.get("required_guardrails") else "",
+                 ("decided by " + ", ".join(f"`{g}`" for g in ab["required_approvers"]))
+                 if ab.get("required_approvers") else "",
+                 f"another test on the same unit: {ab['overlap']}" if ab.get("overlap") else ""]
+        L.append("- A/B tests (`config/ab_test.yaml`): " + "; ".join(p for p in parts if p) + ". Starting, changing "
+                 "and deciding a test is a person's command; read a test with the `ab_status` tool.")
+    else:
+        L.append("- A/B tests (`config/ab_test.yaml`) are defined in the use case and started by a person "
+                 "(`pipewright ab start`); read a test with the `ab_status` tool.")
+    srv = pol.get("serving") or {}
+    cap, hl = srv.get("capture") or {}, srv.get("health") or {}
+    if cap.get("allowed") is False:
+        L.append("- Request capture is not allowed here (policies.serving.capture.allowed: false).")
+    elif cap:
+        L.append("- Request capture: " + ", ".join(x for x in (
+            f"sample_rate at most {cap['max_sample_rate']}" if cap.get("max_sample_rate") else "",
+            f"retention_days at most {cap['retention_days']}" if cap.get("retention_days") else "") if x) + ".")
+    if hl.get("required"):
+        L.append("- Every use case that serves online sets `monitoring.health` (policies.serving.health.required).")
+    if srv.get("scale_to_zero") == "refused":
+        L.append("- `model.serving.scale_to_zero` is refused here (calls are dropped while it scales up).")
+    online = {t: (s.get("features") or {}).get("online_store") for t, s in (env.tenants or {}).items()
+              if (s.get("features") or {}).get("online_store")}
+    if online:
+        L.append("- Online features come from the team's online store (listed under Teams), defined by the same "
+                 "feature tables as training; where callers cannot reach the store, the lookup gateway "
+                 "(`lookup.mode: gateway`) reads the features. Never make the model fetch rows itself.")
+    L.append("- A served model is watched with `monitoring.health` (errors, latency, replicas) and, with capture, "
+             "`monitoring.online` (your monitor steps on live traffic); read a use case's with the `serving_health` "
+             "tool. Every finding is an event: `pipewright events --persona ml` prints the team's subscription filter.")
+    return L
+
+
 def render(root: Path, env, playbooks: list[str]) -> tuple[str, str]:
     """(APP_CONTEXT.md text, fingerprint)."""
     from pipewright.ai import identity
@@ -108,6 +161,7 @@ def render(root: Path, env, playbooks: list[str]) -> tuple[str, str]:
         L.append(f"- A gate on `{metric}`: {rule if isinstance(rule, dict) else {'min': rule}} at least.")
     if (env.features or {}).get("required"):
         L.append("- Every model feature must come from `data.features_from` (features.required).")
+    L += _rules_since_14(pol, env)
     L += ["- Rows ordered in time use `data.split: { strategy: time, time_column: <cut-off> }`.",
           "- Personal data (`data_protection.personal_data_columns`) is never a feature.",
           "- Dates are not features; derive durations in a feature table.",

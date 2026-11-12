@@ -92,6 +92,26 @@ From the FR-57 QA round:
   - `ab status` names the next step when approver groups disagree: stop the test, which keeps the control.
   - The starter takes `policies.ab_test` in `terraform.tfvars`.
 
+AI build assistance for what 1.4 added (FR-129), additive: coding agents knew the 1.3.0 platform only. The guide is
+[docs/AI_BUILD.md](docs/AI_BUILD.md).
+
+- Tools, read only and metadata only as before: `ab_status` (a test's state, arms, allocation, the newest analysis per
+  arm, the decision and the next step; results per value of a column withheld), `serving_health` (health, capture and
+  online monitoring as resolved, the platform's serving rules, the health policies in force, rollback proposals) and
+  `features_check` (the feature contract against the live sources). No integrity tool: it reads model files and audit
+  logs.
+- The context pack states the environment's 1.4 rules (integrity, registration through the launcher,
+  `policies.ab_test`, `policies.serving`, the online store and the gateway, how a served model is watched and the
+  events to subscribe to); four playbooks: prepare an A/B test, watch a served model, serve with online features, a
+  feature source changed.
+- The review bundle lists an A/B test and who decides it, serving health, capture, online monitoring, a pool move,
+  scale to zero and a new feature contract as changes, and the settings that moved under `model.serving`, `ab_test`
+  and `feature_contract`.
+- Judgement checks (warnings): an A/B test with no business guardrail, shorter than a week, giving the treatment more
+  than half or with nobody named to decide; capture of more than half of live calls.
+- The starter and Enterprise let the agent identity read `ab-tests/` and `cases/` in the artifacts bucket (and, in
+  the starter, list object names), so the tools can read tests and proposals.
+
 ### Fixed (found in the 1.4.3 GA QA, live)
 
 - Registration through the launcher: only the use case's own model name and a serving image from Google's prebuilt

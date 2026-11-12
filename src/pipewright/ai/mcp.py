@@ -356,6 +356,119 @@ class Server:
         self.log("lineage", "metadata", "ok", usecase=usecase)
         return self._cli("lineage", "--usecase", usecase, *(["--version", version] if version else []), "--json")
 
+    # -- tools: what 1.4 added (FR-129) ------------------------------------------------------------------------
+
+    def _usecase(self, usecase: str):
+        from pipewright.config import resolve_usecase
+        from pipewright.config.document import discover_usecases
+        from pipewright.errors import ConfigError
+
+        found = discover_usecases(self.root)
+        if usecase not in found:
+            raise ConfigError(f"no use case {usecase} in this repository (found: {', '.join(sorted(found)) or 'none'})")
+        return resolve_usecase(found[usecase], self.env)
+
+    def ab_status(self, usecase: str, name: str | None = None) -> dict:
+        """A use case's A/B test (the active one, or `name`): state, arms, allocation history, the newest analysis per
+        arm (never per unit, never per value of a column), the decision and its approver groups, and the next step.
+        Read only: starting, changing and deciding a test are a person's commands."""
+        from pipewright.abtest.decide import next_step
+        from pipewright.abtest.store import TestStore
+        from pipewright.errors import ConfigError
+
+        store = TestStore(self.gcp(), self.env.artifacts_bucket)
+        try:
+            t = store.get(usecase, name) if name else store.current(usecase)
+            past = [] if t else [{"name": p.get("name"), "state": p.get("state"), "started_at": p.get("started_at"),
+                                  "winner": (p.get("decision") or {}).get("winner")}
+                                 for p in store.list(usecase)[:5]]
+        except ConfigError as e:
+            self.log("ab_status", "metadata", "error", usecase=usecase)
+            return {"ok": False, "error": str(e).splitlines()[0],
+                    "hint": "an agent identity reads ab-tests/ in the artifacts bucket with the platform files of "
+                            "Pipewright 1.4.3 or later; ask the platform team to apply them"}
+        if not t:
+            self.log("ab_status", "metadata", "ok", usecase=usecase, found=0)
+            return {"ok": True, "usecase": usecase, "active": None, "recent": past,
+                    "note": "no active test. A test is defined in config/ab_test.yaml, reviewed, released, and started "
+                            "by a person (pipewright ab start), never by an agent"}
+        a = t.get("analysis") or {}
+        analysis = {k: a[k] for k in ("at", "status", "blocked", "decision_reasons", "exposed", "matured", "shares",
+                                      "moved", "switched") if k in a}
+        if a.get("primary"):
+            analysis["primary"] = {k: a["primary"][k] for k in ("name", "control", "treatment", "diff", "ci",
+                                                                "relative", "p", "p_sequential", "note")
+                                   if k in a["primary"]}
+        if a.get("guardrails"):
+            analysis["guardrails"] = [{k: g.get(k) for k in ("name", "kind", "relative", "breached")}
+                                      for g in a["guardrails"]]
+        if a.get("segments"):
+            analysis["segments"] = "withheld: results per value of a column are aggregates, not offered to agents"
+        d = t.get("decision") or {}
+        out = {"ok": True, "usecase": usecase, "name": t.get("name"), "state": t.get("state"),
+               "mode": t.get("mode", "ab"), "environment": t.get("environment"), "started_at": t.get("started_at"),
+               "release": t.get("release"),
+               "arms": {arm: {"version": (v or {}).get("version")} for arm, v in (t.get("arms") or {}).items()},
+               "allocation": [{"treatment_bp": x.get("treatment_bp"), "at": x.get("at")}
+                              for x in t.get("allocation") or []],
+               "layer": t.get("layer"), "breaker_tripped": bool(t.get("breaker")), "analysis": analysis or None,
+               "decision": {"required": d.get("required"), "winner": d.get("winner"),
+                            "groups_decided": [x.get("group") for x in d.get("approvals") or []]},
+               "next": next_step(t)}
+        self.log("ab_status", "metadata", "ok", usecase=usecase, test=t.get("name"))
+        return out
+
+    def serving_health(self, usecase: str) -> dict:
+        """How the use case is watched while it serves (1.4.3): its health, capture and online monitoring settings as
+        resolved in this environment, the platform's serving rules, the Cloud Monitoring health policies in force
+        (signal, severity, threshold, version), and rollback proposals waiting for a person. No request, answer or
+        feature value."""
+        from pipewright.gcp import error_text
+        from pipewright.serving import health, rollback
+
+        uc = self._usecase(usecase)
+        e = self.env
+        mon = uc.ml.get("monitoring") or {}
+        serving = (uc.model or {}).get("serving") or {}
+        out = {"ok": True, "usecase": usecase,
+               "serving": {k: serving[k] for k in ("enabled", "target", "pool", "scale_to_zero", "capture")
+                           if k in serving},
+               "health": mon.get("health") or {"enabled": False}, "online": mon.get("online") or {"enabled": False},
+               "platform_rules": (e.policies or {}).get("serving") or {}, "policies": [], "rollbacks": []}
+        label = health._label
+        r = self.gcp().get(f"https://monitoring.googleapis.com/v3/projects/{e.project}/alertPolicies",
+                           filter=f'user_labels."pipewright-usecase"="{label(usecase)}" AND '
+                                  f'user_labels."pipewright-environment"="{label(uc.environment)}" AND '
+                                  'user_labels."pipewright-health"="true"', pageSize=200)
+        if r.ok:
+            for p in (r.body or {}).get("alertPolicies") or []:
+                lb = p.get("userLabels") or {}
+                out["policies"].append({"signal": lb.get("pipewright-signal"),
+                                        "severity": lb.get("pipewright-severity"),
+                                        "threshold": lb.get("pipewright-threshold"),
+                                        "version": lb.get("pipewright-model-version"), "arm": lb.get("pipewright-arm"),
+                                        "enabled": p.get("enabled")})
+        else:
+            out["policies_error"] = f"alert policies not readable ({error_text(r)})"
+        try:
+            out["rollbacks"] = [{k: c.get(k) for k in ("case_id", "status", "version", "previous_version", "signal",
+                                                      "threshold", "observed_value", "hours_since_deploy")}
+                                for c in rollback.cases(self.gcp(), e.artifacts_bucket, usecase)[:10]]
+        except Exception as ex:                       # noqa: BLE001 - a missing grant is said, not raised
+            out["rollbacks_error"] = str(ex).splitlines()[0][:200]
+        if not out["health"].get("enabled"):
+            out["note"] = ("monitoring.health is off: nothing alerts on this use case's errors, latency or replicas "
+                           "(the playbook add-serving-health says how to turn it on)")
+        self.log("serving_health", "metadata", "ok", usecase=usecase, policies=len(out["policies"]))
+        return out
+
+    def features_check(self, usecase: str) -> dict:
+        """The use case's feature contract against its live feature sources (definitions and schemas, never values),
+        as `pipewright features contract --check` does: exit 0 the sources match, 1 they differ (training refuses
+        until the contract is recorded again and released), 2 they cannot be checked."""
+        self.log("features_check", "metadata", "ok", usecase=usecase)
+        return self._cli("features", "contract", "--usecase", usecase, "--check")
+
     # -- tools: drafting ---------------------------------------------------------------------------------------
 
     def _schema(self, ref: str) -> list[dict]:
@@ -428,7 +541,7 @@ class Server:
 
 TOOLS = ("environment", "validate", "resolve", "explain", "doctor", "plan", "inspect_table", "list_features",
          "sample_rows", "profile", "status", "runs", "model_list", "monitor_status", "retrain_list", "lineage",
-         "bootstrap_usecase", "review_bundle")
+         "ab_status", "serving_health", "features_check", "bootstrap_usecase", "review_bundle")
 
 
 def build_app(server: Server, tools: tuple[str, ...] = TOOLS, **settings):
