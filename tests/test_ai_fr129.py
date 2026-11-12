@@ -75,7 +75,7 @@ class HealthGcp(FakeGcp):
         if url.endswith("/alertPolicies"):
             self.filter = params.get("filter")
             return Response(200, {"alertPolicies": [{"enabled": True, "userLabels": {
-                "pipewright-signal": "latency", "pipewright-severity": "critical", "pipewright-threshold": "1000",
+                "pipewright-signal": "errors", "pipewright-severity": "critical", "pipewright-threshold": "0_05",
                 "pipewright-model-version": "3", "pipewright-environment": "dev"}}]})
         return super().get(url, **params)
 
@@ -88,7 +88,7 @@ def test_serving_health_shows_settings_policies_and_rollbacks(repo, monkeypatch)
                                                               "by": "ana@example.com"}])
     out = s.serving_health("churn")
     assert out["ok"] and out["serving"]["enabled"] is True
-    assert out["policies"] == [{"signal": "latency", "severity": "critical", "threshold": "1000", "version": "3",
+    assert out["policies"] == [{"signal": "errors", "severity": "critical", "threshold": "0.05", "version": "3",
                                 "arm": None, "enabled": True}]
     assert 'pipewright-environment"="dev"' in gcp.filter and out["rollbacks"][0]["previous_version"] == "2"
     assert "example.com" not in str(out)

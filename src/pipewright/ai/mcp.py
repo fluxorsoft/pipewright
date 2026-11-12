@@ -455,7 +455,7 @@ class Server:
                 lb = p.get("userLabels") or {}
                 out["policies"].append({"signal": lb.get("pipewright-signal"),
                                         "severity": lb.get("pipewright-severity"),
-                                        "threshold": lb.get("pipewright-threshold"),
+                                        "threshold": (lb.get("pipewright-threshold") or "").replace("_", "."),
                                         "version": lb.get("pipewright-model-version"), "arm": lb.get("pipewright-arm"),
                                         "enabled": p.get("enabled")})
         else:
