@@ -92,6 +92,40 @@ From the FR-57 QA round:
   - `ab status` names the next step when approver groups disagree: stop the test, which keeps the control.
   - The starter takes `policies.ab_test` in `terraform.tfvars`.
 
+### Fixed (found in the 1.4.3 GA QA, live)
+
+- Registration through the launcher: only the use case's own model name and a serving image from Google's prebuilt
+  images or the environment's repository are registered; a record whose own decision is reject is refused. Each answer
+  names the request it answers, and the step reads it with a new handle each time (a refused request no longer hides
+  the answer to the next one). `model.registration_refused` can be emailed.
+- Online monitoring judges the version that serves (the most traffic on the use case's own endpoint or
+  InferenceService), not the registry's default, which can move without a deploy.
+- Capture coverage on Agent Platform says when it cannot read the capture table (it took a 403 as nothing to report);
+  the platform grants the launcher read on `*_online_log` tables and Cloud Monitoring with `serving_health`.
+- Capture on a private (or dedicated) endpoint is set when the endpoint is created: `deploy-model` and `validate` say
+  so, and the starter and Enterprise take `endpoints.<use case>.capture.sample_rate`. An undeploy leaves capture alone.
+- Health: an A/B treatment on Agent Platform is watched like the control (both arms named in the policies); a model on a
+  shared pool gets errors and latency policies only (a pool's replicas are reported at the pool); Agent Platform
+  latency reads the total series (one breach opened three incidents). A rollback is proposed only for an errors or
+  latency incident and only when an earlier version exists.
+- The A/B router keeps the prediction IDs (lookup mode) and makes them (router-only), so live quality follows A/B
+  traffic. The launcher's tick refreshes a lookup service or router that runs another image than the environment's.
+- The closed retrain loop: trains on test's `retraining.source_uri` (not production's landing path) unless an approver
+  named the data; restarts a loop whose training failed and resubmits a validation that never started; scores its
+  unapproved candidate for validation under `inference: refuse` (`run.integrity` mode `loop-candidate`); promotes the
+  release that trained the candidate; counts the approval it just made; keeps the version production served before it;
+  a canary must also be more than 20 ms slower to fail on latency.
+- Pools: an environment's file can set `model.serving.machine: null` to join a pool when the use case sets a machine;
+  the same version on dedicated machines is not "already live" for a pool; the plan names the pool.
+- `report fleet` counts pipeline hours (Agent Platform refused a page of 200, so it said 0 h).
+- `data erase` says capture holds features and prediction IDs, never the key. `features sync` from outside the network
+  says to run the `online_sync` schedule. `model rollback` prints no raw event line.
+- Examples and scaffolding: sample paths under `samples/<tenant>/` (the only samples prefix a runner reads); the churn
+  example shows `monitoring.online.outcomes`, `data.snapshot_table` and the other defaults it left out; the features,
+  serving and ray examples declare `customer_id` as personal data; `--from serving` writes the tenant's Cloud SQL
+  schema; `new-usecase --help` names every example and says when a name is too long; `validate` warns when the
+  outcomes table is not the use case's and no longer warns a BigQuery ML use case about Pipewright's own steps.
+
 ### Upgrading
 
 Teams' own component steps are theirs: update `components/register.py` from the churn example (the fixed model ID)
