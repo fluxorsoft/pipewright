@@ -51,3 +51,16 @@ def test_kserve_records_pair_request_and_answer_and_insufficient_data():
     found, summary = rt.online_window(ML, "p", "bq://acme-ml-dev.d.stdout", FEATURES, "3", client=c, isvc="churn")
     assert len(found) == 2 and summary["source"] == "kserve"
     assert summary["insufficient_data"] is True                   # 2 rows, min_samples 3: never "no drift"
+
+
+def test_no_capture_table_yet_is_insufficient_data_not_a_crash():
+    # 1.4.3 GA QA (live): the scheduled online monitoring of a use case not serving yet failed with a 404
+    from google.api_core.exceptions import NotFound
+
+    class Missing(Client):
+        def get_table(self, table):
+            raise NotFound("Not found: Table pw-ebook:pw_retail.churn_ga_online_log")
+
+    rows, summary = rt.online_window(ML, "p", "bq://acme-ml-dev.d.churn_online_log", FEATURES, "3",
+                                     client=Missing([], []))
+    assert rows == [] and summary["insufficient_data"] and summary["missing_table"]

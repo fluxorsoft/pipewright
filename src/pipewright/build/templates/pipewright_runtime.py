@@ -1183,7 +1183,16 @@ def online_window(ml_config: dict, project: str, source_uri: str, features: list
     client = client or bigquery_client(project, ml_config)      # CMEK in private environments (battle test)
     params = [bigquery.ScalarQueryParameter("minutes", "INT64", int(hours * 60)),
               bigquery.ScalarQueryParameter("cap", "INT64", int(cap * max(hours / 24, 1)))]
-    columns = {f.name for f in client.get_table(table).schema}
+    from google.api_core.exceptions import NotFound
+
+    try:
+        columns = {f.name for f in client.get_table(table).schema}
+    except NotFound:
+        # 1.4.3 GA QA (live): capture makes its table at the first logged request; before that (nothing served yet,
+        # or never deployed) the scheduled run crashed with a 404. No table is no data: insufficient, never "no drift".
+        return [], {"source": None, "table": table, "window_hours": hours, "records": 0, "rows": 0, "skipped": 0,
+                    "min_samples": min_samples, "insufficient_data": True, "missing_table": True,
+                    "deployed_model": deployed_model, "isvc": isvc, "model_version": model_version}
     if "request_payload" in columns:
         deployed_model = deployed_model or _champion_deployed_model(ml_config, model_version)
         params.append(bigquery.ScalarQueryParameter("dm", "STRING", deployed_model or ""))
