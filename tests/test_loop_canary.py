@@ -192,3 +192,13 @@ def test_the_loop_refuses_to_send_what_the_release_does_not_take(monkeypatch):
     with pytest.raises(ConfigError, match="takes no champion_version parameter.*nothing was submitted"):
         b._accepts("test", {"pipeline": "training", "champion_version": "3"})
     b._accepts("test", {"pipeline": "training"})                   # nothing optional sent: nothing to check
+
+
+def test_a_few_milliseconds_never_fail_a_canary():
+    # GA QA (found live): 24 ms against 12 ms rolled a healthy canary back
+    ok, why = canary.judge({"predictions": 300, "errors": 0, "latency_ms": 24},
+                           {"predictions": 3000, "errors": 0, "latency_ms": 12}, CFG, {"ok": True, "note": "fine"})
+    assert ok and "median latency 24 ms" in why
+    bad, why = canary.judge({"predictions": 300, "errors": 0, "latency_ms": 80},
+                            {"predictions": 3000, "errors": 0, "latency_ms": 40}, CFG, {"ok": True, "note": "fine"})
+    assert not bad and "median latency 80 ms against 40 ms" in why
