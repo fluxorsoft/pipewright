@@ -342,9 +342,19 @@ class Server:
         return self._cli("model", "list", "--usecase", usecase, "--json")
 
     def monitor_status(self, usecase: str) -> dict:
-        """Drift and performance as recorded by monitoring (scores per feature), and open retrain cases."""
+        """Drift and performance as recorded by monitoring (scores per feature), and open retrain cases. An agent
+        identity cannot read them: they are rows of the monitoring table (found in the FR-129 live test, where the
+        tool answered with BigQuery's Access Denied); the answer then says where the same facts are."""
+        out = self._cli("monitor", "status", "--usecase", usecase, "--json")
+        if out.get("ok") is False and "Access Denied" in str(out.get("error", "")):
+            self.log("monitor_status", "rows", "refused", usecase=usecase)
+            return {"ok": False, "refused": "monitoring results are rows of the use case's monitoring table, which an "
+                    "agent identity cannot read (metadata only)",
+                    "instead": ["retrain_list: open retrain cases and their decision packs",
+                                "serving_health: how the served version is watched",
+                                f"a person runs `pipewright monitor status --env {self.env.name} --usecase {usecase}`"]}
         self.log("monitor_status", "metadata", "ok", usecase=usecase)
-        return self._cli("monitor", "status", "--usecase", usecase, "--json")
+        return out
 
     def retrain_list(self, usecase: str) -> dict:
         """Open retrain decision cases."""

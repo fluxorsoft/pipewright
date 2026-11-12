@@ -167,3 +167,12 @@ def test_judgement_on_capturing_most_calls():
     w = judgement.serving_and_tests({}, {"serving": {"capture": {"enabled": True, "sample_rate": 1.0}}})
     assert len(w) == 1 and "real people" in w[0]
     assert judgement.serving_and_tests({}, {"serving": {"capture": {"enabled": True, "sample_rate": 0.05}}}) == []
+
+
+def test_monitor_status_as_an_agent_says_where_the_facts_are(repo, monkeypatch):
+    s = _server(repo)
+    monkeypatch.setattr(s, "_cli", lambda *a: {"ok": False, "exit_code": 2, "error": "error: Access Denied: Table "
+                                               "p:d.churn_model_monitoring: User does not have permission"})
+    out = s.monitor_status("churn")
+    assert out["refused"].startswith("monitoring results are rows") and "retrain_list" in out["instead"][0]
+    assert logged(s)[-1]["outcome"] == "refused"
