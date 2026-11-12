@@ -158,9 +158,16 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     # store. A deployment of the same version made without it (under features request) is not "already live": it
     # answered every lookup with HTTP 403 (found re-running the book's Chapter 19), so it is deployed again.
     runner = uc.resources.get("runner_service_account") if uc.ml.get("online_features") else None
-    current = [d for d in deployed if d.model == default.resource_name and d.model_version_id == default.version_id
-               and (not runner or (getattr(d, "service_account", "") or "") == runner)]
     serving = uc.model["serving"]
+
+    def placed(d) -> bool:
+        # GA QA (found live): the same version on dedicated machines is not live when the use case now asks for a
+        # pool (and the other way round), or the move would never happen
+        shared = (getattr(d, "shared_resources", "") or "").rsplit("/", 1)[-1]
+        return shared == serving["pool"] if serving.get("pool") else not shared
+
+    current = [d for d in deployed if d.model == default.resource_name and d.model_version_id == default.version_id
+               and (not runner or (getattr(d, "service_account", "") or "") == runner) and placed(d)]
     from pipewright.gcp import Gcp
     from pipewright.models import gates
 

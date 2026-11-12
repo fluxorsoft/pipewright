@@ -365,8 +365,9 @@ def cmd_deploy_model(args) -> int:
         _health_sync(uc, env)
         return 0
     p = deploy_model.plan(uc, env, creds)
-    print(f"model {p.model} default version v{p.version} -> endpoint {p.endpoint} ({p.machine}, replicas "
-          f"{p.replicas['min']}-{p.replicas['max']})"
+    where = (f"on pool {p.pool}" if p.pool else          # GA QA: a pool sets the machines, not the use case
+             f"{p.machine}, replicas {p.replicas['min']}-{p.replicas['max']}")
+    print(f"model {p.model} default version v{p.version} -> endpoint {p.endpoint} ({where})"
           + ("  [already live]" if p.already_deployed else "")
           + (f"; replaces {', '.join(p.other_versions)}" if p.other_versions else ""))
     print("evaluation gates: " + ("pass" if not p.gate_problems else "FAIL\n  " + "\n  ".join(p.gate_problems)))
