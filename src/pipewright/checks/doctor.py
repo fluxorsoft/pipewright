@@ -495,6 +495,42 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     _check_permissions(uc, env, gcp, report, as_agent=as_agent)
 
 
+
+def _check_sources(uc, env, gcp, report, s, retrain) -> None:
+    """BigQuery sources named in configuration (schedules, retrain source) must exist and be readable."""
+    from pipewright.runs import sources
+
+    named = [(f"schedule {s['name']}", s.get("source_uri")) for s in uc.triggers["schedules"]]
+    named.append(("retraining.source_uri", retrain.get("source_uri")))
+    for where, uri in named:
+        if not uri or not uri.startswith("bq://") or sources.problem(uri):
+            continue
+        project, dataset, table = sources.bq_table(uri, env.project).split(".")
+        resp = gcp.get(f"{BQ}/projects/{project}/datasets/{dataset}/tables/{table}")
+        if resp.ok:
+            rows = resp.body.get("numRows")
+            report.add(s, Result(OK, f"source for {where}", f"{project}.{dataset}.{table} ({resp.body.get('type', '')}"
+                                 + (f", {rows} rows" if rows else "") + ")"))
+        elif (resp.status == 404 and (table.endswith("_online_log") or table == "stdout")
+              and where == "schedule online-monitoring"):
+            # 1.4.3 (FR-98): Agent Platform makes the capture table at the first logged request (battle test)
+            report.add(s, Result(INFO, f"source for {where}", f"{project}.{dataset}.{table} does not exist yet: "
+                                 "capture creates it at the first logged request after deploy-model"))
+        elif resp.status == 403 and project != env.project:
+            # 1.4.3 GA QA (live, the e2e repository's PR checks): a source in another project (the closed loop's
+            # production data) is read by the runner through that environment's loop_readers; CI and other callers
+            # need no access to it, so a refusal here says nothing about the run.
+            report.add(s, Result(WARN, f"source for {where}", f"{project}.{dataset}.{table}: not readable by the "
+                                 f"identity running this check; runs read it as "
+                                 f"{uc.resources['runner_service_account']}",
+                                 "the owner of that project grants the runner read access (Enterprise: "
+                                 "tenants.<t>.loop_readers there)"))
+        else:
+            report.add(s, Result(FAIL, f"source for {where}", f"{project}.{dataset}.{table}: {error_text(resp)}",
+                                 "check the name, and that the runner service account may read it "
+                                 "(roles/bigquery.dataViewer on the dataset)"))
+
+
 def _check_serving_1_4_2(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
     """1.4.2, only when used: the Terraform endpoint (FR-92), the pool (FR-105) and the gateway (FR-106)."""
     from pipewright.serving import endpoints, pools, prices
@@ -666,29 +702,7 @@ def _check_ml(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -
     report.add(s, Result(INFO if uc.tests_command else WARN, "tests",
                          uc.tests_command or "no tests.command: `pipewright test` skips this use case"))
 
-    # BigQuery sources named in configuration (schedules, retrain source) must exist and be readable.
-    from pipewright.runs import sources
-
-    named = [(f"schedule {s['name']}", s.get("source_uri")) for s in uc.triggers["schedules"]]
-    named.append(("retraining.source_uri", retrain.get("source_uri")))
-    for where, uri in named:
-        if not uri or not uri.startswith("bq://") or sources.problem(uri):
-            continue
-        project, dataset, table = sources.bq_table(uri, env.project).split(".")
-        resp = gcp.get(f"{BQ}/projects/{project}/datasets/{dataset}/tables/{table}")
-        if resp.ok:
-            rows = resp.body.get("numRows")
-            report.add(s, Result(OK, f"source for {where}", f"{project}.{dataset}.{table} ({resp.body.get('type', '')}"
-                                 + (f", {rows} rows" if rows else "") + ")"))
-        elif (resp.status == 404 and (table.endswith("_online_log") or table == "stdout")
-              and where == "schedule online-monitoring"):
-            # 1.4.3 (FR-98): Agent Platform makes the capture table at the first logged request (battle test)
-            report.add(s, Result(INFO, f"source for {where}", f"{project}.{dataset}.{table} does not exist yet: "
-                                 "capture creates it at the first logged request after deploy-model"))
-        else:
-            report.add(s, Result(FAIL, f"source for {where}", f"{project}.{dataset}.{table}: {error_text(resp)}",
-                                 "check the name, and that the runner service account may read it "
-                                 "(roles/bigquery.dataViewer on the dataset)"))
+    _check_sources(uc, env, gcp, report, s, retrain)
 
     _check_feature_tables(uc, env, gcp, report)
     if (uc.ml.get("online_features") or {}).get("type"):     # FR-104: bigquery, cloudsql, http
