@@ -244,7 +244,10 @@ class Loop:
     def _promote(self, loop: dict) -> dict:
         """The production approval: promote the candidate, make it the default, then a scoring run to verify it, or
         (retraining.loop.canary) a canary on the endpoint, checked after its soak window."""
-        previous = next((str(v["version"]) for v in self.backend.versions(self.production) if v["default"]), None)
+        # What production served when the loop started (GA QA: a retried approval read the default the failed try
+        # had already moved, so a rollback would have gone back to the candidate itself)
+        previous = (str((loop.get("champion") or {}).get("production_version") or "") or
+                    next((str(v["version"]) for v in self.backend.versions(self.production) if v["default"]), None))
         canary = getattr(self.backend, "canary_settings", lambda: None)()
         if canary:
             # Before anything changes in production: a canary needs the endpoint to serve the current version.

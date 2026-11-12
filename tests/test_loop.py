@@ -318,3 +318,19 @@ def test_the_loop_promotes_the_release_that_trained_its_candidate(monkeypatch):
     assert b.promote("5") == {"version": "9", "release_id": "4013670859c2"}
     b.promote("6")
     assert seen["release_id"] is None                                     # no label: test's live release, as before
+
+
+def test_a_retried_production_approval_keeps_the_version_production_served_before():
+    # GA QA (found live): the first try moved the default and then failed; the retry recorded v2 -> v2
+    b = FakeBackend()
+    lp = loop(b)
+    lp.start()
+    b.finish("test", "training", "rc-1", register="8")
+    lp.advance()
+    lp.advance()
+    b.finish("test", "inference", "rc-1-validate", alert=False)
+    lp.advance()
+    b.versions_of["prod"].append({"version": "4", "default": False, "labels": {}})
+    b.approve("prod", "4")                                   # the failed first try left the new version the default
+    out = lp.advance(approve=True)
+    assert out["promotion"]["previous_version"] == "3"
