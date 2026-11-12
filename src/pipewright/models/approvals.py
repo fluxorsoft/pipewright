@@ -26,6 +26,18 @@ REFRESH_SECONDS = 60                    # within a process, look again at most t
 _lock = threading.Lock()
 _caches: dict[tuple, dict] = {}
 _store: dict = {}                       # {"bucket", "name"}: the launcher's state file, when set
+_recent: list[dict] = []                # events this process published, until the event log has them (GA QA)
+
+
+def remember(event: dict) -> None:
+    """A model.approved, model.registered or model.lock.renewed event this process published: counted by its own
+    checks at once, as the event log's copy arrives a few seconds later. Never saved in the launcher's state file."""
+    if event.get("event_type") not in KINDS:
+        return
+    with _lock:
+        _recent.append({"id": f"local|{len(_recent)}", "at": str(event.get("time") or "")[:19],
+                        "type": event["event_type"], "usecase": event.get("usecase"),
+                        "environment": event.get("environment"), "data": event.get("data") or {}})
 
 
 def use_store(bucket: str | None, name: str | None) -> None:
@@ -38,6 +50,7 @@ def use_store(bucket: str | None, name: str | None) -> None:
 def reset() -> None:
     with _lock:
         _caches.clear()
+        _recent.clear()
 
 
 def _p(name, value, kind="STRING"):
@@ -138,6 +151,9 @@ def events(gcp, env, kind: str, usecase: str, version: str) -> list[dict] | None
         def found():
             hits = [e for e in cache["events"].values() if e["type"] == kind and e["usecase"] == usecase
                     and str((e["data"] or {}).get("version")) == str(version)]
+            if not hits:                  # one this process published, before the event log has it
+                hits = [e for e in _recent if e["type"] == kind and e["usecase"] == usecase
+                        and e.get("environment") == env.name and str((e["data"] or {}).get("version")) == str(version)]
             return [{"at": e["at"], **e["data"]} for e in sorted(hits, key=lambda e: e["at"], reverse=True)]
 
         out = found()

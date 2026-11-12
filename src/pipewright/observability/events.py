@@ -141,6 +141,12 @@ def emit(e: dict, topic: str | None = None, gcp=None, stream=None, region: str |
         if not r.ok:
             log.warning("event %s not published to %s: %s", e["event_type"], topic, r.status)
             _lost(e["event_type"], f"HTTP {r.status}")
+        else:
+            # GA QA: an approval this process just made counts at once in its own checks (the event reaches the
+            # event log's table a few seconds after it is published: the loop's canary deploy was refused)
+            from pipewright.models import approvals
+
+            approvals.remember(e)
         return r.ok
     except Exception as ex:  # noqa: BLE001 - events must never break a release or a launch
         log.warning("event %s not published: %s", e["event_type"], ex)
