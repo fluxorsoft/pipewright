@@ -109,7 +109,7 @@ def _ray_image(uc: ResolvedUseCase, env: Environment, release_id: str, gcp: Gcp,
 def release(uc: ResolvedUseCase, env: Environment, gcp: Gcp | None = None, component_image: str | None = None,
             skip_tables: bool = False, build_dir: Path | None = None, log=print) -> ReleaseResult:
     if uc.release_refusals:                 # 1.4.3: e.g. a component writing the registry under registration: launcher
-        raise ConfigError([f"{env.name} refuses this release of {uc.name}:", *uc.release_refusals])
+        raise ConfigError([f"{env.name} refuses this release of {uc.name}: {r}" for r in uc.release_refusals])
     if env.promotion_from:                  # Pipewright 1.2.0 (FR-80): this environment's releases come from another
         how = (f"{env.name}'s releases come from {env.promotion_from} (promotion.from): `pipewright promote --from "
                f"{env.promotion_from} --to {env.name} --usecase {uc.name}` brings the tested release")
