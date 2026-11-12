@@ -523,6 +523,13 @@ class Server:
         values = [0, 1] if kind in ("integer", "int64") else None
         notes = ["label values assumed 0/1 (not read: an AI agent sees no data); check them"] if values else []
         sources = self._feature_fields(features) if features else None
+        for src in sources or []:            # FR-129 live test: a feature group whose table was gone drafted an
+            got = {f["name"] for f in src.get("fields") or []}      # invalid use case without saying why
+            missing = [f for f in src.get("features") or [] if f not in got]
+            if missing:
+                notes.append(f"feature source {src.get('feature_group') or src.get('table')}: no schema for "
+                             f"{', '.join(missing)} (its BigQuery table is missing, not granted, or lacks them); "
+                             "validate will refuse them: ask the data team, or choose other features")
         data_yaml, raw_schema, more = from_bq.draft(fields, label, values, table, feature_sources=sources)
         dest = scaffold.new_usecase(self.root, name, self.tenant, owner or self.tenant, "minimal", None,
                                     data_yaml=data_yaml, raw_schema=raw_schema)

@@ -176,3 +176,25 @@ def test_monitor_status_as_an_agent_says_where_the_facts_are(repo, monkeypatch):
     out = s.monitor_status("churn")
     assert out["refused"].startswith("monitoring results are rows") and "retrain_list" in out["instead"][0]
     assert logged(s)[-1]["outcome"] == "refused"
+
+
+def test_bootstrap_says_when_a_feature_source_has_no_schema(repo):
+    s = _server(repo)
+    entity = {"schema": {"fields": [{"name": "customer_id", "type": "STRING", "mode": "REQUIRED"},
+                                    {"name": "snapshot_date", "type": "DATE", "mode": "REQUIRED"},
+                                    {"name": "churned", "type": "INTEGER"}]}}
+    real_get = s._gcp_factory().get
+
+    def get(url, **params):
+        if url.endswith("/featureGroups/gone"):
+            return Response(200, {"bigQuery": {"bigQuerySource": {"inputUri": "bq://acme-ml-dev.features.gone"}}})
+        if url.endswith("/tables/gone"):
+            return Response(404, {"error": {"message": "Not found: Table"}})
+        if url.endswith("/tables/entities"):
+            return Response(200, entity)
+        return real_get(url, **params)
+
+    s._gcp_factory().get = get
+    out = s.bootstrap_usecase("lapse", "churn.entities", "churned",
+                              features=[{"feature_group": "gone", "features": ["tenure_months"]}])
+    assert any("feature source gone: no schema for tenure_months" in n for n in out["notes"])
