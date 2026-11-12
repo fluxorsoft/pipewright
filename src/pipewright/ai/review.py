@@ -74,6 +74,10 @@ def _moves(old_ml: dict | None, new_ml: dict, watched: tuple = WATCHED, prefix: 
         if old == new:
             continue
         fo, fn = _flat(old, prefix + key), _flat(new, prefix + key)
+        if old is None and isinstance(new, dict) and len(fn) > 8:   # FR-129 live test: a section switched on listed
+            lines.append(f"- `{prefix + key}`: switched on ({len(fn)} settings with their defaults; "  # 30+ defaults
+                         "what it changes is listed above)")
+            continue
         for k in sorted(set(fo) | set(fn)):
             if fo.get(k) != fn.get(k):
                 a, b = fo.get(k), fn.get(k)
@@ -135,7 +139,10 @@ def _changes_since_14(old, new) -> list[str]:
                    "after the merge with `pipewright alerts sync` or the next `deploy-model`")
     cap_o, cap_n = o_srv.get("capture") or {}, n_srv.get("capture") or {}
     if _on(cap_n) and (not _on(cap_o) or cap_o != cap_n):
-        out.append(f"+ request capture into `{new.name}_online_log`: a sample of {cap_n.get('sample_rate', '?')} of "
+        from pipewright.serving import capture as capture_mod
+
+        table = capture_mod.source_table(new.name, n_srv.get("target"))
+        out.append(f"+ request capture into `{table}`: a sample of {cap_n.get('sample_rate', '?')} of "
                    f"live calls, kept {cap_n.get('retention_days', 30)} days (requests hold features of real people)")
     if _on(n_mon.get("online")) and not _on(o_mon.get("online")):
         out.append("+ online monitoring: the use case's monitor steps on the live window, on "
@@ -192,13 +199,15 @@ def bundle(root: Path, env, base: str = "main") -> str:
             all_ok = False
             L += [f"### {name}", "", "**Does not validate:**", "", "```", str(e), "```", ""]
             continue
-        old = None
+        old, base_note = None, None
         if name in old_found and old_env:
             try:
                 old = resolve_usecase(old_found[name], old_env)
-            except ConfigError:
-                old = None
-        L += [f"### {name}{' (new)' if old is None else ''}", "", "**What a release would change in Google Cloud**", ""]
+            except ConfigError as e:      # FR-129 live test: said "(new)" with no reason, and every setting as new
+                base_note = (f"_`{base}`'s version does not resolve, so it is compared as new: "
+                             f"{str(e).splitlines()[0].split(': ', 1)[-1][:200]}_")
+        L += [f"### {name}{' (new)' if old is None and not base_note else ''}", "",
+              *([base_note, ""] if base_note else []), "**What a release would change in Google Cloud**", ""]
         L += [f"- {c}" for c in _cloud_changes(old, new)]
         L += ["", "**Checks**", "", "- validate: passes" + (f", {len(new.warnings)} warning(s)" if new.warnings
                                                                else ", no warnings")]

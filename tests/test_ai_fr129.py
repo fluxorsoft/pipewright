@@ -198,3 +198,32 @@ def test_bootstrap_says_when_a_feature_source_has_no_schema(repo):
     out = s.bootstrap_usecase("lapse", "churn.entities", "churned",
                               features=[{"feature_group": "gone", "features": ["tenure_months"]}])
     assert any("feature source gone: no schema for tenure_months" in n for n in out["notes"])
+
+
+def test_a_base_that_does_not_resolve_is_said_not_called_new(repo):
+    import subprocess
+
+    env = committed(repo)
+    repo.usecase["spec"]["evaluation"]["gates"][0]["metric"] = "no_such_metric"     # break the base version
+    repo.write()
+    for args in (["add", "-A"], ["commit", "-q", "-m", "broken"]):
+        subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=t", *args], cwd=repo.root,
+                       check=True, capture_output=True)
+    repo.usecase["spec"]["evaluation"]["gates"][0]["metric"] = "auc"
+    repo.write()
+    text = review.bundle(repo.root, env, base="HEAD")
+    assert "### churn (new)" not in text and "version does not resolve, so it is compared as new" in text
+
+
+def test_a_section_switched_on_is_one_line_not_every_default(repo):
+    repo.usecase["spec"]["environments"]["dev"]["model"]["serving"]["enabled"] = True   # a test needs serving
+    env = committed(repo)
+    repo.usecase["spec"]["ab_test"] = {**abc.DEFAULTS, "enabled": True, "name": "lapse-v7", "unit": "customer_id",
+                                       "arms": {"control": "champion", "treatment": {"model_version": "7"}},
+                                       "metric": {**abc.DEFAULTS["metric"], "name": "churned",
+                                                  "source": "bq://acme-ml-dev.churn.outcomes",
+                                                  "time_column": "observed_at", "minimum_effect": 0.05}}
+    repo.write()
+    text = review.bundle(repo.root, env)
+    assert "- `ab_test`: switched on (" in text and "`ab_test.analysis.alpha`" not in text
+    assert "+ A/B test `lapse-v7` (ab): treatment v7" in text
