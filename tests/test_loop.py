@@ -295,3 +295,26 @@ def test_a_validation_run_that_never_started_is_submitted_again(monkeypatch):
     assert lp.advance()["state"] == "validation-failed"
     again = lp.start()
     assert again["state"] == "validating" and b.submitted[-1][1]["run_key"] == "rc-1-validate-1"
+
+
+def test_the_loop_promotes_the_release_that_trained_its_candidate(monkeypatch):
+    # GA QA (found live): a release in test during the loop made the promotion refuse the candidate
+    from types import SimpleNamespace
+
+    from pipewright.loop.backend import GcpBackend
+    from pipewright.release import promote
+
+    seen = {}
+
+    def fake(path, src, dst, **k):
+        seen.update(k)
+        return SimpleNamespace(model_version="9", contract=SimpleNamespace(release_id=k.get("release_id")))
+
+    monkeypatch.setattr(promote, "promote", fake)
+    b = object.__new__(GcpBackend)
+    b.path, b.case_id, b.gcp = "p", "rc-1", None
+    b.test, b.production = SimpleNamespace(name="test"), SimpleNamespace(name="prod")
+    b.versions = lambda env: [{"version": "5", "labels": {"release": "4013670859c2"}}, {"version": "6", "labels": {}}]
+    assert b.promote("5") == {"version": "9", "release_id": "4013670859c2"}
+    b.promote("6")
+    assert seen["release_id"] is None                                     # no label: test's live release, as before
