@@ -6,12 +6,14 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.4.2.** Choose the online feature store by cost and speed (Bigtable, Cloud SQL, BigQuery with BI Engine,
-> or your own fed by a Parquet export), serve inside your network through the lookup gateway, private endpoints in
-> Terraform, and several models on shared machines (see [Choosing the online store](#choosing-the-online-store) and
-> [Private endpoints, co-hosting and the lookup gateway](#private-endpoints-co-hosting-and-the-lookup-gateway-142)).
-> All of it is off until set. What runs is still what was approved: approvals fingerprint the model files, serving
-> image, rules and feature definitions, and deploy, promote and scoring refuse anything that changed since.
+> **Status: 1.4.3, the complete MLOps loop.** A team on Google Cloud can take a model from a data contract to
+> production and back with Pipewright alone: train on any of four runners, release through gates and named approvals,
+> score in batch or serve online, A/B test a candidate against the champion ([docs/AB_TESTING.md](docs/AB_TESTING.md)),
+> watch serving health and quality on live traffic ([docs/SERVING.md](docs/SERVING.md)), hold scoring runs for a
+> person ([docs/BATCH_SCORING.md](docs/BATCH_SCORING.md)) and retrain when a signal says so, with a person deciding at
+> every point that matters. All of it is off until set. What runs is still what was approved: approvals fingerprint
+> the model files, serving image, rules and feature definitions, and deploy, promote and scoring refuse anything that
+> changed since.
 > Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
@@ -774,11 +776,11 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.4.2"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp]==1.4.3"     # the command is `pipewright`
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.4.2 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.4.3 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -881,9 +883,11 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
 | OpenTelemetry export | Planned |
-| A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner ([docs/AB_TESTING.md](docs/AB_TESTING.md)) | Built on a branch (FR-57), being battle-tested |
+| A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner ([docs/AB_TESTING.md](docs/AB_TESTING.md)) | Released in 1.4.3; used end to end in the starter and on private GKE with KServe |
+| Serving health per deployed version, rollback proposals, request capture, quality on live traffic ([docs/SERVING.md](docs/SERVING.md)) | Released in 1.4.3; used end to end on Agent Platform endpoints and KServe |
+| Registration through the launcher (runners cannot write the registry; `release` refuses a component that does), scoring runs that wait for a person, pull request checks without a reviewer (`ci init --checks-environment`) | Released in 1.4.3; used end to end, with real GitHub reviewers |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2, 1.4.3) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
