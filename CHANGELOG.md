@@ -3,7 +3,7 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [Unreleased]
+## [1.4.3] - 2026-11-13
 
 Model serving observability (FR-98), a runner that cannot move a model's default (FR-100) and repeatable synthetic
 runs (FR-107). All off until turned on: a use case or environment that sets none of it releases and serves exactly as
