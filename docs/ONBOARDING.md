@@ -106,7 +106,9 @@ doctor, dry runs on every pull request), `pipewright-release` (on merge: tables,
 each changed use case, environment by environment) and `pipewright-operate` (by hand: run, status, rollback,
 model approve, deploy, canary). Create a GitHub environment per name with the variables `GCP_WIF_PROVIDER`,
 `PIPEWRIGHT_SERVICE_ACCOUNT` and `PIPEWRIGHT_PIP_SPEC` (set `PIPEWRIGHT_SCHEDULES=off` where Cloud Scheduler is not
-enabled), and add required reviewers to production. On self-hosted runners use
+enabled), and add required reviewers to production. Pull request checks run under the first environment; if it
+has required reviewers, add `--checks-environment <name>` and give that GitHub environment the same variables and no
+reviewers, so checks start without waiting (1.4.3). On self-hosted runners use
 `pipewright ci init --environments dev,prod --runs-on self-hosted,linux,mlops`; with a service account attached to
 the runner, leave `GCP_WIF_PROVIDER` empty, and set `PIPEWRIGHT_SETUP_TOOLS=off` when the image already has Python
 3.11 and uv.

@@ -45,6 +45,10 @@ Batch scoring that waits for a person (FR-130), off until `approvals.batch_scori
   a hold expires after `approvals.batch_scoring_hold_hours` (default 24). `run.hold_decided` records who decided
   and the GitHub reviewers. Runners and the launcher may not decide. Retrain loops are not held.
 
+`pipewright ci init --checks-environment <name>` (1.4.3, found in the gate test): pull request checks run under a
+GitHub environment of their own, with the first environment's variables and no reviewers, so they start without
+waiting while the first environment keeps its reviewers. Unset, the workflows are written exactly as before.
+
 A/B testing of models (FR-57), off until `ab_test.enabled`: a use case that sets none of it scores and serves exactly
 as in 1.4.2. The guide is [docs/AB_TESTING.md](docs/AB_TESTING.md).
 

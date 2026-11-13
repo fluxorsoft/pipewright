@@ -1421,7 +1421,8 @@ def cmd_ci_init(args) -> int:
     labels = args.runs_on.split(",") if args.runs_on else None
     environments = [e.strip() for e in args.environments.split(",") if e.strip()]
     cron = args.decisions_cron or ci.DECISIONS_CRON
-    for path in ci.init(Path(args.root), environments, args.force, labels, cron):
+    checks = (args.checks_environment or "").strip() or None
+    for path in ci.init(Path(args.root), environments, args.force, labels, cron, checks):
         print(f"wrote {path}")
     for env, source in ci.promotions(Path(args.root), environments).items():
         print(f"{env}: no release job (promotion.from {source}); pipewright-promote brings {source}'s releases")
@@ -1433,6 +1434,9 @@ def cmd_ci_init(args) -> int:
           + ", ".join(f"{e}-decisions" for e in environments)
           + "), with the same variables and no reviewers: pipewright-decisions runs there. A gate refuses until "
             "its environment has required reviewers (GitHub Team or Enterprise, or a public repository)")
+    if checks and checks != environments[0]:
+        print(f"      and {checks}, with {environments[0]}'s variables and no reviewers: pull request checks run "
+              "there, so they start without waiting for a reviewer")
     return 0
 
 
@@ -2047,6 +2051,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--decisions-cron", default=None,
                     help="when pipewright-decisions runs, five cron fields in UTC (default: hourly, 07:17 to 18:17, "
                          "Monday to Friday; '*/15 * * * *' was 1.1's)")
+    sp.add_argument("--checks-environment", default=None, metavar="NAME",
+                    help="the GitHub environment pull request checks run under (default: the first environment). "
+                         "Give it the first environment's variables and no reviewers, so checks start at once")
     sp.set_defaults(func=cmd_ci_init)
 
     sp = sub.add_parser("test", help="run each use case's tests.command")

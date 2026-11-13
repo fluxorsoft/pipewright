@@ -160,3 +160,28 @@ def test_gate_refuses_an_id_that_is_not_a_decision():
     run = next(s for s in steps if s.get("name") == "Still pending")["run"]
     assert run.index("is not a decision in") < run.index("pipewright decisions pending")
     assert '[ "$id_env" != "$ENV" ]' in run and '[ ! -d "usecases/$id_uc" ]' in run
+
+
+def test_pull_request_checks_can_run_under_an_environment_without_reviewers():
+    # 1.4.3 (found in the gate test): with reviewers on the first environment every pull request waited for one
+    # before its checks started; --checks-environment gives the checks a GitHub environment of their own.
+    import pytest
+
+    from pipewright.errors import ConfigError
+    from pipewright.scaffold import ci
+
+    pr = ".github/workflows/pipewright-pr.yml"
+    plain = ci.render(["test", "prod"])[pr]
+    assert plain.count("    environment: test\n") == 2
+    assert ci.render(["test", "prod"], checks_environment="test")[pr] == plain       # same as unset
+    flagged = ci.render(["test", "prod"], checks_environment="test-checks")[pr]
+    assert flagged.count("    environment: test-checks   # ci init --checks-environment") == 2
+    assert flagged.count("      ENV: test\n") == 2                    # still checked against the test environment
+    assert flagged.replace("test-checks   # ci init --checks-environment: test's variables, no reviewers",
+                           "test") == plain
+    others = {k: v for k, v in ci.render(["test", "prod"], checks_environment="test-checks").items() if k != pr}
+    assert others == {k: v for k, v in ci.render(["test", "prod"]).items() if k != pr}
+    with pytest.raises(ConfigError, match="give the checks one of their own"):
+        ci.render(["test", "prod"], checks_environment="prod")
+    with pytest.raises(ConfigError, match="lowercase"):
+        ci.render(["test", "prod"], checks_environment="Test Checks")

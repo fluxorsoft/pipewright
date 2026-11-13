@@ -52,7 +52,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.usecases != '[]'
     runs-on: @@RUNS_ON@@
-    environment: @@FIRST_ENV@@
+    environment: @@CHECKS_ENV@@
     strategy:
       fail-fast: false
       matrix:
@@ -110,7 +110,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.usecases != '[]'
     runs-on: @@RUNS_ON@@
-    environment: @@FIRST_ENV@@
+    environment: @@CHECKS_ENV@@
     env:
       ENV: @@FIRST_ENV@@
     steps:

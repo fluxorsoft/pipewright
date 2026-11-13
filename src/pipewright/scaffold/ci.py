@@ -106,7 +106,7 @@ def _cron(value: str) -> str:
 
 
 def render(environments: list[str], labels: list[str] | None = None, promotions: dict[str, str] | None = None,
-           decisions_cron: str = DECISIONS_CRON) -> dict[str, str]:
+           decisions_cron: str = DECISIONS_CRON, checks_environment: str | None = None) -> dict[str, str]:
     """{relative path: content}. Environments are in promotion order (first: where PRs are checked); promotions
     maps an environment to its promotion.from: it gets the promote workflow instead of a release job."""
     if not environments:
@@ -114,6 +114,19 @@ def render(environments: list[str], labels: list[str] | None = None, promotions:
     bad = [e for e in environments if not NAME.match(e)]
     if bad or len(set(environments)) != len(environments):
         raise ConfigError(f"environment names must be unique, lowercase letters, digits and hyphens: {environments}")
+    # 1.4.3: the GitHub environment pull request checks run under. Unset: the first environment, as before; with
+    # required reviewers there, every pull request waits for one before its checks start. A separate environment
+    # with the same variables and no reviewers runs them at once (found in the 1.4.3 gate test).
+    if checks_environment and checks_environment != environments[0]:
+        if not NAME.match(checks_environment):
+            raise ConfigError(f"--checks-environment {checks_environment!r}: lowercase letters, digits and hyphens")
+        if checks_environment in environments:
+            raise ConfigError(f"--checks-environment {checks_environment}: a Pipewright environment's GitHub "
+                              "environment carries its reviewers; give the checks one of their own")
+        checks_value = (f"{checks_environment}   # ci init --checks-environment: {environments[0]}'s variables, "
+                        "no reviewers")
+    else:
+        checks_value = environments[0]
     promotions = {e: s for e, s in (promotions or {}).items() if e in environments}
     if environments[0] in promotions:
         raise ConfigError(f"{environments[0]} is where pull requests are checked and releases start: it cannot have "
@@ -127,7 +140,8 @@ def render(environments: list[str], labels: list[str] | None = None, promotions:
         previous = f"release-{env}"
     released = [e for e in environments if e not in promotions]
     promote_cases = "\n".join(f"            {e}) SOURCE={s} ;;" for e, s in promotions.items())
-    values = {"@@FIRST_ENV@@": environments[0], "@@ENV_CHOICES@@": ", ".join(environments),
+    values = {"@@CHECKS_ENV@@": checks_value, "@@FIRST_ENV@@": environments[0],
+              "@@ENV_CHOICES@@": ", ".join(environments),
               "@@ENV_ORDER@@": " -> ".join(released), "@@RELEASE_JOBS@@": "\n".join(jobs).rstrip(),
               "@@RUNS_ON@@": runs_on(labels), "@@DECISIONS_CRON@@": _cron(decisions_cron),
               "@@PROMOTED_CHOICES@@": ", ".join(promotions),
@@ -175,14 +189,14 @@ def promotions(root: Path, environments: list[str]) -> dict[str, str]:
 
 
 def init(root: Path, environments: list[str], force: bool = False, labels: list[str] | None = None,
-         decisions_cron: str = DECISIONS_CRON) -> list[Path]:
+         decisions_cron: str = DECISIONS_CRON, checks_environment: str | None = None) -> list[Path]:
     root = Path(root)
     if not (root / "usecases").is_dir() and not (root / "environments").is_dir():
         raise ConfigError(f"{root} does not look like an MLOps repo (no usecases/ or environments/)")
     missing = [e for e in environments if not (root / "environments" / f"{e}.yaml").is_file()]
     if missing:
         raise ConfigError(f"no environments/{{name}}.yaml for: {', '.join(missing)}")
-    files = render(environments, labels, promotions(root, environments), decisions_cron)
+    files = render(environments, labels, promotions(root, environments), decisions_cron, checks_environment)
     existing = [p for p in files if (root / p).exists()]
     if existing and not force:
         raise ConfigError(f"already present (use --force to replace): {', '.join(existing)}")
