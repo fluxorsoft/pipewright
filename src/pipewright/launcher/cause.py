@@ -251,4 +251,6 @@ def submit_refusal(error: BaseException) -> dict | None:
     if rule == "unclear" and kind in ("InvalidArgument", "FailedPrecondition", "BadRequest", "OutOfRange"):
         rule, who, hint = "bad_request", TEAM, "the orchestrator refused the run as asked: check the use case's " \
                                                "pipeline and step settings"
+    if rule == "permission":          # at submission no step has run: it is the launcher or the run's identity
+        hint = "the orchestrator refused the launcher or the run's identity: the platform grants the permission"
     return {"error_type": kind, "error": line, "rule": rule, "owner": who, "next": hint}

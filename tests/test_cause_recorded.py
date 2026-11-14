@@ -599,3 +599,10 @@ def test_cleaning_drops_the_request_url_before_cutting_the_message():
                                    "Table p:d.t: Permission bigquery.tables.get denied on table p:d.t"})
     assert kept["message"] == ("write_table: Forbidden: Access Denied: Table p:d.t: Permission bigquery.tables.get "
                                "denied on table p:d.t")
+
+
+def test_a_permission_refused_at_submission_names_the_launcher_not_a_step():
+    # found live on Kubeflow (1.4.4 QA): the launcher's own role binding was gone, and the hint spoke of a step
+    refusal = cause.submit_refusal(RuntimeError('listing Kubeflow runs failed: 403 services "x" is forbidden'))
+    assert refusal["rule"] == "permission" and refusal["owner"] == "platform"
+    assert "launcher" in refusal["next"] and "step" not in refusal["next"]
