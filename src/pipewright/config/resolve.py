@@ -475,6 +475,16 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                   # present when on, so releases elsewhere compile exactly as before.
                   **({"registration": "launcher", "artifacts_bucket": env.artifacts_bucket}
                      if (env.policies or {}).get("registration") == "launcher" else {}),
+                  # 1.4.4 (the cause recorded, off by default): where a failed step drops its value-free failure
+                  # record (the tenant's own pipeline root, the one place its runner may write), and whether a refused
+                  # submission is recorded. On for the environment (the manifest) or for this use case
+                  # (monitoring.*). Only present when on, so releases elsewhere compile exactly as before.
+                  **({"failure_records": f"gs://{env.artifacts_bucket}/pipeline-root/{tenant}/{meta['name']}/failures"}
+                     if env.observability.get("failure_records") or (ml.get("monitoring") or {}).get("failure_records")
+                     else {}),
+                  **({"submit_failed": True}
+                     if env.observability.get("submit_failed") or (ml.get("monitoring") or {}).get("submit_failed")
+                     else {}),
                   # read_source refuses feature tables (and groups' tables) outside them
                   **({"feature_datasets": fd} if (fd := ((env.tenants.get(tenant) or {}).get("features") or {})
                                                   .get("datasets")) is not None else {})},

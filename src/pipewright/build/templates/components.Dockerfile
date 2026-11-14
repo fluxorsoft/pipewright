@@ -22,6 +22,11 @@ RUN --mount=type=secret,id=pip_ca,required=false \
 COPY components/ ./
 COPY kfp_config.ini ./
 
+# Pipewright 1.4.4, failure records (off by default): when the build context carries pipewright_failure_hook.py, a
+# .pth file loads it at interpreter start, so a step that ends with an error leaves a value-free record of why.
+# Without the file (records off) nothing is written here.
+RUN if [ -f pipewright_failure_hook.pth ]; then       mv pipewright_failure_hook.pth "$(python -c 'import site; print(site.getsitepackages()[0])')/"; fi
+
 ARG RELEASE_ID=unknown
 ARG USECASE=unknown
 ENV PIPEWRIGHT_RELEASE=${RELEASE_ID}

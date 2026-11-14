@@ -72,6 +72,15 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message
 log = logging.getLogger("pipewright.launcher")
 
 
+class SubmitRefused(Exception):
+    """1.4.4: the orchestrator refused a run and trying again cannot help. Recorded as run.submit_failed already;
+    .answer is what the trigger is told."""
+
+    def __init__(self, message: str, answer: dict):
+        super().__init__(message)
+        self.answer = answer
+
+
 def create_app(registry: Registry | None = None) -> Flask:
     app = Flask(__name__)
     state = {"registry": registry}
@@ -291,6 +300,24 @@ def create_app(registry: Registry | None = None) -> Flask:
             log.info("duplicate %s for %s", jid, source_uri)
             _event("run.duplicate", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid)
             return {"usecase": contract.usecase, "pipeline": pipeline, "status": "duplicate", "job_id": jid}
+        except Exception as e:  # noqa: BLE001
+            # 1.4.4 (off by default: the environment's observability.submit_failed, or the use case's
+            # monitoring.submit_failed): a run the orchestrator refuses at submission is recorded once as
+            # run.submit_failed, and a refusal that cannot get better is answered at the trigger (/run, /pubsub),
+            # not retried. Callers inside the launcher (retrain loops, A/B tests) still get the error, as before.
+            # Off, or an error that may pass: raised unchanged, and the trigger's retry stands.
+            from pipewright.launcher import cause as _cause
+
+            refusal = _cause.submit_refusal(e) if _cause.submit_failed_on(reg().manifest, contract) else None
+            if refusal is None:
+                raise
+            log.warning("submission of %s refused (%s): %s", jid, refusal["error_type"], refusal["error"])
+            _event("run.submit_failed", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid,
+                   source_uri=source_uri, **refusal, **({"loop": loop} if loop else {}))
+            raise SubmitRefused(str(e), {
+                "usecase": contract.usecase, "pipeline": pipeline, "status": "submit_failed", "job_id": jid,
+                "run_id": rid, "release": contract.release_id, "reason": refusal["error"],
+                "owner": refusal["owner"]}) from e
 
     # ---------------------------------------------------------------------------------- retrain decisions --
     def launcher_url() -> str:
@@ -816,6 +843,8 @@ def create_app(registry: Registry | None = None) -> Flask:
                     results.append(via_loop(contract, rid, "landing", event.uri))
                     continue
                 results.append(start(contract, landing_pipeline(contract), event.uri, rid, "landing", stem))
+            except SubmitRefused as e:                  # 1.4.4: recorded; a retry cannot help, so acknowledged
+                results.append(e.answer)
             except Exception:  # noqa: BLE001 - retried by Pub/Sub; duplicates are rejected by job ID
                 failed = True
                 log.exception("failed to submit %s for %s", contract.usecase, event.uri)
@@ -854,6 +883,8 @@ def create_app(registry: Registry | None = None) -> Flask:
         try:
             result = start(contract, r.pipeline, r.source_uri, r.run_id, r.trigger, body.get("schedule") or "",
                            dict(r.overrides), r.loop, r.ml_config, dict(r.recorded))
+        except SubmitRefused as e:                      # 1.4.4: recorded; a retry cannot help, so answered
+            return jsonify(e.answer), 200
         except Exception as e:  # noqa: BLE001
             log.exception("failed to submit %s", usecase)
             return jsonify(status="error", reason=str(e)), 500

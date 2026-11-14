@@ -242,6 +242,8 @@ monitoring.performance.min: The value below which an alert is raised.
 monitoring.output_table: The table monitoring results are written to.
 monitoring.alerts: Email for Pipewright events, set up by `pipewright alerts sync`.
 monitoring.alerts.notify: Email addresses, distribution lists included.
+monitoring.failure_records: "1.4.4, off by default. A failed step records why it failed, with no data values (the error's type, the place in your code, check results), and run.failed carries the cause and whose it is: your team's or the platform's. Takes effect at the next release. The platform can also switch it on for a whole environment."
+monitoring.submit_failed: "1.4.4, off by default. A run the orchestrator refuses at submission (a machine the region cannot provide, a refused permission) is recorded as run.submit_failed, and a refusal that cannot get better is not retried. The platform can also switch it on for a whole environment."
 
 retraining: What drift or a performance drop leads to, and who decides on a retrain.
 retraining.mode: off (alerts only), propose (a case opens and a person decides) or candidate (trains a candidate that is never promoted). Write "off" in quotes, since YAML reads a bare off as false (which also means off).

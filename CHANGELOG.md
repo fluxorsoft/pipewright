@@ -3,6 +3,37 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [1.4.4] - unreleased
+
+The cause recorded (FR-132). When a run fails, Pipewright says why and whose it is. Both parts are off until
+turned on: a use case or environment that sets neither releases and runs exactly as before. The guide is
+[docs/FAILURES.md](docs/FAILURES.md).
+
+- Failure records (`monitoring.failure_records` in usecase.yaml, or `observability.failure_records` for a whole
+  environment): a step that ends with an error drops a small record of why in its tenant's pipeline root, with no
+  data values: the error's type, Pipewright's own message, the place in your code (file, line, the code line
+  without comments), the identity the step ran as, and check results a step attaches with
+  `pipewright_runtime.failure_detail(checks=[...])`. A message Pipewright did not write is never kept.
+- `run.failed` says why: the launcher's hourly check reads the record, cleans it again and adds `cause`, `owner`
+  (team, platform or unclear), `why` and `next` to the event and to its `runs/failed/` marker; the alert email
+  carries them. Without a record the cause comes from Google's own error line (out of memory, a missing image,
+  quota, a machine shape) or, on Kubeflow, from the failed pod's status (never its logs).
+- The owner comes from a fixed, ordered rules table (`pipewright.launcher.cause`): no model, one test per rule.
+- `run.submit_failed` (`monitoring.submit_failed`, or `observability.submit_failed`): a run the orchestrator
+  refuses at submission is recorded once, and a refusal that cannot get better is answered, not retried.
+  `monitoring.alerts.events` may name it.
+- Kubeflow: a failed run that lists no failed step takes the step from its failed pods; the tool server's `runs`
+  tool lists Kubeflow runs too, and shows a failed run's recorded cause on both orchestrators.
+- `pipewright doctor` says when a use case's failure causes are not recorded, and how to switch them on.
+- `value_free()` keeps Python and pandas type names (`'float'`, `'str'`): they are not data.
+
+### Upgrading
+
+Nothing to do to stay as you are. To switch on, set the key and release: the record writer ships in the component
+image. With the starter or Enterprise Terraform, `failure_records = true` and `submit_failed = true` switch a whole
+environment on, and let an agent identity read the launcher's `runs/failed/` markers. On private GKE the launcher
+needs a role to read pod status in the Kubeflow namespace (Enterprise's blueprint grants it).
+
 ## [1.4.3] - 2026-11-13
 
 Model serving observability (FR-98), a runner that cannot move a model's default (FR-100) and repeatable synthetic

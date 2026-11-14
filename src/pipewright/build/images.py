@@ -52,6 +52,12 @@ def kfp_config_ini(components: dict[str, str]) -> str:
     return buf.getvalue()
 
 
+# What Python runs at start in a component image built with failure records on (a .pth line must begin "import").
+FAILURE_HOOK_PTH = ('import importlib.util as _u; _s = _u.spec_from_file_location("pipewright_failure_hook", '
+                    '"/app/components/pipewright_failure_hook.py"); _m = _u.module_from_spec(_s); '
+                    '_s.loader.exec_module(_m)\n')
+
+
 def build_context(uc: ResolvedUseCase, dest: Path) -> Path:
     requirements = uc.requirements or (uc.components_dir / "requirements.txt")
     if not requirements.is_file():
@@ -81,6 +87,12 @@ def build_context(uc: ResolvedUseCase, dest: Path) -> Path:
     templates = resources.files("pipewright.build.templates")
     runtime = templates.joinpath("pipewright_runtime.py").read_text(encoding="utf-8")
     (dest / "components" / "pipewright_runtime.py").write_text(runtime, encoding="utf-8")
+    # 1.4.4 (off by default): with failure records on, the image carries the hook that writes one when a step
+    # fails; the Dockerfile loads it only if the file is there, so other images are built exactly as before.
+    if (uc.platform or {}).get("failure_records"):
+        hook = templates.joinpath("pipewright_failure_hook.py").read_text(encoding="utf-8")
+        (dest / "components" / "pipewright_failure_hook.py").write_text(hook, encoding="utf-8")
+        (dest / "components" / "pipewright_failure_hook.pth").write_text(FAILURE_HOOK_PTH, encoding="utf-8")
     (dest / "kfp_config.ini").write_text(kfp_config_ini(find_components(uc.components_dir)), encoding="utf-8")
     dockerfile = templates.joinpath("components.Dockerfile").read_text(encoding="utf-8")
     (dest / "Dockerfile").write_text(dockerfile, encoding="utf-8")

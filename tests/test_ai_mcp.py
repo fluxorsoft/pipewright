@@ -1,6 +1,7 @@
 """`pipewright mcp` (Pipewright 1.3.0): read-and-verify tools, refusals, untrusted text marked, every call logged."""
 
 import asyncio
+import dataclasses
 import json
 
 import pytest
@@ -293,3 +294,71 @@ def test_every_tool_has_a_description_even_when_overridden(server):
     server.__class__ = Sub
     tools = asyncio.run(mcp.build_app(server).list_tools())
     assert all(t.description for t in tools), [t.name for t in tools if not t.description]
+
+
+def test_runs_shows_the_recorded_cause_of_a_failed_run(server):
+    """1.4.4: with failure records on, the launcher's runs/failed/ marker holds the cause; an agent may read it."""
+    job = {"name": "projects/p/locations/l/pipelineJobs/churn-r1", "state": "PIPELINE_STATE_FAILED",
+           "labels": {"run-id": "r1"},
+           "jobDetail": {"taskDetails": [{"taskName": "ingest-data", "state": "FAILED",
+                                          "error": {"message": "replica exited 1"}}]}}
+    marker = {"job_id": "churn-r1", "cause": {"owner": "platform", "rule": "permission", "step": "ingest-data",
+                                               "summary": "ingest-data: write_table: Forbidden"}}
+
+    class Media:
+        text = json.dumps(marker)
+
+    class G(FakeGcp):
+        session = type("S", (), {"get": staticmethod(lambda url, **k: Media())})()
+
+        def get(self, url, **params):
+            if url.endswith("/pipelineJobs"):
+                return Response(200, {"pipelineJobs": [job]})
+            if url.endswith("/pipelineJobs/churn-r1"):
+                return Response(200, job)
+            if "/o/runs%2Ffailed%2Fchurn-r1" in url:
+                return Response(200, {"generation": "3"})
+            return super().get(url, **params)
+
+    server._gcp_factory = G
+    (run,) = server.runs("churn")["runs"]
+    assert run["cause"] == marker["cause"] and run["failed_steps"] == ["ingest-data"]
+
+    class NoMarker(G):
+        def get(self, url, **params):
+            return Response(404, {}) if "/o/runs%2Ffailed" in url else super().get(url, **params)
+
+    server._gcp_factory = NoMarker
+    (run,) = server.runs("churn")["runs"]
+    assert "cause" not in run and run["error"] == "ingest-data: replica exited 1"
+
+
+def test_runs_lists_kubeflow_runs_too(server, monkeypatch):
+    """1.4.4: on private GKE the runs are Kubeflow's; before, the tool answered Agent Platform runs only."""
+    from pipewright import kube
+    from pipewright.adapters.kfp import run_description
+
+    labels = {"pipewright-usecase": "churn", "run-id": "r9", "pipewright-pipeline": "training", "trigger": "api"}
+    runs = [{"run_id": "u1", "display_name": "churn-r9", "state": "FAILED", "description": run_description(labels),
+             "created_at": "2026-11-14T09:50:00Z", "finished_at": "2026-11-14T09:58:00Z",
+             "pipeline_spec": {"root": {"dag": {"tasks": {"validate-data": {}}}}},
+             "run_details": {"task_details": [{"display_name": "validate-data", "state": "FAILED"}]}},
+            {"run_id": "u2", "display_name": "other", "state": "SUCCEEDED",
+             "description": run_description({**labels, "pipewright-usecase": "someone-else"})}]
+    asked = {}
+
+    class Kube:
+        def get(self, path, **params):
+            asked.update(path=path)
+            return Response(200, {"runs": runs})
+
+    def from_manifest(cls, manifest, gcp, dns=False):
+        asked.update(dns=dns)
+        return Kube()
+
+    monkeypatch.setattr(kube.KubeClient, "from_manifest", classmethod(from_manifest))
+    server.env = dataclasses.replace(server.env, orchestrator="kfp", kubernetes={"namespace": "kubeflow"})
+    out = server.runs("churn")
+    (run,) = out["runs"]
+    assert out["ok"] and run["state"] == "failed" and run["run_id"] == "r9" and run["failed_steps"] == ["validate-data"]
+    assert asked["dns"] is True and asked["path"].endswith("/runs")

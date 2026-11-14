@@ -34,6 +34,12 @@ def validate_data(
         metrics.log_metric("label_rate", round(summary["label_rate"], 4))
     metrics.log_metric("max_null_fraction", round(max(summary["null_fractions"].values(), default=0.0), 4))
     if errors:
+        # Pipewright 1.4.4: with failure records on (monitoring.failure_records), these check results go into the
+        # step's failure record and run.failed says why the run stopped. Counts and the contract's own limits
+        # only, never data values. Off, this does nothing.
+        from pipewright_runtime import failure_detail
+
+        failure_detail(checks=errors)
         raise ValueError("data contract failed:\n  " + "\n  ".join(errors))
     logging.info("data contract passed: %d rows", len(df))
     return json.dumps({"rows": len(df), "errors": [],

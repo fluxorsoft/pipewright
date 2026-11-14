@@ -94,22 +94,28 @@ def kfp_failed_jobs(manifest: dict, gcp, since: datetime) -> list[dict]:
             labels = run_labels(run.get("description"))
             if (run.get("state") in KFP_FAILED and labels.get("pipewright-usecase")
                     and (run.get("finished_at") or "") > stamp):
-                # Found live: Kubeflow also lists the DAG, its drivers, executors and "(0)" attempts as failed, and
-                # keeps no error text: only the pipeline's own steps count, and the error is in their pods' logs.
-                steps = _kfp_steps(run.get("pipeline_spec") or {})
-                tasks = [t for t in ((run.get("run_details") or {}).get("task_details")) or []
-                         if t.get("display_name") in steps]
-                jobs.append({
-                    "name": f"kubeflow/{namespace}/runs/{run.get('display_name')}",
-                    "state": "PIPELINE_STATE_" + ("CANCELLED" if run["state"] == "CANCELED" else "FAILED"),
-                    "labels": labels, "endTime": run.get("finished_at"), "error": run.get("error") or {},
-                    "jobDetail": {"taskDetails": [
-                        {"taskName": t["display_name"], "state": t.get("state"),
-                         "error": t.get("error") or {"message": "failed: Kubeflow keeps the error in the step's pod "
-                                                                "logs"}} for t in tasks]}})
+                jobs.append(kfp_job(run, namespace, labels))
         token = (r.body or {}).get("next_page_token")
         if not token or not runs or (runs[-1].get("created_at") or "") < oldest:
             return jobs
+
+
+def kfp_job(run: dict, namespace: str, labels: dict) -> dict:
+    """A failed Kubeflow run in the shape failure() reads. Found live: Kubeflow also lists the DAG, its drivers,
+    executors and "(0)" attempts as failed, and keeps no error text: only the pipeline's own steps count, and the
+    error is in their pods' logs."""
+    steps = _kfp_steps(run.get("pipeline_spec") or {})
+    tasks = [t for t in ((run.get("run_details") or {}).get("task_details")) or []
+             if t.get("display_name") in steps]
+    return {
+        "kfp_run_id": run.get("run_id"),
+        "name": f"kubeflow/{namespace}/runs/{run.get('display_name')}",
+        "state": "PIPELINE_STATE_" + ("CANCELLED" if run.get("state") == "CANCELED" else "FAILED"),
+        "labels": labels, "endTime": run.get("finished_at"), "error": run.get("error") or {},
+        "jobDetail": {"taskDetails": [
+            {"taskName": t["display_name"], "state": t.get("state"),
+             "error": t.get("error") or {"message": "failed: Kubeflow keeps the error in the step's pod logs"}}
+            for t in tasks]}}
 
 
 def _kfp_steps(spec: dict) -> set[str]:
@@ -118,6 +124,65 @@ def _kfp_steps(spec: dict) -> set[str]:
     dags = [spec.get("root") or {}, *(spec.get("components") or {}).values()]
     return {name for d in dags for name in ((d.get("dag") or {}).get("tasks") or {})
             if not name.startswith("condition-")}
+
+
+POD_NOISE = ("Completed", "PodInitializing", "ContainerCreating")
+
+
+def kfp_failed_pods(manifest: dict, gcp, run_id: str) -> list[dict]:
+    """1.4.4: the status of a Kubeflow run's failed pods (why a container stopped: OOMKilled, an image that cannot be
+    pulled), never their logs. Needs a role to read pods in the Kubeflow namespace; without it, an empty list."""
+    from pipewright.kube import KubeClient
+
+    namespace = (manifest.get("kubernetes") or {}).get("namespace") or "kubeflow"
+    r = KubeClient.from_manifest(manifest, gcp).get(f"/api/v1/namespaces/{namespace}/pods",
+                                                    labelSelector=f"pipeline/runid={run_id}")
+    if not r.ok:
+        log.info("pod status of run %s not readable (%s): the cause comes from the failure record only", run_id,
+                 r.status)
+        return []
+    out = []
+    for pod in (r.body or {}).get("items") or []:
+        meta, status = pod.get("metadata") or {}, pod.get("status") or {}
+        args = [a for c in ((pod.get("spec") or {}).get("containers") or [])
+                for a in (c.get("command") or []) + (c.get("args") or [])]
+        step = next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "--task_name"), None)
+        for cs in (status.get("containerStatuses") or []) + (status.get("initContainerStatuses") or []):
+            state = cs.get("state") or {}
+            ended, waiting = state.get("terminated") or {}, state.get("waiting") or {}
+            last = (cs.get("lastState") or {}).get("terminated") or {}
+            reason = ended.get("reason") or waiting.get("reason") or last.get("reason")
+            code = ended.get("exitCode", last.get("exitCode"))
+            if reason and reason not in POD_NOISE:
+                out.append({"pod": meta.get("name"), "step": step, "reason": str(reason)[:80], "exit_code": code,
+                            "workflow": (meta.get("labels") or {}).get("workflows.argoproj.io/workflow")})
+    # the status that names a cause first (OOMKilled, ImagePullBackOff), then plain errors
+    return sorted(out, key=lambda p: p["reason"] == "Error")
+
+
+def _cause(gcp, contract, job: dict, detail: dict, since: datetime, manifest: dict | None,
+           now: datetime) -> dict | None:
+    """1.4.4, with failure records on for the use case: why the run failed and whose it is (launcher.cause)."""
+    from pipewright.launcher import cause
+
+    where = cause.folder(contract)
+    if not where:
+        return None
+    pods = []
+    if manifest is not None and job.get("kfp_run_id"):
+        try:
+            pods = kfp_failed_pods(manifest, gcp, job["kfp_run_id"])
+        except Exception:  # noqa: BLE001 - pod status is a help, never a need
+            log.exception("pod status of %s not read", detail["job_id"])
+    extra = tuple(x for x in (job.get("kfp_run_id"), *sorted({p["workflow"] for p in pods if p.get("workflow")}))
+                  if x)
+    try:
+        found = cause.records(gcp, where, contract.usecase, (job.get("labels") or {}).get("run-id"),
+                              detail["job_id"], since, extra, now)
+    except Exception:  # noqa: BLE001 - the folder cannot be read: the cause comes from what Google says
+        log.exception("failure records of %s not read", detail["job_id"])
+        found = []
+    return cause.cause(detail, found, pods[0] if pods else None)
 
 
 def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, now: datetime | None = None,
@@ -135,6 +200,16 @@ def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, n
         if contract is None:
             continue
         detail = failure(job if kubeflow else full_job(gcp, job, region))
+        try:
+            why = _cause(gcp, contract, job, detail, now - LOOKBACK - timedelta(days=1), manifest, now)
+        except Exception:  # noqa: BLE001 - run.failed is recorded with or without its cause
+            log.exception("cause of %s not worked out", detail["job_id"])
+            why = None
+        if why:
+            # owner, why and next are plain fields so the email's short text carries them; cause has the detail
+            detail.update(cause=why, owner=why["owner"], why=why["summary"], next=why.get("next"))
+            if not detail["failed_steps"] and why.get("step"):       # Kubeflow can list no failed step (found live)
+                detail["failed_steps"] = [why["step"]]
         try:
             gcs_write(gcp, bucket, f"{MARKERS}/{detail['job_id']}", json.dumps(detail), if_generation_match=0)
         except PreconditionFailed:

@@ -64,6 +64,8 @@ EVENTS: tuple[Event, ...] = (
     Event("run.integrity", _L, "A run was checked against what was approved before it was submitted (refused or "
           "warned).", ("governance", "sre", "ml"), "1.4.0"),
     Event("run.failed", _L, "A run ended failed or cancelled (the launcher's tick).", ("ml", "sre"), "1.2.0"),
+    Event("run.submit_failed", _L, "The orchestrator refused a run at submission, and trying again cannot help "
+          "(off by default).", ("ml", "sre"), "1.4.4"),
     Event("run.unregistered", _L, "A training run the gates approved ended succeeded without registering its model.",
           ("ml", "sre", "governance"), "1.4.3"),
     Event("run.held", _L, "A scoring run waits for a person (approvals.batch_scoring manual): nothing was submitted.",

@@ -5,6 +5,9 @@ inference:
 
 monitoring:
   output_table: my_churn_model_monitoring
+  # Pipewright 1.4.4, both off by default (the platform can also switch them on for a whole environment):
+  # failure_records: true               # a failed step records why (no data values); run.failed says why and whose
+  # submit_failed: true                 # a run the orchestrator refuses at submission is recorded, and not retried
   alerts:                                 # `pipewright alerts sync` turns these into email alerts
     notify: []                            # e.g. [team-ml@yourcompany.com, ml-oncall@yourcompany.com] (lists work)
     events: [monitoring.alert, training.rejected]   # also: model.registered, training.evaluated

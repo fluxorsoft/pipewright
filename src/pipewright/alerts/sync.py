@@ -53,7 +53,11 @@ EVENTS = {
                          ["model", "version", "default", "primary_value"]),
     # from the launcher's hourly tick (Pipewright 1.2.0, FR-67)
     "run.failed": ('jsonPayload.pipewright_event.event_type="run.failed"', "pipeline run failed",
-                   ["pipeline", "job_id", "state", "failed_steps", "error"]),
+                   ["pipeline", "job_id", "state", "failed_steps", "error"]),   # 1.4.4: the cause is in the brief
+    # 1.4.4 (off by default): the orchestrator refused the run at submission
+    "run.submit_failed": ('jsonPayload.pipewright_event.event_type="run.submit_failed"',
+                          "pipeline run could not be submitted",
+                          ["pipeline", "job_id", "error_type", "error", "owner"]),
     # FR-124, from the same tick: the evaluation approved the model, the run succeeded, nothing was registered
     "run.unregistered": ('jsonPayload.pipewright_event.event_type="run.unregistered"',
                          "approved model was not registered", ["job_id", "run_id", "primary_metric",

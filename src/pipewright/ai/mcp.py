@@ -309,15 +309,18 @@ class Server:
 
     def runs(self, usecase: str, limit: int = 5) -> dict:
         """A use case's latest pipeline runs, newest first: state, release, and for a failed run the failed steps and
-        their first error line (the same value-free summary as the run.failed event). Step logs are not read: they
-        can hold data values; the person reads them in the console."""
+        their first error line (the same value-free summary as the run.failed event). With failure records on
+        (1.4.4), a failed run also has its cause: the step, the owner (team, platform or unclear) and why. Agent
+        Platform and Kubeflow runs. Step logs are not read: they can hold data values; the person reads them in the
+        console."""
         from pipewright.launcher import watch
 
         e = self.env
+        if e.orchestrator == "kfp":                    # 1.4.4: Kubeflow runs too (private-gke)
+            return self._kfp_runs(usecase, limit)
         if e.orchestrator != "vertex":
             self.log("runs", "metadata", "unsupported", usecase=usecase)
-            return {"ok": False, "error": "runs lists Agent Platform runs; on private-gke use the Kubeflow UI "
-                                          "(pipewright pipelines-ui) or the run.failed events"}
+            return {"ok": False, "error": f"runs does not list {e.orchestrator} runs"}
         base = f"https://{e.region}-aiplatform.googleapis.com/v1/projects/{e.project}/locations/{e.region}"
         r = self.gcp().get(f"{base}/pipelineJobs", filter=f'labels.pipewright-usecase="{usecase}"',
                            orderBy="create_time desc", pageSize=max(1, min(int(limit), 20)))
@@ -333,8 +336,55 @@ class Server:
                    "created": job.get("createTime"), "ended": job.get("endTime")}
             if job.get("state") in watch.FAILED:       # a list leaves out the steps; a get has them
                 f = watch.failure(watch.full_job(self.gcp(), job, e.region))
-                run.update(failed_steps=f["failed_steps"], error=f["error"])
+                run.update(failed_steps=f["failed_steps"], error=f["error"], **self._recorded_cause(f["job_id"]))
             out.append(run)
+        self.log("runs", "metadata", "ok", usecase=usecase, runs=len(out))
+        return {"ok": True, "usecase": usecase, "runs": out,
+                "note": "a run that succeeded without a new model version did not pass its gates (see model_list)"}
+
+    def _recorded_cause(self, job_id: str) -> dict:
+        """1.4.4, with failure records on: the cause the launcher recorded for a failed run (its runs/failed/ marker:
+        the step, the owner, a one-line summary, the value-free record). {} when there is none or it is not
+        readable; the launcher writes it on its hourly check, so a run that just failed may not have one yet."""
+        try:
+            from pipewright.gcp import gcs_read
+
+            text, _ = gcs_read(self.gcp(), self.env.artifacts_bucket, f"runs/failed/{job_id}")
+            cause = (json.loads(text) if text else {}).get("cause")
+            return {"cause": cause} if isinstance(cause, dict) else {}
+        except Exception:  # noqa: BLE001 - no marker, or no read access to runs/failed/: the run without its cause
+            return {}
+
+    def _kfp_runs(self, usecase: str, limit: int) -> dict:
+        """The use case's latest Kubeflow runs, in the same shape as Agent Platform runs."""
+        from pipewright.adapters.kfp import api_path, run_labels
+        from pipewright.kube import KubeClient, message
+        from pipewright.launcher import watch
+
+        e = self.env
+        namespace = (e.kubernetes or {}).get("namespace") or "kubeflow"
+        # outside the VPC (a person's machine, a hosted tool server): the cluster's DNS endpoint, IAM authorized
+        kube = KubeClient.from_manifest({"kubernetes": e.kubernetes}, self.gcp(), dns=True)
+        r = kube.get(f"{api_path(namespace)}/runs", page_size=100, sort_by="created_at desc")
+        if not r.ok:
+            self.log("runs", "metadata", "error", usecase=usecase)
+            return {"ok": False, "error": f"Kubeflow runs not readable ({r.status} {message(r)})"}
+        out = []
+        for item in (r.body or {}).get("runs") or []:
+            labels = run_labels(item.get("description"))
+            if labels.get("pipewright-usecase") != usecase:
+                continue
+            state = str(item.get("state") or "").lower()
+            run = {"run_id": labels.get("run-id"), "pipeline": labels.get("pipewright-pipeline"),
+                   "release": labels.get("pipewright-release"), "trigger": labels.get("trigger"),
+                   "state": "cancelled" if state == "canceled" else state,
+                   "created": item.get("created_at"), "ended": item.get("finished_at")}
+            if item.get("state") in watch.KFP_FAILED:
+                f = watch.failure(watch.kfp_job(item, namespace, labels))
+                run.update(failed_steps=f["failed_steps"], error=f["error"], **self._recorded_cause(f["job_id"]))
+            out.append(run)
+            if len(out) >= max(1, min(int(limit), 20)):
+                break
         self.log("runs", "metadata", "ok", usecase=usecase, runs=len(out))
         return {"ok": True, "usecase": usecase, "runs": out,
                 "note": "a run that succeeded without a new model version did not pass its gates (see model_list)"}

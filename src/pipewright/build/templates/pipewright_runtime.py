@@ -11,6 +11,7 @@ write_table   writes rows to the use case's store (outputs.store): BigQuery, Par
 write_snapshot  writes the rows a run read to data.snapshot_table, tagged with the run, so the run can be replayed
 fairness_measures  bias measures per attribute on the test set (evaluation.fairness); fairness_problems its gates
 write_lineage writes lineage.json for a registered model version: release, config digest, rows, sources, evaluation
+failure_detail  check results for this step's failure record, should it fail (1.4.4, with failure records on)
 log           one structured JSON log line with the standard Pipewright labels
 emit_event    a lifecycle event: a structured log line, and a Pub/Sub message when the platform set an events topic
 ray_cluster   a Ray on Agent Platform cluster for this step of this run (steps.<step>.ray), deleted when the block ends
@@ -147,12 +148,22 @@ def emit_event(event_type: str, ml_config: dict, run_id: str | None = None, **da
 _QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 _AFTER_VALUE = re.compile(r"(?i)\b(values?|got|found|literal)(\s*[:=]\s*)(?![`'\"])[^\s,;)\]]+")
 HIDDEN = "..."
+# Python and pandas type names are not data (1.4.4): "unsupported operand type(s) for /: 'float' and 'str'" keeps them.
+TYPE_NAMES = frozenset((
+    "int", "float", "str", "bool", "bytes", "complex", "NoneType", "list", "dict", "tuple", "set", "frozenset",
+    "object", "function", "module", "type", "datetime", "date", "time", "timedelta", "Decimal", "Timestamp",
+    "Timedelta", "NaTType", "Series", "DataFrame", "Index", "ndarray", "int8", "int16", "int32", "int64", "uint8",
+    "uint16", "uint32", "uint64", "float16", "float32", "float64", "bool_", "str_", "object_", "datetime64",
+    "timedelta64", "category", "Int64", "Float64", "boolean", "string"))
 
 
 def value_free(text: str) -> str:
     """The message with data values taken out."""
-    text = _QUOTED.sub(lambda m: m.group(0)[0] + HIDDEN + m.group(0)[0], str(text))
-    return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, text)
+    def quoted(m):
+        q = m.group(0)
+        return q if q[1:-1] in TYPE_NAMES else q[0] + HIDDEN + q[0]
+
+    return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, _QUOTED.sub(quoted, str(text)))
 
 
 def _value_free_errors(fn):
@@ -165,9 +176,23 @@ def _value_free_errors(fn):
             return fn(*args, **kwargs)
         except Exception as e:
             if type(e).__module__.startswith("google."):
-                raise RuntimeError(f"{fn.__name__}: {type(e).__name__}: {value_free(str(e))}") from None
+                error = RuntimeError(f"{fn.__name__}: {type(e).__name__}: {value_free(str(e))}")
+                error.pipewright_value_free = True     # 1.4.4: the failure record may keep this message
+                error.pipewright_error_type = type(e).__name__
+                raise error from None
             raise
     return wrapper
+
+
+# 1.4.4 (the cause recorded, off by default): check results a step wants in its failure record, should it fail.
+_FAILURE_CHECKS: list = []
+
+
+def failure_detail(checks=None) -> None:
+    """Attach check results to this step's failure record, before raising: counts and the contract's own values,
+    never data values ("tenure_months: 715 values below 0"). Kept only if the step then fails and failure records
+    are on (pipewright_failure_hook); otherwise it does nothing. A second call replaces the first."""
+    _FAILURE_CHECKS[:] = [str(c) for c in (checks or [])][:20]
 
 
 # Same rules as pipewright.runs.sources (kept in step by a test).

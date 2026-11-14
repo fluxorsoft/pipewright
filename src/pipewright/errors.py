@@ -29,9 +29,19 @@ class ConfigError(Exception):
 _QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 _AFTER_VALUE = re.compile(r"(?i)\b(values?|got|found|literal)(\s*[:=]\s*)(?![`'\"])[^\s,;)\]]+")
 HIDDEN = "..."
+# Python and pandas type names are not data (1.4.4): "unsupported operand type(s) for /: 'float' and 'str'" keeps them.
+TYPE_NAMES = frozenset((
+    "int", "float", "str", "bool", "bytes", "complex", "NoneType", "list", "dict", "tuple", "set", "frozenset",
+    "object", "function", "module", "type", "datetime", "date", "time", "timedelta", "Decimal", "Timestamp",
+    "Timedelta", "NaTType", "Series", "DataFrame", "Index", "ndarray", "int8", "int16", "int32", "int64", "uint8",
+    "uint16", "uint32", "uint64", "float16", "float32", "float64", "bool_", "str_", "object_", "datetime64",
+    "timedelta64", "category", "Int64", "Float64", "boolean", "string"))
 
 
 def value_free(text: str) -> str:
     """The message with data values taken out."""
-    text = _QUOTED.sub(lambda m: m.group(0)[0] + HIDDEN + m.group(0)[0], str(text))
-    return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, text)
+    def quoted(m):
+        q = m.group(0)
+        return q if q[1:-1] in TYPE_NAMES else q[0] + HIDDEN + q[0]
+
+    return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, _QUOTED.sub(quoted, str(text)))

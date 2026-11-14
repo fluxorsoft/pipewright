@@ -433,6 +433,7 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     s = f"Use case {uc.name} (tenant {uc.tenant})"
     platform = "ask the platform team"
     res = uc.resources
+    _check_failure_records(uc, report, s)
 
     _exists(gcp, report, s, "runner service account", f"{IAM}/projects/-/serviceAccounts/"
             f"{res['runner_service_account']}", platform, lambda b: b.get("email", ""))
@@ -494,6 +495,23 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     _check_serving_1_4_2(uc, env, gcp, report)
     _check_permissions(uc, env, gcp, report, as_agent=as_agent)
 
+
+
+def _check_failure_records(uc: ResolvedUseCase, report: Report, s: str) -> None:
+    """1.4.4: says whether a failed run will say why. A note, never a warning: both are off by default."""
+    on = bool((uc.platform or {}).get("failure_records"))
+    report.add(s, Result(OK if on else INFO, "failure causes",
+                         "recorded: run.failed says why a run failed and whose it is (takes effect at the next "
+                         "release)" if on else
+                         "not recorded: a failed run says only that a step failed",
+                         "" if on else
+                         "set monitoring.failure_records: true in usecase.yaml (or failure_records = true in the "
+                         "environment's Terraform), then release"))
+    if not (uc.platform or {}).get("submit_failed"):
+        report.add(s, Result(INFO, "refused submissions",
+                             "not recorded: a run the orchestrator refuses leaves only a launcher log line",
+                             "set monitoring.submit_failed: true in usecase.yaml (or submit_failed = true in the "
+                             "environment's Terraform), then release"))
 
 
 def _check_sources(uc, env, gcp, report, s, retrain) -> None:

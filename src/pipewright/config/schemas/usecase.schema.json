@@ -1013,6 +1013,14 @@
             "propose_rollback_hours": { "type": "integer", "minimum": 0 }
           }
         },
+        "failure_records": {
+          "type": "boolean",
+          "description": "1.4.4, off by default: a failed step records why it failed, with no data values, and run.failed carries the cause and its owner (team, platform or unclear). Also switched on for a whole environment by the manifest's observability.failure_records"
+        },
+        "submit_failed": {
+          "type": "boolean",
+          "description": "1.4.4, off by default: a run Google refuses at submission is recorded as run.submit_failed, and a refusal that cannot get better is not retried. Also switched on for a whole environment by the manifest's observability.submit_failed"
+        },
         "alerts": {
           "type": "object",
           "additionalProperties": false,
@@ -1024,7 +1032,7 @@
                         "training.rejected", "training.evaluated", "model.registered", "run.failed",
                         "run.unregistered", "model.duplicated", "serving.degraded", "serving.recovered", "rollback.proposed",
                         "monitoring.attribution_drift", "monitoring.insufficient_data", "serving.capture_gap",
-                        "serving.capture_silent", "model.registration_refused"] } },
+                        "serving.capture_silent", "model.registration_refused", "run.submit_failed"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         },
@@ -1405,7 +1413,7 @@
         "monitoring": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "online": { "$ref": "#/$defs/monitoring/properties/online" }, "health": { "$ref": "#/$defs/monitoring/properties/health" }, "alerts": {
+          "properties": { "online": { "$ref": "#/$defs/monitoring/properties/online" }, "health": { "$ref": "#/$defs/monitoring/properties/health" }, "failure_records": { "type": "boolean" }, "submit_failed": { "type": "boolean" }, "alerts": {
           "type": "object",
           "additionalProperties": false,
           "description": "email notifications for Pipewright events (`pipewright alerts sync`)",
@@ -1416,7 +1424,7 @@
                         "training.rejected", "training.evaluated", "model.registered", "run.failed",
                         "run.unregistered", "model.duplicated", "serving.degraded", "serving.recovered", "rollback.proposed",
                         "monitoring.attribution_drift", "monitoring.insufficient_data", "serving.capture_gap",
-                        "serving.capture_silent", "model.registration_refused"] } },
+                        "serving.capture_silent", "model.registration_refused", "run.submit_failed"] } },
             "severity": { "enum": ["CRITICAL", "ERROR", "WARNING"] }
           }
         } }
