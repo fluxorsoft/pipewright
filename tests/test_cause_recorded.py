@@ -530,3 +530,59 @@ def test_the_one_line_reason_leaves_out_the_request_url():
     assert c["summary"] == ("record-metrics: write_table: Forbidden: Access Denied: Table p:d.t: Permission "
                             "bigquery.tables.get denied on table p:d.t")
     assert c["owner"] == "platform" and "https://" in c["record"]["message"]
+
+
+def test_a_step_without_ml_config_records_too(monkeypatch):
+    """Found in the 1.4.4 QA on Kubeflow: load-model takes no ml_config and left no record. The release compiles
+    the folder into every step's environment."""
+    info = raised(RuntimeError("default version has no model.pt at gs://b/x"))
+    out = "/gcs/b/pipeline-root/churn/churn/churn-training/ee7e31aa-5957-4da7-a129-a4dc8f351c68/load-model/" \
+          "2b96e1df-9d3b-49f2-8af9-2fa7a5748a6c/output_metadata.json"
+    args = argv(ml=False, function="load_model", output=out)
+    assert hook.build(*info, args) is None                               # records off: nothing
+    for name, value in (("PIPEWRIGHT_FAILURE_RECORDS", FOLDER), ("PIPEWRIGHT_USECASE", "churn"),
+                        ("PIPEWRIGHT_TENANT", "churn"), ("PIPEWRIGHT_ENVIRONMENT", "dev")):
+        monkeypatch.setenv(name, value)
+    folder, record = hook.build(*info, args)
+    assert folder == FOLDER and record["usecase"] == "churn" and record["tenant"] == "churn"
+    assert record["step"] == "load-model" and record["error_type"] == "RuntimeError" and record["message"] is None
+
+
+def test_the_release_compiles_the_folder_into_every_step_only_when_on(repo):
+    from pipewright.build import compile as build_compile
+
+    def doc():
+        return {"deploymentSpec": {"executors": {
+            "exec-a": {"container": {"image": "i", "env": [{"name": "KEEP", "value": "1"}]}},
+            "exec-b": {"container": {"image": "i"}}, "exec-importer": {"importer": {}}}}}
+
+    env = load_environment(repo.root if repo.write() else repo.root, "dev")
+    off = doc()
+    assert build_compile.failure_env(off, resolve_usecase(repo.write(), env)) is False and off == doc()
+    repo.usecase["spec"]["monitoring"] = {"failure_records": True}
+    on = doc()
+    assert build_compile.failure_env(on, resolve_usecase(repo.write(), env)) is True
+    a = {e["name"]: e["value"] for e in on["deploymentSpec"]["executors"]["exec-a"]["container"]["env"]}
+    assert a == {"KEEP": "1", "PIPEWRIGHT_FAILURE_RECORDS": FOLDER, "PIPEWRIGHT_USECASE": "churn",
+                 "PIPEWRIGHT_TENANT": "churn", "PIPEWRIGHT_ENVIRONMENT": "dev"}
+    assert len(on["deploymentSpec"]["executors"]["exec-b"]["container"]["env"]) == 4
+    assert "container" not in on["deploymentSpec"]["executors"]["exec-importer"]
+
+
+def test_a_kubeflow_pod_names_its_step_by_the_components_function(monkeypatch):
+    """Seen live: the pod's arguments carry --function_to_execute, not the task's name."""
+    from pipewright import kube
+
+    pod = {"metadata": {"name": "churn-training-k772f-system-container-impl-3274566317", "labels": {}},
+           "spec": {"containers": [{"name": "main", "args": ["--executor_input", "{}", "--function_to_execute",
+                                                             "load_model"]}]},
+           "status": {"containerStatuses": [{"name": "main", "state": {"terminated": {"reason": "Error",
+                                                                                      "exitCode": 1}}}]}}
+
+    class Kube:
+        def get(self, path, **params):
+            return SimpleNamespace(ok=True, status=200, body={"items": [pod]})
+
+    monkeypatch.setattr(kube.KubeClient, "from_manifest", classmethod(lambda cls, m, g, dns=False: Kube()))
+    (found,) = watch.kfp_failed_pods({"kubernetes": {}}, None, "ee7e31aa")
+    assert found["step"] == "load-model" and found["reason"] == "Error" and found["exit_code"] == 1

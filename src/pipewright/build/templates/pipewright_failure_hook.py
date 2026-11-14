@@ -2,9 +2,10 @@
 this writes one small JSON file saying why, with no data values, then lets the step fail exactly as before.
 
 Copied into every component image by `pipewright release`, next to pipewright_runtime.py, and loaded at interpreter
-start by a .pth file the image build writes. It does nothing unless the step's ml_config carries
-platform.failure_records (the environment's observability.failure_records, or the use case's
-monitoring.failure_records): that value is the folder the record is dropped in, inside the tenant's own pipeline root.
+start by a .pth file the image build writes. It does nothing unless failure records are on (the environment's
+observability.failure_records, or the use case's monitoring.failure_records): the release then compiles
+PIPEWRIGHT_FAILURE_RECORDS into every step of its pipelines (and platform.failure_records into ml_config), the
+folder the record is dropped in, inside the tenant's own pipeline root.
 The launcher's hourly check reads the record, cleans it again and keeps the cause in run.failed; nothing else reads
 this folder.
 
@@ -103,7 +104,8 @@ def _step(executor_input: dict, function: str | None) -> str:
     """The step's name: on Agent Platform the task's folder (<task>_<number>), otherwise the function's name as the
     compiler names its task."""
     out = str(((executor_input.get("outputs") or {}).get("outputFile")) or "")
-    m = re.search(r"/([^/]+)_-?\d+/executor_output\.json$", out)
+    m = (re.search(r"/([^/]+)_-?\d+/executor_output\.json$", out)                       # Agent Platform
+         or re.search(r"/([^/]+)/[0-9a-f]{8}-[0-9a-f-]{27}/output_metadata\.json$", out))   # Kubeflow (seen live)
     return m.group(1) if m else (function or "unknown").replace("_", "-")
 
 
@@ -141,11 +143,18 @@ def build(exc_type, exc, tb, argv: list, components: str = COMPONENTS) -> tuple[
     if isinstance(ml_config, str):                     # a dict parameter can arrive as its JSON text
         ml_config = json.loads(ml_config)
     if not isinstance(ml_config, dict):
-        return None
+        ml_config = {}
     platform = ml_config.get("platform") or {}
-    folder = platform.get("failure_records")
+    # Where records go, and so whether they are on: the release compiles it into every step of the pipeline
+    # (PIPEWRIGHT_FAILURE_RECORDS), so a step without an ml_config parameter records too (found in the 1.4.4 QA: a
+    # load-model step failed on Kubeflow and left nothing). The step's own ml_config is the older source.
+    folder = os.environ.get("PIPEWRIGHT_FAILURE_RECORDS") or platform.get("failure_records")
     if not folder or not isinstance(folder, str):
         return None
+    env = os.environ.get
+    ml_config = {"usecase": env("PIPEWRIGHT_USECASE"), "environment": env("PIPEWRIGHT_ENVIRONMENT"),
+                 **{k: v for k, v in ml_config.items() if v is not None}}
+    platform = {"tenant": env("PIPEWRIGHT_TENANT"), **{k: v for k, v in platform.items() if v is not None}}
     function = _argument(argv, "--function_to_execute")
     run_id = values.get("run_id")
     runtime = sys.modules.get("pipewright_runtime")

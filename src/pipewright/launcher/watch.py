@@ -146,7 +146,9 @@ def kfp_failed_pods(manifest: dict, gcp, run_id: str) -> list[dict]:
         meta, status = pod.get("metadata") or {}, pod.get("status") or {}
         args = [a for c in ((pod.get("spec") or {}).get("containers") or [])
                 for a in (c.get("command") or []) + (c.get("args") or [])]
-        step = next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "--task_name"), None)
+        # the step: Kubeflow's pods carry the component's function, not the task's name (seen live in the 1.4.4 QA)
+        step = next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "--task_name"), None) or next(
+            (args[i + 1].replace("_", "-") for i, a in enumerate(args[:-1]) if a == "--function_to_execute"), None)
         for cs in (status.get("containerStatuses") or []) + (status.get("initContainerStatuses") or []):
             state = cs.get("state") or {}
             ended, waiting = state.get("terminated") or {}, state.get("waiting") or {}

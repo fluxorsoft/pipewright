@@ -90,7 +90,8 @@ raise ValueError("data contract failed")
 
 ## How it works
 
-1. **The step drops the record.** A small hook in the component image runs when the step's Python process ends with an
+1. **The step drops the record.** With records on, the release compiles the record folder into every step of your
+   pipelines, so every step records, whatever its parameters. A small hook in the component image runs when the step's Python process ends with an
    error. It writes the record under the tenant's own pipeline root (`<pipeline root>/failures/<date>/`), the one
    place the step's runner may write, then lets the step fail exactly as before. If it cannot write, it prints one line
    and gives up. It never changes the step's outcome.

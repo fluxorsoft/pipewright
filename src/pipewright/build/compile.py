@@ -74,6 +74,23 @@ def _import(uc: ResolvedUseCase, pipeline: str):
     return fn
 
 
+def failure_env(doc: dict, uc: ResolvedUseCase) -> bool:
+    """1.4.4, with failure records on for the use case in this environment: every step's container learns where to
+    drop its failure record (PIPEWRIGHT_FAILURE_RECORDS) and whose it is, so a step without an ml_config parameter
+    records too. Off, the template is untouched: it compiles exactly as before."""
+    folder = (uc.platform or {}).get("failure_records")
+    if not folder:
+        return False
+    names = {"PIPEWRIGHT_FAILURE_RECORDS": folder, "PIPEWRIGHT_USECASE": uc.name, "PIPEWRIGHT_TENANT": uc.tenant,
+             "PIPEWRIGHT_ENVIRONMENT": uc.environment}
+    for executor in ((doc.get("deploymentSpec") or {}).get("executors") or {}).values():
+        container = executor.get("container")
+        if container is not None:
+            kept = [e for e in container.get("env") or [] if e.get("name") not in names]
+            container["env"] = kept + [{"name": k, "value": str(v)} for k, v in names.items()]
+    return True
+
+
 def compile_pipeline(uc: ResolvedUseCase, pipeline: str = "training", component_image: str = PLACEHOLDER_IMAGE,
                      output: Path | None = None, steps: dict | None = None,
                      synthetic_images: tuple[str, str] = (PLACEHOLDER_IMAGE, PLACEHOLDER_IMAGE)) -> TemplateInfo:
@@ -104,6 +121,8 @@ def compile_pipeline(uc: ResolvedUseCase, pipeline: str = "training", component_
     doc = yaml.safe_load(out.read_text(encoding="utf-8"))
     if steps:
         apply_steps(doc, steps)
+        out.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    if failure_env(doc, uc):
         out.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     params = {
         name: {"type": p.get("parameterType"), "default": p.get("defaultValue"),
