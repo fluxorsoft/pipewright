@@ -245,6 +245,28 @@ def submit_failed_on(manifest: dict, contract) -> bool:
     return bool(_platform(contract).get("submit_failed"))
 
 
+_KUBE_DENIED = re.compile(r'is forbidden: User "')
+_KUBE_NAME = re.compile(r'"([A-Za-z0-9_.@:/*-]{0,120})"')
+
+
+def _refusal_text(text: str) -> str:
+    """The orchestrator's reason, value-free. Kubernetes' own access refusal quotes names only (the resource, the
+    user, the API group, the namespace, the verb), and they are what the platform team needs, so they are kept:
+    found live on Kubeflow, where hiding them left `User "..." cannot get resource "..."`."""
+    if not _KUBE_DENIED.search(text):
+        return value_free(text)
+    kept: list[str] = []
+
+    def keep(m):
+        kept.append(m.group(1))
+        return f"PWNAME{len(kept) - 1}X"
+
+    out = value_free(_KUBE_NAME.sub(keep, text))
+    for i, name in enumerate(kept):
+        out = out.replace(f"PWNAME{i}X", f'"{name}"')
+    return out
+
+
 def submit_refusal(error: BaseException) -> dict | None:
     """What run.submit_failed says about a refused submission, or None for an error that may pass on a retry.
     Google's reason passes the value-free rule; the owner comes from the same rules table."""
@@ -252,7 +274,7 @@ def submit_refusal(error: BaseException) -> dict | None:
     text = str(error)
     if kind not in PERMANENT and not (isinstance(error, RuntimeError) and _HTTP_PERMANENT.search(text)):
         return None
-    line = " ".join(value_free(text).split())[:MAX_TEXT]
+    line = " ".join(_refusal_text(text).split())[:MAX_TEXT]
     rule, who, hint = owner({"error_type": kind, "message": line}, line)
     if rule == "unclear" and kind in ("InvalidArgument", "FailedPrecondition", "BadRequest", "OutOfRange"):
         rule, who, hint = "bad_request", TEAM, "the orchestrator refused the run as asked: check the use case's " \

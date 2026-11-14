@@ -617,3 +617,16 @@ def test_a_perimeter_refusal_reads_cleanly():
     assert record["message"] == ("read_source: Forbidden: Request is prohibited by organization's policy. "
                                  "vpcServiceControlsUniqueIdentifier: F_-fSo")
     assert cause.owner(record, "")[:2] == ("perimeter", "platform")
+
+
+def test_a_kubernetes_refusal_keeps_its_names_and_nothing_else():
+    # Kubernetes' text as the launcher received it on Kubeflow (1.4.4 QA): names only, and the platform needs them
+    refusal = cause.submit_refusal(RuntimeError(
+        'listing Kubeflow runs failed: 403 services "ml-pipeline:8888" is forbidden: User '
+        '"pw-launcher@p.iam.gserviceaccount.com" cannot get resource "services/proxy" in API group "" in the '
+        'namespace "kubeflow": requires one of ["container.services.proxy"] permission(s)'))
+    assert 'User "pw-launcher@p.iam.gserviceaccount.com" cannot get resource "services/proxy"' in refusal["error"]
+    assert 'namespace "kubeflow"' in refusal["error"] and refusal["rule"] == "permission"
+    # any other refusal still has its quoted text hidden
+    other = cause.submit_refusal(RuntimeError('creating Kubeflow run x failed: 400 invalid value "Jane Doe"'))
+    assert "Jane Doe" not in other["error"]
