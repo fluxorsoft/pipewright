@@ -518,3 +518,15 @@ def test_doctor_says_when_causes_are_not_recorded(repo):
                                                          (doctor.INFO, "refused submissions")]
     repo.usecase["spec"]["monitoring"] = {"failure_records": True, "submit_failed": True}
     assert notes(resolve_usecase(repo.write(), env)) == [(doctor.OK, "failure causes")]
+
+
+def test_the_one_line_reason_leaves_out_the_request_url():
+    """Found live: Google's message starts with the request line, which pushed the permission out of the summary."""
+    record = {"step": "record-metrics", "kind": "pipewright_error", "error_type": "Forbidden",
+              "message": "write_table: Forbidden: 403 GET https://bigquery.googleapis.com/bigquery/v2/projects/p/"
+                         "datasets/d/tables/t?prettyPrint=false: Access Denied: Table p:d.t: Permission "
+                         "bigquery.tables.get denied on table p:d.t"}
+    c = cause.cause({"state": "failed", "failed_steps": ["record-metrics"], "error": GENERIC}, [record])
+    assert c["summary"] == ("record-metrics: write_table: Forbidden: Access Denied: Table p:d.t: Permission "
+                            "bigquery.tables.get denied on table p:d.t")
+    assert c["owner"] == "platform" and "https://" in c["record"]["message"]

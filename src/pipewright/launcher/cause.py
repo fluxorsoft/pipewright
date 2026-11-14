@@ -30,6 +30,7 @@ MAX_TEXT = 300
 MAX_RECORD_BYTES = 32_000
 MAX_LISTED = 500                     # failure records looked at per failed run
 _NAME = re.compile(r"^[A-Za-z0-9_.@:/ -]{1,200}$")
+_URL = re.compile(r"\b\d{3} (?:GET|POST|PUT|PATCH|DELETE) https?://\S+ ")   # "403 GET https://...: " in a Google error
 
 # The rules, in order: the first that matches names the owner. `on` says what a rule reads: "line" is Google's error
 # line or a pod's status, "record" the step's failure record. Patterns confirmed live in the 1.4.4 spikes.
@@ -197,7 +198,7 @@ def cause(detail: dict, found: list[dict], pod: dict | None = None) -> dict:
     if record and rule not in ("out_of_memory", "machine_shape", "missing_image"):
         source = "failure_record"
         if record.get("message"):
-            what = record["message"]
+            what = _URL.sub("", record["message"])          # the request line says nothing the rest does not
         elif record.get("checks"):
             what = "; ".join(record["checks"][:3])
         elif record.get("code"):
