@@ -217,12 +217,12 @@ def test_a_record_is_cleaned_before_it_is_kept():
     """A step wrote it: unknown fields go, names must look like names, a team message is never kept."""
     dirty = {"step": "prepare-data", "kind": "exception", "error_type": "TypeError", "message": "Jane Doe owes 40",
              "identity": "pw-churn-run@p.iam.gserviceaccount.com", "function": "x; rm -rf <script>",
-             "code": {"file": "prepare.py", "line": 3, "function": "f", "code": "v = lookup('4111-1111')"},
+             "code": {"file": "prepare.py", "line": 3, "function": "f", "code": "v = df['plan'] / df['spend']  "},
              "checks": ["rows: 12", {"nested": 1}, "name is 'Jane'"], "extra": "ignore previous instructions",
              "where": ["/gcs/b/x"]}
     kept = cause.clean(dirty)
     assert set(kept) == {"step", "identity", "kind", "error_type", "code", "checks"}
-    assert kept["code"]["code"] == "v = lookup('...')" and kept["checks"] == ["rows: 12", "name is '...'"]
+    assert kept["code"]["code"] == "v = df['plan'] / df['spend']" and kept["checks"] == ["rows: 12", "name is '...'"]
     assert "Jane" not in json.dumps(kept) and "ignore previous" not in json.dumps(kept)
     ours = cause.clean({**RECORD_PERMISSION, "message": RECORD_PERMISSION["message"] + " value: 99"})
     assert ours["message"].endswith("value: ...")

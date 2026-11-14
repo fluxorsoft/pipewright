@@ -207,7 +207,8 @@ def report(gcp, bucket: str, project: str, region: str, contracts: list, emit, n
             why = None
         if why:
             # owner, why and next are plain fields so the email's short text carries them; cause has the detail
-            detail.update(cause=why, owner=why["owner"], why=why["summary"], next=why.get("next"))
+            detail.update({k: v for k, v in (("cause", why), ("owner", why["owner"]), ("why", why["summary"]),
+                                             ("next", why.get("next"))) if v is not None})
             if not detail["failed_steps"] and why.get("step"):       # Kubeflow can list no failed step (found live)
                 detail["failed_steps"] = [why["step"]]
         try:

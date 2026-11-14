@@ -37,11 +37,11 @@ RULES = (
     # Google's own line or the pod's status names the cause
     ("out_of_memory", TEAM, "line",
      r"low on memory|out of memory|OOMKilled|exit(?:ed)? (?:with )?(?:code |status )?137",
-     "the step ran out of memory: give it more (steps.<step>.resources.memory)"),
+     "the step ran out of memory: give it more (steps.<step>.memory in usecase.yaml)"),
     ("machine_shape", TEAM, "line",
      r"Unable to find available machine|does not support accelerator|"
      r"machine type .* (?:is )?not (?:supported|available)",
-     "the region cannot provide the machine the step asks for: change steps.<step>.resources"),
+     "the region cannot provide the machine the step asks for: change steps.<step> (cpu, memory, gpu) in usecase.yaml"),
     ("quota", PLATFORM, "line", r"[Qq]uota|RESOURCE_EXHAUSTED",
      "a Google Cloud quota was reached: the platform raises it or frees capacity"),
     ("missing_image", PLATFORM, "line",
@@ -68,6 +68,15 @@ def _text(value, limit: int = MAX_TEXT) -> str | None:
     return value_free(str(value)).replace("\n", " ")[:limit]
 
 
+def _line(value, limit: int) -> str | None:
+    """A line of the team's own source code, kept as written (its column names are what make it useful: found in the
+    1.4.4 live test, where hiding quoted text left `df["..."] / df["..."]`): one line, cut short. Source code is not
+    data; the step's hook has already dropped the comment."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return " ".join(value.split())[:limit]
+
+
 def _name(value) -> str | None:
     """A name or an ID from a record: kept only if it looks like one."""
     return str(value) if isinstance(value, (str, int)) and _NAME.match(str(value)) else None
@@ -87,7 +96,7 @@ def clean(record: dict) -> dict:
         "message": _text(record.get("message")) if ours else None,
         "code": ({"file": _name(code.get("file")),
                   "line": code.get("line") if isinstance(code.get("line"), int) else None,
-                  "function": _name(code.get("function")), "code": _text(code.get("code"), 200)}
+                  "function": _name(code.get("function")), "code": _line(code.get("code"), 200)}
                  if code.get("file") else None),
         "checks": [c for c in (_text(c, 240) for c in (record.get("checks") or [])[:20]
                                if isinstance(c, (str, int, float))) if c],
