@@ -94,7 +94,8 @@ def clean(record: dict) -> dict:
         "identity": _name(record.get("identity")),
         "kind": "pipewright_error" if ours else "exception",
         "error_type": _name(record.get("error_type")),
-        "message": _text(record.get("message")) if ours else None,
+        # without the request line ("403 GET https://...: "): it repeats what follows and used up the length
+        "message": _text(_URL.sub("", str(record.get("message") or ""))) if ours else None,
         "code": ({"file": _name(code.get("file")),
                   "line": code.get("line") if isinstance(code.get("line"), int) else None,
                   "function": _name(code.get("function")), "code": _line(code.get("code"), 200)}

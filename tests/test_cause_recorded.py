@@ -586,3 +586,13 @@ def test_a_kubeflow_pod_names_its_step_by_the_components_function(monkeypatch):
     monkeypatch.setattr(kube.KubeClient, "from_manifest", classmethod(lambda cls, m, g, dns=False: Kube()))
     (found,) = watch.kfp_failed_pods({"kubernetes": {}}, None, "ee7e31aa")
     assert found["step"] == "load-model" and found["reason"] == "Error" and found["exit_code"] == 1
+
+
+def test_cleaning_drops_the_request_url_before_cutting_the_message():
+    """Found on Kubeflow: the limit cut the permission's last word because the URL had used the length."""
+    long_url = "https://bigquery.googleapis.com/bigquery/v2/projects/p/datasets/d/tables/" + "t" * 180
+    kept = cause.clean({"kind": "pipewright_error", "error_type": "Forbidden", "step": "record-metrics",
+                        "message": f"write_table: Forbidden: 403 GET {long_url}?prettyPrint=false: Access Denied: "
+                                   "Table p:d.t: Permission bigquery.tables.get denied on table p:d.t"})
+    assert kept["message"] == ("write_table: Forbidden: Access Denied: Table p:d.t: Permission bigquery.tables.get "
+                               "denied on table p:d.t")
