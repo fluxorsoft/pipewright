@@ -16,6 +16,7 @@ one test per rule. It holds no data values: names, IDs, error types, Pipewright'
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -34,6 +35,8 @@ _URL = re.compile(r"\b\d{3} (?:GET|POST|PUT|PATCH|DELETE) https?://\S+ ")   # "4
 
 # The rules, in order: the first that matches names the owner. `on` says what a rule reads: "line" is Google's error
 # line or a pod's status, "record" the step's failure record. Patterns confirmed live in the 1.4.4 spikes.
+_TAIL = re.compile(r": \('\.\.\.', \d{3}, .*\)\s*$")                        # the storage client's trailing tuple
+
 RULES = (
     # Google's own line or the pod's status names the cause
     ("out_of_memory", TEAM, "line",
@@ -67,7 +70,10 @@ RULE_NAMES = ("out_of_memory", "machine_shape", "quota", "missing_image", "perim
 def _text(value, limit: int = MAX_TEXT) -> str | None:
     if value in (None, ""):
         return None
-    return value_free(str(value)).replace("\n", " ")[:limit]
+    # Google's storage errors arrive HTML-escaped and end with the client's own tuple ("...: ('...', 403, ...)"):
+    # found live under an enforced perimeter (1.4.4 QA)
+    text = _TAIL.sub("", html.unescape(value_free(str(value)).replace("\n", " ")))
+    return text[:limit]
 
 
 def _line(value, limit: int) -> str | None:

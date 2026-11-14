@@ -606,3 +606,14 @@ def test_a_permission_refused_at_submission_names_the_launcher_not_a_step():
     refusal = cause.submit_refusal(RuntimeError('listing Kubeflow runs failed: 403 services "x" is forbidden'))
     assert refusal["rule"] == "permission" and refusal["owner"] == "platform"
     assert "launcher" in refusal["next"] and "step" not in refusal["next"]
+
+
+def test_a_perimeter_refusal_reads_cleanly():
+    # the message as it arrived live from a step on Kubeflow under an enforced perimeter (1.4.4 QA)
+    record = cause.clean({"step": "ingest-data", "kind": "pipewright_error", "error_type": "Forbidden", "message": (
+        "read_source: Forbidden: Request is prohibited by organization&#39;s policy. "
+        "vpcServiceControlsUniqueIdentifier: F_-fSo: ('...', 403, '...', <HTTPStatus.OK: 200>, "
+        "<HTTPStatus.PARTIAL_CONTENT: 206>)")})
+    assert record["message"] == ("read_source: Forbidden: Request is prohibited by organization's policy. "
+                                 "vpcServiceControlsUniqueIdentifier: F_-fSo")
+    assert cause.owner(record, "")[:2] == ("perimeter", "platform")
