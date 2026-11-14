@@ -50,14 +50,15 @@ RULES = (
      "the step's image is missing from the registry: release the use case again, or restore the image"),
     ("perimeter", PLATFORM, "line", r"VPC Service Controls|vpcServiceControls|SECURITY_POLICY_VIOLATED",
      "a service perimeter refused the call: the platform reviews the perimeter's rules"),
-    # the step's own record
-    ("permission", PLATFORM, "record",
-     r"[Ff]orbidden|PermissionDenied|Permission \S+ denied|IAM_PERMISSION_DENIED|Unauthorized|\b403\b",
-     "the step's identity was refused a permission: the platform grants it, or the use case asks for less"),
+    # the step's own record. A perimeter's refusal and a quota's both arrive as a 403 (Forbidden, PermissionDenied),
+    # so they are read before the permission rule
     ("perimeter", PLATFORM, "record", r"VPC Service Controls|vpcServiceControls|SECURITY_POLICY_VIOLATED",
      "a service perimeter refused the call: the platform reviews the perimeter's rules"),
     ("quota", PLATFORM, "record", r"[Qq]uota exceeded|RESOURCE_EXHAUSTED|TooManyRequests",
      "a Google Cloud quota was reached: the platform raises it or frees capacity"),
+    ("permission", PLATFORM, "record",
+     r"[Ff]orbidden|PermissionDenied|Permission \S+ denied|IAM_PERMISSION_DENIED|Unauthorized|\b403\b",
+     "the step's identity was refused a permission: the platform grants it, or the use case asks for less"),
 )
 RULE_NAMES = ("out_of_memory", "machine_shape", "quota", "missing_image", "perimeter", "permission", "checks",
               "team_code", "cancelled", "unclear")

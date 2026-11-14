@@ -202,7 +202,10 @@ RECORD_CONTRACT = {"step": "validate-data", "kind": "exception", "error_type": "
     (None, "ImagePullBackOff exit None", "missing_image", "platform"),
     ({"kind": "pipewright_error", "error_type": "PermissionDenied",
       "message": "read_source: PermissionDenied: Request is prohibited by organization's policy. "
-                 "vpcServiceControlsUniqueIdentifier: abc"}, GENERIC, "permission", "platform"),
+                 "vpcServiceControlsUniqueIdentifier: abc"}, GENERIC, "perimeter", "platform"),
+    ({"kind": "pipewright_error", "error_type": "Forbidden",
+      "message": "write_table: Forbidden: Quota exceeded: Your usage exceeded the custom quota for "
+                 "QueryUsagePerDay"}, GENERIC, "quota", "platform"),
     (None, GENERIC, "unclear", "unclear"),
     ({"kind": "pipewright_error", "error_type": "NotFound", "message": "read_source: NotFound: 404 table"},
      GENERIC, "unclear", "unclear"),
