@@ -86,9 +86,9 @@ def _code(tb, components: str = COMPONENTS) -> dict | None:
     import linecache
 
     found = None
-    root = components.rstrip("/\\")
+    root = os.path.normpath(components).replace("\\", "/")
     while tb is not None:
-        path = tb.tb_frame.f_code.co_filename.replace("\\", "/")
+        path = os.path.normpath(tb.tb_frame.f_code.co_filename).replace("\\", "/")   # /app/components/./x.py
         if path.startswith(root.replace("\\", "/") + "/") and os.path.basename(path) not in OWN:
             found = (path, tb.tb_lineno, tb.tb_frame.f_code.co_name)
         tb = tb.tb_next
