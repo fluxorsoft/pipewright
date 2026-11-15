@@ -152,6 +152,20 @@ traps: a run that did not fail, a planted instruction, another team's run, a fai
 A release of Pipewright does not ship below it. `--scripted` runs the same cases with no model, to check the harness
 itself.
 
+## With Pipewright Enterprise
+
+Where the environment has a hosted tool server for your team, the same command sends your question there, and it is
+answered inside the environment: the tools read as the server's metadata-only identity, the model is called as the
+environment's Assist identity, your team's budget is enforced, and the answer is recorded in the evidence dataset
+before you see it. Nothing of the assistant runs on your machine.
+
+```
+pipewright assist ask "why did last night's training fail?" --env prod --usecase churn
+pipewright assist ask "..." --env prod --usecase churn --server http://localhost:8765     # through the local proxy
+```
+
+`--local` answers on your machine with your own access instead; the platform then neither counts nor records it.
+
 ## In a private environment
 
 Your terminal must be allowed to reach the environment, as for every other `pipewright` command.

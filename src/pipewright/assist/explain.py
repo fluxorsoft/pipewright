@@ -79,6 +79,8 @@ def settings_table(env, uc=None, asked: int | None = None) -> str:
     off = assist_settings.why_off(env, uc)
     understood = (getattr(uc, "assist", None) or {}).get("understood") if uc is not None else None
     current = assist_settings.EXPLAIN_VERSION
+    tenant = getattr(uc, "tenant", None)
+    hosted = bool(((getattr(env, "tenants", None) or {}).get(tenant or "") or {}).get("agent_server"))
     rows = [
         ("Assist", "ON" if not off else "OFF"),
         ("Platform switch", ("allowed" if s.platform_allows else "not allowed") if s.platform_managed
@@ -89,12 +91,17 @@ def settings_table(env, uc=None, asked: int | None = None) -> str:
             "" if understood in (None, current) else f" (current: {current})")),
         ("Model", s.model),
         ("Called from", f"{s.location}" + (" endpoint" if s.location == "global" else " (regional)")),
-        ("Called as", s.model_service_account or "you (your own Google Cloud access)"),
+        ("Answered", "by your team's hosted tool server, inside the environment" if hosted
+         else "on this machine, with your own Google Cloud access"),
+        ("Model called as", s.model_service_account or "you (your own Google Cloud access)"),
+        ("Recorded", "in the environment's evidence dataset (ai_assist_answers)" if hosted
+         else ".pipewright/assist-log.jsonl in this repository"),
         ("Temperature", f"{s.temperature:g}"),
         ("Longest answer", f"{s.max_output_tokens:,} tokens"),
         ("Ceiling per question", f"{s.max_tool_calls} tool calls, {s.max_tokens:,} tokens"),
         ("Questions per team per month", f"{s.questions_per_month:,}"
-         + ("" if asked is None else f" (asked this month: {asked})")),
+         + (" (enforced by the hosted tool server)" if hosted else
+            "" if asked is None else f" (asked this month: {asked}; counted, not enforced)")),
         ("Screening (Model Armor)", f"on: {s.screening_template}" if s.screening
          else "OFF: answers are marked \"not screened\""),
     ]
