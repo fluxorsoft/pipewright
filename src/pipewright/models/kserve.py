@@ -213,6 +213,25 @@ class KServe:
     def _path(self, name: str = "") -> str:
         return f"{API}/namespaces/{self.s['namespace']}/inferenceservices" + (f"/{name}" if name else "")
 
+    def capture_note(self) -> str | None:
+        """What to say about capture after a deploy: with capture on, whether the tenant's capture receiver is there
+        to take the records. Found in the 1.4.4 GA QA, live: in an environment without the receiver every record was
+        dropped and nothing (validate, doctor, deploy-model) said so. None when capture is off for the use case."""
+        cap = (self.uc.model.get("serving") or {}).get("capture") or {}
+        if not cap.get("enabled"):
+            return None
+        ns = self.s["namespace"]
+        r = self.kube.get(f"/api/v1/namespaces/{ns}/services/{capture.RECEIVER}")
+        if r.ok:
+            return (f"capture on: a share of {float(cap['sample_rate']):g} of the requests goes to the capture "
+                    f"receiver in {ns}")
+        if r.status == 404:
+            return (f"capture: NOT recorded. {self.uc.name} sets model.serving.capture, but namespace {ns} has no "
+                    f"capture receiver (service {capture.RECEIVER}): the platform switches it on for the environment "
+                    "(Pipewright Enterprise: spec.gke.capture_receiver_image). Until then online monitoring and live "
+                    "quality have no data")
+        return f"capture: the capture receiver in {ns} could not be checked (HTTP {r.status})"
+
     def current(self) -> dict | None:
         from pipewright.kube import message
 
@@ -423,6 +442,9 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
         apply_pod_monitoring(k, log)
     if running == _label(vid) and current_pin == (pinned or {}).get("folder") and same_files and same_obs and ready:
         log(f"v{vid} of {uc.model['name']} is already live on {k.name}")
+        note = k.capture_note()
+        if note:
+            log(note)
         log(k.how_to_call() or "")
         return {"version": vid, "status": "live"}
     if running == _label(vid) and current_pin == (pinned or {}).get("folder") and not same_files:
@@ -436,6 +458,9 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
         k.ensure_load_balancer(port)
     log(f"live: {k.name} serves {uc.model['name']} v{vid} ({', '.join(f'{a}: {u}' for a, u in k.endpoints().items())})")
     _deployed(uc, env, gcp, vid, k, check, pinned)
+    note = k.capture_note()
+    if note:
+        log(note)
     log(k.how_to_call() or "")
     return {"version": vid, "status": "deployed"}
 

@@ -285,3 +285,24 @@ def test_a_rewritten_serving_copy_updates_the_pods_check(repo, fake, monkeypatch
     assert kserve.deploy(uc, env, gcp, log=said.append)["status"] == "deployed"
     assert kserve._pinned_files(fake.isvc)[0]["generation"] == "12"
     assert any("the pods' check is updated" in line for line in said)
+
+
+def test_capture_without_a_receiver_is_said_at_deploy(repo, fake):
+    """1.4.4 GA QA (live): with capture on and no capture receiver in the namespace, every record was dropped and
+    nothing said so."""
+    uc, env = serving_env(repo)
+    gcp = SimpleNamespace(identity=lambda: "ci@p")
+    said: list[str] = []
+    kserve.deploy(uc, env, gcp, log=said.append)
+    assert not any("capture" in line for line in said)                       # capture off: nothing about it
+    uc.model["serving"]["capture"] = {"enabled": True, "sample_rate": 0.1, "max_per_day": 1000, "retention_days": 7}
+    said.clear()
+    kserve.deploy(uc, env, gcp, log=said.append)
+    assert any(line.startswith("capture: NOT recorded") and "capture_receiver_image" in line for line in said)
+    found = fake.get
+    fake.get = lambda path, **p: (Response(200, {}) if path.endswith("/services/pipewright-capture")
+                                  else found(path, **p))
+    said.clear()
+    kserve.deploy(uc, env, gcp, log=said.append)                             # already live: said there too
+    assert any(line.startswith("capture on: a share of 0.1") for line in said)
+
