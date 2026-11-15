@@ -138,8 +138,12 @@ def ask(env, tenant: str, question: str, usecase: str | None, understood: str, s
                    f"kubectl port-forward -n {hosted.get('namespace', 'pipewright-mcp')} "
                    f"service/{hosted.get('service', 'pipewright-mcp')} 8765:80")
         elif hosted and not proxied:
-            how = (" If its ingress is internal, run the proxy and pass --server http://localhost:8765:\n  "
+            # 1.4.4 GA QA (live): with internal ingress Cloud Run drops a call from outside the network (404), and
+            # the local proxy sends the same call from the same machine, so it does not help there
+            how = (" If its ingress is internal (the default), Cloud Run only takes calls from inside the "
+                   "environment's network: ask from a machine on it (a workstation on the VPC, or over your VPN). "
+                   "There the same command works; the proxy is an alternative:\n  "
                    f"gcloud run services proxy {hosted.get('service', 'pipewright-mcp')} --project {env.project} "
-                   f"--region {env.region} --port 8765")
+                   f"--region {env.region} --port 8765   (then --server http://localhost:8765)")
         raise ConfigError(f"the hosted tool server at {url} could not be reached "
                           f"({type(e).__name__}: {str(e)[:200]}).{how}") from None
