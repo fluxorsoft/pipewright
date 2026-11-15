@@ -616,3 +616,23 @@ def test_a_hosted_answer_wrapped_by_the_tool_server_is_unwrapped(monkeypatch):
     assert hosted._call("http://x/mcp", {}, {"question": "q"}) == {"ok": True, "answer": "It failed."}
     monkeypatch.setattr(hosted, "_post", lambda url, headers, body: (401, "application/json", "{}"))
     assert "did not admit you (401)" in hosted._call("http://x/mcp", {}, {})["refused"]
+
+
+def test_the_token_ceiling_is_named_and_stops_the_tools():
+    """1.4.4 GA QA (live): at the token ceiling the answer said '8 tool calls'."""
+    c = CASES[0]
+    tools = Tools(FrozenSource(c["data"]), "retail", None, 8)
+
+    class Spent(replay.ScriptedBrain):
+        settings = SimpleNamespace(max_tokens=1500)
+
+        def investigate(self, question, context, tools):
+            found, usage = super().investigate(question, context, tools)
+            tools.stop("the ceiling of 1,500 tokens for one question is reached")
+            assert "1,500 tokens" in tools.known_fix("checks")["refused"]      # no further tool call
+            return found, {**usage, "ceiling": "tokens"}
+
+    a = Engine(Spent(), tools, "test", None, c.get("usecase")).ask(c["question"])
+    assert "Assist stopped at its ceiling for one question (1,500 tokens)" in a.text
+    assert "tool calls)" not in a.text.split("ceiling for one question")[1].split("\n")[0]
+

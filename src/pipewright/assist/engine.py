@@ -81,8 +81,10 @@ class Engine:
                           tokens_out=a.tokens_out, screened=True, refused=self.tools.unscreened)
         body = self._compose(found or {}, a, question)
         if usage.get("ceiling") or self.tools.ceiling_reached:
-            body += ("\n\nAssist stopped at its ceiling for one question "
-                     f"({self.tools.max_calls} tool calls). Ask about one run at a time.")
+            limit = getattr(getattr(self.brain, "settings", None), "max_tokens", None)
+            which = (f"{self.tools.max_calls} tool calls" if self.tools.ceiling_reached or not limit
+                     else f"{limit:,} tokens")
+            body += f"\n\nAssist stopped at its ceiling for one question ({which}). Ask about one run at a time."
         if a.withheld:
             body += ("\n\nNote: " + ", ".join(a.withheld) + " looked like an instruction, not a fact. Assist "
                      "ignored it and left it out.")

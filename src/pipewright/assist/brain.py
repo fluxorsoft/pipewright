@@ -140,7 +140,11 @@ class AdkBrain:
                                            max_output_tokens=self.settings.max_output_tokens,
                                            thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET))
 
-    async def _run(self, name: str, instruction: str, question: str, tools: list) -> tuple[str, dict]:
+    async def _run(self, name: str, instruction: str, question: str, tools: list,
+                   on_ceiling=None) -> tuple[str, dict]:
+        """One agent run. At the token ceiling the tools are told to refuse (on_ceiling), so the model ends its
+        answer on its next turn; the run is cut only if it then spends as much again. Found in the 1.4.4 GA QA,
+        live: leaving the run in the middle filled the screen with the agent library's errors."""
         from google.adk.agents import LlmAgent
         from google.adk.runners import InMemoryRunner
         from google.genai import types
@@ -151,9 +155,10 @@ class AdkBrain:
         session = await runner.session_service.create_session(app_name="pipewright_assist", user_id="person")
         usage = {"model_calls": 0, "tokens_in": 0, "tokens_out": 0}
         texts: list[str] = []
+        events = runner.run_async(user_id="person", session_id=session.id, new_message=types.Content(
+            role="user", parts=[types.Part(text=question)]))
         try:
-            async for ev in runner.run_async(user_id="person", session_id=session.id, new_message=types.Content(
-                    role="user", parts=[types.Part(text=question)])):
+            async for ev in events:
                 if ev.usage_metadata:
                     usage["model_calls"] += 1
                     usage["tokens_in"] += ev.usage_metadata.prompt_token_count or 0
@@ -162,10 +167,18 @@ class AdkBrain:
                 for part in (ev.content.parts if ev.content and ev.content.parts else []):
                     if part.text and not getattr(part, "thought", False):
                         texts.append(part.text)
-                if usage["tokens_in"] + usage["tokens_out"] > self.settings.max_tokens:
-                    usage["ceiling"] = True
+                spent = usage["tokens_in"] + usage["tokens_out"]
+                if spent > self.settings.max_tokens and not usage.get("ceiling"):
+                    usage["ceiling"] = "tokens"
+                    if on_ceiling:
+                        on_ceiling(f"the ceiling of {self.settings.max_tokens:,} tokens for one question is reached")
+                if spent > 2 * self.settings.max_tokens or (usage.get("ceiling") and not on_ceiling):
                     break
         finally:
+            try:
+                await events.aclose()
+            except Exception:  # noqa: BLE001 - the run is over either way
+                pass
             await runner.close()
         return "\n".join(texts).strip(), usage
 
@@ -177,7 +190,7 @@ class AdkBrain:
 
     def investigate(self, question: str, context: str, tools) -> tuple[dict, dict]:
         text, usage = self._wait(self._run("incident", INVESTIGATE.format(context=context), question,
-                                           tools.as_functions()))
+                                           tools.as_functions(), on_ceiling=getattr(tools, "stop", None)))
         return _last_json(text), usage
 
 

@@ -151,11 +151,19 @@ class Tools:
         self.blocked_seen: list[dict] | None = None
         self.withheld: list[str] = []           # fields that looked like instructions
         self.ceiling_reached = False
+        self.stopped: str | None = None         # the question's token ceiling was reached: no further tool call
         self.unscreened: str | None = None      # screening could not run on a tool's text: the answer is refused
         self.refusals: list[str] = []           # what the guard refused, in its own words
 
     # -- the guard ------------------------------------------------------------------------------------------
+    def stop(self, why: str) -> None:
+        """No further tool call for this question (the model loop reached the token ceiling): the model is told
+        why and ends its answer, as at the tool-call ceiling."""
+        self.stopped = why
+
     def _enter(self, tool: str, **args) -> None:
+        if self.stopped:
+            raise Refused(self.stopped)
         if len(self.calls) >= self.max_calls:
             self.ceiling_reached = True
             raise Refused(f"the ceiling of {self.max_calls} tool calls for one question is reached")
