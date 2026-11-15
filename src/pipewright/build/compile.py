@@ -74,6 +74,11 @@ def _import(uc: ResolvedUseCase, pipeline: str):
     return fn
 
 
+# The variables Pipewright itself writes into every step (1.4.4). They belong to the environment, not to the
+# release: promotion leaves them out when it compares two environments' templates.
+STEP_ENV = ("PIPEWRIGHT_FAILURE_RECORDS", "PIPEWRIGHT_USECASE", "PIPEWRIGHT_TENANT", "PIPEWRIGHT_ENVIRONMENT")
+
+
 def failure_env(doc: dict, uc: ResolvedUseCase) -> bool:
     """1.4.4, with failure records on for the use case in this environment: every step's container learns where to
     drop its failure record (PIPEWRIGHT_FAILURE_RECORDS) and whose it is, so a step without an ml_config parameter

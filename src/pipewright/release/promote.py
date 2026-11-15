@@ -163,12 +163,32 @@ def _download_template(target, creds) -> str:
         return Path(path).read_text(encoding="utf-8")
 
 
+def _without_step_env(doc):
+    """The template without the variables Pipewright writes into every step for the cause recorded (1.4.4). They
+    say where this environment keeps its failure records and which environment it is, so they differ between two
+    environments by design (and are absent where the records are off): not a change to the pipeline. Found in the
+    1.4.4 GA QA: with records on in test only, every promotion to production was refused as a changed template."""
+    from pipewright.build.compile import STEP_ENV
+
+    if not isinstance(doc, dict):
+        return doc
+    for executor in ((doc.get("deploymentSpec") or {}).get("executors") or {}).values():
+        container = executor.get("container") if isinstance(executor, dict) else None
+        if isinstance(container, dict) and "env" in container:
+            kept = [e for e in container["env"] or [] if not (isinstance(e, dict) and e.get("name") in STEP_ENV)]
+            if kept:
+                container["env"] = kept
+            else:
+                del container["env"]
+    return doc
+
+
 def template_differences(source_text: str, dest_text: str, rewrites: dict[str, str]) -> list[str]:
     """Where the destination's compiled template differs from the source template once each source image address
     is rewritten to the destination's. Empty: the same pipeline, pointing at the destination's copy of the images."""
     for old, new in rewrites.items():
         source_text = source_text.replace(old, new)
-    a, b = yaml.safe_load(source_text), yaml.safe_load(dest_text)
+    a, b = _without_step_env(yaml.safe_load(source_text)), _without_step_env(yaml.safe_load(dest_text))
     out: list[str] = []
 
     def walk(x, y, path):

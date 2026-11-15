@@ -5,6 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from pipewright.config import load_environment
 from pipewright.errors import ConfigError
@@ -243,6 +244,30 @@ def test_a_conflicting_release_is_refused(setup):
 
 
 # ------------------------------------------------------------------ parts --
+
+def _with_step_env(text, extra):
+    doc = yaml.safe_load(text)
+    for executor in doc["deploymentSpec"]["executors"].values():
+        executor["container"]["env"] = list(extra)
+    return yaml.safe_dump(doc)
+
+
+def test_template_differences_leave_out_the_variables_pipewright_writes_into_each_step():
+    """1.4.4 GA QA: failure records on in test and off in production is not a changed pipeline."""
+    plain = TEMPLATE.replace("{image}", DST_IMAGE)
+    own = [{"name": "PIPEWRIGHT_FAILURE_RECORDS", "value": "gs://acme-test/runs/failed"},
+           {"name": "PIPEWRIGHT_USECASE", "value": "churn"}, {"name": "PIPEWRIGHT_TENANT", "value": "retail"},
+           {"name": "PIPEWRIGHT_ENVIRONMENT", "value": "test"}]
+    other = [dict(e, value=e["value"].replace("test", "prod")) for e in own]
+    assert promote.template_differences(_with_step_env(plain, own), plain, {}) == []      # on in the source only
+    assert promote.template_differences(plain, _with_step_env(plain, own), {}) == []      # on in the destination only
+    assert promote.template_differences(_with_step_env(plain, own), _with_step_env(plain, other), {}) == []
+    # a variable of the team's own still counts
+    team = [{"name": "MODE", "value": "fast"}]
+    assert promote.template_differences(_with_step_env(plain, own + team), plain, {}) != []
+    both = _with_step_env(plain, own + team), _with_step_env(plain, other + team)
+    assert promote.template_differences(*both, {}) == []
+
 
 def test_template_differences_ignore_only_the_registry_address():
     src, dst = TEMPLATE.replace("{image}", SRC_IMAGE), TEMPLATE.replace("{image}", DST_IMAGE)
