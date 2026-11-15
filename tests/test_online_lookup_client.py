@@ -128,3 +128,27 @@ def test_bigquery_lookups_carry_the_cmek_key(monkeypatch):
               "table": "p.d.t", "kms_key": "projects/p/locations/us-central1/keyRings/r/cryptoKeys/bigquery"}
     lc.fetch_many(online, ["e"])
     assert seen[0]["destinationEncryptionConfiguration"]["kmsKeyName"].endswith("/cryptoKeys/bigquery")
+
+
+def test_a_store_without_the_versions_features_says_what_to_run(monkeypatch):
+    """1.4.4 GA QA (live): a version trained on more features than the store's table held answered only
+    'HTTP 400 (invalidQuery)'."""
+    import io
+    import urllib.error
+
+    def refuse(reason, code):
+        def urlopen(request, timeout=None):
+            body = ('{"error": {"errors": [{"reason": "%s", "message": "Unrecognized name: jane"}]}}' % reason).encode()
+            raise urllib.error.HTTPError("https://bigquery.googleapis.com/x", code, "Bad Request", {}, io.BytesIO(body))
+        return urlopen
+
+    monkeypatch.setattr(lc.urllib.request, "urlopen", refuse("invalidQuery", 400))
+    with pytest.raises(ValueError) as e:
+        lc._post("https://bigquery.googleapis.com/x", {}, "token", 5, "BigQuery")
+    assert "answered HTTP 400 (invalidQuery)" in str(e.value) and "online sync" in str(e.value)
+    assert "jane" not in str(e.value)                                    # never the API's message
+    monkeypatch.setattr(lc.urllib.request, "urlopen", refuse("backendError", 503))
+    with pytest.raises(ValueError) as e:
+        lc._post("https://bigquery.googleapis.com/x", {}, "token", 5, "BigQuery")
+    assert str(e.value) == "the online store (BigQuery) answered HTTP 503 (backendError)"
+

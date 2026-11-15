@@ -70,8 +70,13 @@ def _post(url, body, token, timeout, what):
             reason = errors[0].get("reason") or ""
         except (ValueError, AttributeError):
             pass
-        raise ValueError("the online store ({}) answered HTTP {}{}".format(
-            what, e.code, " ({})".format(reason) if reason else "")) from None
+        # 1.4.4 GA QA: a version trained on more features than the store's table holds answered only
+        # "HTTP 400 (invalidQuery)"; the usual cause and what to run are said with it
+        hint = (": the store's table may not hold this version's features yet; run the use case's online sync "
+                "(pipewright run --schedule <its online schedule>, or pipewright features sync)"
+                if reason in ("invalidQuery", "notFound") else "")
+        raise ValueError("the online store ({}) answered HTTP {}{}{}".format(
+            what, e.code, " ({})".format(reason) if reason else "", hint)) from None
     except (urllib.error.URLError, OSError) as e:
         raise ValueError("the online store ({}) did not answer: {}".format(what, type(e).__name__)) from None
 
