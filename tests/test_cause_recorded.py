@@ -118,6 +118,36 @@ def test_a_team_bug_keeps_the_place_in_the_code_never_the_message(tmp_path):
     assert any("churn-r7" in w for w in record["where"])
 
 
+def test_an_error_pipewrights_own_engine_raised_keeps_its_message_and_names_no_team_line(tmp_path):
+    """1.4.4 GA QA: the BigQuery ML runtime's own error was reported as the team's bug, without its message."""
+    components = tmp_path / "components"
+    components.mkdir()
+    engine = components / "bqml_runtime.py"
+    engine.write_text("def require_champion(ref, customer):\n"
+                      "    raise ValueError(f\"the champion names BigQuery model {ref}, which no longer exists: "
+                      "turn off evaluation.champion (found '{customer}')\")\n", encoding="utf-8")
+    scope: dict = {}
+    exec(compile(engine.read_text(encoding="utf-8"), str(engine), "exec"), scope)  # noqa: S102
+    try:
+        scope["require_champion"]("acme.sales.churn_bqml_r1", "jane.doe@example.com")
+    except ValueError as e:
+        info = (type(e), e, e.__traceback__)
+    _, record = hook.build(*info, argv(function="bqml_evaluate"), components=str(components))
+    assert record["kind"] == "pipewright_error" and record["code"] is None
+    assert "acme.sales.churn_bqml_r1, which no longer exists" in record["message"]
+    assert "jane.doe" not in json.dumps(record)                          # a quoted value is still taken out
+    kept = cause.clean(record)
+    assert "no longer exists" in kept["message"]
+    rule, who, _ = cause.owner(kept)
+    assert rule == "unclear" and "bqml_runtime" not in json.dumps(kept)  # never "your code, bqml_runtime.py"
+    # the same error passing through the engine from somewhere else is not Pipewright's message
+    try:
+        raise ValueError("row 7: Jane Doe")
+    except ValueError as e:
+        _, record = hook.build(type(e), e, e.__traceback__, argv(function="bqml_evaluate"), components=str(components))
+    assert record["kind"] == "exception" and record["message"] is None
+
+
 def test_a_pipewright_error_keeps_its_value_free_message_and_googles_type():
     class Forbidden(Exception):
         pass

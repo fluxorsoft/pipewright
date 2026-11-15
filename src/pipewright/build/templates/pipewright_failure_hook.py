@@ -37,7 +37,11 @@ MAX_BYTES = 16_000        # the whole record
 WRITE_SECONDS = 15
 IDENTITY_SECONDS = 2
 COMPONENTS = "/app/components"
-OWN = ("pipewright_runtime.py", "pipewright_failure_hook.py")
+# Pipewright's own engine code inside a component image (the BigQuery ML steps): an error one of its raise
+# statements wrote is Pipewright's message, about names and settings, and the team has no line to fix in it. Found in
+# the 1.4.4 GA QA: a missing champion model was reported as the team's bug in bqml_runtime.py, without its message.
+ENGINE = ("bqml_runtime.py", "bqml_steps.py")
+OWN = ("pipewright_runtime.py", "pipewright_failure_hook.py", *ENGINE)
 
 _QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 _AFTER_VALUE = re.compile(r"(?i)\b(values?|got|found|literal)(\s*[:=]\s*)(?![`'\"])[^\s,;)\]]+")
@@ -100,6 +104,16 @@ def _code(tb, components: str = COMPONENTS) -> dict | None:
     return {"file": path[len(root) + 1:], "line": line, "function": function, "code": text}
 
 
+def _raised_by_engine(tb, components: str = COMPONENTS) -> bool:
+    """Whether the error was raised by a line of Pipewright's own engine code in the image (the innermost frame)."""
+    root = os.path.normpath(components).replace("\\", "/") + "/"
+    path = None
+    while tb is not None:
+        path = os.path.normpath(tb.tb_frame.f_code.co_filename).replace("\\", "/")
+        tb = tb.tb_next
+    return bool(path) and path.startswith(root) and os.path.basename(path) in ENGINE
+
+
 def _step(executor_input: dict, function: str | None) -> str:
     """The step's name: on Agent Platform the task's folder (<task>_<number>), otherwise the function's name as the
     compiler names its task."""
@@ -159,7 +173,7 @@ def build(exc_type, exc, tb, argv: list, components: str = COMPONENTS) -> tuple[
     run_id = values.get("run_id")
     runtime = sys.modules.get("pipewright_runtime")
     checks = [value_free(str(c))[:MAX_CHECK] for c in (getattr(runtime, "_FAILURE_CHECKS", None) or [])][:MAX_CHECKS]
-    ours = bool(getattr(exc, "pipewright_value_free", False))
+    ours = bool(getattr(exc, "pipewright_value_free", False)) or _raised_by_engine(tb, components)
     record = {
         "schema": SCHEMA, "time": datetime.now(timezone.utc).isoformat(),
         "usecase": ml_config.get("usecase"), "environment": ml_config.get("environment"),
