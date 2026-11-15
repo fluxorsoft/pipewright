@@ -5,9 +5,41 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [1.4.4] - unreleased
 
-The cause recorded (FR-132). When a run fails, Pipewright says why and whose it is. Both parts are off until
-turned on: a use case or environment that sets neither releases and runs exactly as before. The guide is
+Two things, both off until turned on: a use case or environment that sets neither releases and runs exactly as
+before.
+
+**The cause recorded (FR-132).** When a run fails, Pipewright says why and whose it is. The guide is
 [docs/FAILURES.md](docs/FAILURES.md).
+
+**Pipewright Assist, a preview (FR-133).** An assistant that answers incident questions from what Pipewright
+recorded: `pipewright assist ask "why did last night's training fail?"`. The guide is
+[docs/ASSIST.md](docs/ASSIST.md).
+
+### Pipewright Assist (preview)
+
+- `pipewright assist explain`: what Assist is, what it reads and never reads, the model, who pays, and the settings
+  in play. A team reads it before switching Assist on.
+- `pipewright assist ask "<question>" --env <env> [--usecase | --tenant | --platform]`: the run, the cause, the owner
+  and what to do next. The cause, the owner and the advice come from Pipewright's fixed rules and a fixed list of
+  fixes; the model finds the run and explains. It reads no data rows, logs, monitoring results or audit logs, and it
+  changes nothing.
+- Two switches, neither enough alone: the platform allows it (`ai.assist.enabled` in the manifest; an environment
+  without a platform manifest has no platform switch) and the team opts in (`assist: { enabled: true, understood:
+  "1.4.4" }` in usecase.yaml, naming the explain page it read).
+- The model: `gemini-3.8-flash` from the global endpoint, temperature 0, called in the customer's own project as the
+  person asking. The platform may set `ai.assist.model` and `ai.assist.location`. Eight tool calls and 40,000 tokens
+  a question at most.
+- Screening with Model Armor (`ai.assist.screening`): the question, each text field a tool returns and the answer.
+  Without a template every answer says it was not screened.
+- A record of every question and answer in `.pipewright/assist-log.jsonl`.
+- `pipewright assist test`: 22 frozen incidents replayed against the model and scored against a pass mark (the
+  release gate).
+- `pipewright doctor` says whether Assist is on for a use case, and why not.
+- A new extra, `assist` (Google's Agent Development Kit, pinned). Not installed, nothing changes.
+- For Assist, a run the orchestrator refused at submission now also leaves a marker under
+  `runs/failed/not-submitted/`, and the `runs` tool lists it with state `not_submitted` (with `submit_failed` on).
+
+### The cause recorded
 
 - Failure records (`monitoring.failure_records` in usecase.yaml, or `observability.failure_records` for a whole
   environment): a step that ends with an error drops a small record of why in its tenant's pipeline root, with no
