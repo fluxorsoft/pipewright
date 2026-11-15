@@ -458,10 +458,14 @@ class ABTests:
         if not (reason or "").strip():
             raise ConfigError("give --reason: it is recorded with your name")
         if winner == "treatment" and t["state"] != "decision_required" and not t["decision"]["required"]:
+            # 1.4.4 GA QA (live): an analysis that said "continue" (minutes into the test, no outcome matured, days
+            # short of min_days) let the treatment win. Decision-ready means the analysis itself says a decision is
+            # due: the planned sample after min_days, a conclusive sequential test, or max_days.
             res = t.get("analysis") or {}
-            if not res or res.get("blocked"):
-                raise ConfigError(f"test {t['name']} has no decision-ready analysis: the treatment can win only on "
-                                  "evidence (`pipewright ab analyse`); stop the test to keep the control")
+            if not res or res.get("blocked") or res.get("status") != "decision_required":
+                said = (" (its newest analysis says: continue)" if res.get("status") == "continue" else "")
+                raise ConfigError(f"test {t['name']} has no decision-ready analysis{said}: the treatment can win "
+                                  "only on evidence (`pipewright ab analyse`); stop the test to keep the control")
         if winner == "treatment":
             registry.approve(self.uc, self.env, self.gcp.session.credentials, t["arms"]["treatment"]["version"],
                              identity, approved, self.log)

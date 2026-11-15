@@ -180,6 +180,21 @@ def test_the_treatment_wins_only_on_evidence_without_groups(monkeypatch):
         s.conclude("treatment", "looks good", "a@example.com", True)
 
 
+def test_an_analysis_that_says_continue_is_not_evidence(monkeypatch):
+    """1.4.4 GA QA (live): minutes into a test, with no outcome matured and min_days ahead, the treatment won."""
+    early = {"at": "2026-11-15T15:57:15+00:00", "status": "continue", "diff": None, "ci": None}
+    s = _svc(monkeypatch, _test(decision={"required": [], "approvals": []}, analysis=early))
+    with pytest.raises(ConfigError, match="says: continue.*only on evidence"):
+        s.conclude("treatment", "looks good", "a@example.com", True)
+    blocked = {**early, "status": "blocked", "blocked": ["sample ratio mismatch"]}
+    s = _svc(monkeypatch, _test(decision={"required": [], "approvals": []}, analysis=blocked))
+    with pytest.raises(ConfigError, match="only on evidence"):
+        s.conclude("treatment", "looks good", "a@example.com", True)
+    # the control may be kept at any time
+    s = _svc(monkeypatch, _test(decision={"required": [], "approvals": []}, analysis=early))
+    assert s.conclude("control", "keep the champion", "a@example.com", True)["decision"]["winner"] == "control"
+
+
 def test_plan_sizes_the_test_and_warns_when_it_cannot_finish(monkeypatch):
     s = _svc(monkeypatch)
     assert "give --baseline" in s.plan()["note"]
