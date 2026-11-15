@@ -62,6 +62,9 @@ or, when no run matches:
 """
 
 
+MODEL_TIMEOUT = 120          # seconds for one job of the model, tools included: a hung call is an error, not a wait
+
+
 class CeilingReached(Exception):
     pass
 
@@ -113,7 +116,15 @@ class AdkBrain:
     def _wait(self, coroutine):
         """One event loop for the process, closed at exit: a loop per call leaves the model client's connections
         to be closed after their loop is gone (noisy on Windows)."""
-        return _loop().run_until_complete(coroutine)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return _loop().run_until_complete(asyncio.wait_for(coroutine, MODEL_TIMEOUT))
+        # inside a running loop (the hosted tool server answers a request): a thread with a loop of its own
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(asyncio.wait_for(coroutine, MODEL_TIMEOUT))).result()
 
     # -- one agent run --------------------------------------------------------------------------------------
     def _config(self):

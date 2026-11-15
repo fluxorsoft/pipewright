@@ -397,3 +397,81 @@ def test_the_platform_question_needs_only_the_platform_switch(repo):
     assist_repo(repo, team=False)
     engine, *_ = cli.assemble(repo.root, "dev", platform=True, brain=replay.ScriptedBrain(), source=FrozenSource({}))
     assert engine.tools.platform and engine.tools.tenant is None and engine.tools.usecases is None
+
+
+# ----------------------------------------------------------------- a hosted tool server (Enterprise) --
+def test_a_use_case_whose_team_cannot_be_told_is_refused():
+    t = Tools(FrozenSource({"runs": {"ghost": {"ok": True, "runs": []}}}), "retail", None, 8)
+    assert "not a use case of team retail" in t.runs("ghost")["refused"]
+
+
+def hosted_repo(repo):
+    assist_repo(repo)
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {
+        "url": "https://pw-mcp-churn-1.europe-west2.run.app", "runtime": "cloud_run", "service": "pw-mcp-churn"}
+    repo.write()
+    return repo
+
+
+def test_with_a_hosted_tool_server_the_question_is_answered_there(repo, capsys, monkeypatch):
+    from pipewright.assist import hosted
+    from pipewright.cli.main import main
+
+    hosted_repo(repo)
+    sent = {}
+
+    def fake_ask(env, tenant, question, usecase, understood, server_url=None, call=None):
+        sent.update(tenant=tenant, question=question, usecase=usecase, understood=understood, server=server_url)
+        return {"ok": True, "answer": "The training run r1 of churn failed.", "asked_this_month": 3, "budget": 200}
+
+    monkeypatch.setattr(hosted, "ask", fake_ask)
+    code = main(["assist", "ask", "why did it fail?", "--root", str(repo.root), "--env", "dev", "--usecase", "churn",
+                 "--server", "http://localhost:8765"])
+    out = capsys.readouterr().out
+    assert code == 0 and "The training run r1 of churn failed." in out and "3 of 200 questions this month" in out
+    assert sent == {"tenant": "churn", "question": "why did it fail?", "usecase": "churn",
+                    "understood": settings.EXPLAIN_VERSION, "server": "http://localhost:8765"}
+    assert not (repo.root / ".pipewright" / "assist-log.jsonl").exists()        # the platform keeps the record
+
+
+def test_a_refusal_of_the_hosted_server_is_said_and_fails(repo, capsys, monkeypatch):
+    from pipewright.assist import hosted
+    from pipewright.cli.main import main
+
+    hosted_repo(repo)
+    monkeypatch.setattr(hosted, "ask", lambda *a, **k: {"ok": False, "refused": "team churn has asked 200 questions"})
+    code = main(["assist", "ask", "why?", "--root", str(repo.root), "--env", "dev", "--usecase", "churn"])
+    assert code == 1 and "has asked 200 questions" in capsys.readouterr().out
+
+
+def test_the_teams_switch_is_checked_before_the_hosted_server_is_asked(repo, capsys, monkeypatch):
+    from pipewright.assist import hosted
+    from pipewright.cli.main import main
+
+    assist_repo(repo, team=False)
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {"url": "https://x.run.app", "runtime": "cloud_run"}
+    repo.write()
+    monkeypatch.setattr(hosted, "ask", lambda *a, **k: pytest.fail("the server was asked"))
+    code = main(["assist", "ask", "why?", "--root", str(repo.root), "--env", "dev", "--usecase", "churn"])
+    assert code != 0 and "has not switched Pipewright Assist on" in capsys.readouterr().err
+
+
+def test_the_hosted_call_carries_the_id_token_unless_a_proxy_signs(repo, monkeypatch):
+    from pipewright.assist import hosted
+    from pipewright.config import load_environment
+
+    hosted_repo(repo)
+    env = load_environment(repo.root, "dev")
+    monkeypatch.setattr(hosted, "identity_token", lambda: "TOKEN")
+    seen = []
+
+    def call(url, headers, arguments):
+        seen.append((url, headers, arguments))
+        return {"ok": True, "answer": "a"}
+
+    hosted.ask(env, "churn", "q", "churn", "1.4.4", call=call)
+    hosted.ask(env, "churn", "q", None, "1.4.4", server_url="http://localhost:8765", call=call)
+    assert seen[0][0] == "https://pw-mcp-churn-1.europe-west2.run.app/mcp"
+    assert seen[0][1]["Authorization"] == "Bearer TOKEN" and seen[0][2]["usecase"] == "churn"
+    assert seen[1][0] == "http://localhost:8765/mcp" and "Authorization" not in seen[1][1]
+    assert seen[1][2] == {"question": "q", "usecase": "", "understood": "1.4.4"}

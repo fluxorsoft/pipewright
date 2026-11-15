@@ -48,8 +48,13 @@ class LiveSource:
 
     def checks(self, usecase: str) -> dict:
         from pipewright.checks import doctor
+        from pipewright.errors import ConfigError
 
-        uc = self.server._usecase(usecase)
+        try:
+            uc = self.server._usecase(usecase)
+        except ConfigError:                       # a hosted tool server has no copy of the repository
+            return {"ok": False, "refused": "the environment checks run where the repository is: "
+                                            f"pipewright doctor --env {self.env.name} --usecase {usecase}"}
         report = doctor.run(self.env, [uc], gcp=self.server.gcp(), compile_check=False,
                             as_agent=bool(self.server.acting_as))
         self.server.log("doctor", "metadata", "ok" if not report.failed else "failed", failed=report.failed)
@@ -61,11 +66,14 @@ class LiveSource:
 
         try:
             from pipewright.gcp import gcs_read
+            from pipewright.release.contract import Pointer, pointer_name
 
-            text, _ = gcs_read(self.server.gcp(), self.env.artifacts_bucket, f"contracts/{usecase}/current.json")
-            pointer = json.loads(text) if text else {}
-            if pointer.get("tenant"):
-                return pointer["tenant"]
+            gcp, bucket = self.server.gcp(), self.env.artifacts_bucket
+            text, _ = gcs_read(gcp, bucket, pointer_name(usecase))
+            contract, _ = gcs_read(gcp, bucket, Pointer.from_json(text).contract) if text else (None, None)
+            tenant = (json.loads(contract) if contract else {}).get("tenant")
+            if tenant:
+                return tenant
         except Exception:  # noqa: BLE001 - no release yet, or not readable: the repository says
             pass
         try:
@@ -162,6 +170,9 @@ class Tools:
         owner = self.source.tenant_of(usecase)
         if self.tenant and owner and owner != self.tenant:
             raise Refused(f"{usecase} belongs to another team: Assist answers for team {self.tenant} only")
+        if self.tenant and not owner:             # which team it belongs to cannot be told: not answered
+            raise Refused(f"{usecase} is not a use case of team {self.tenant} that Assist can find (no release of "
+                          "it in this environment, and it is not in this repository)")
         if self.usecases is not None and usecase not in self.usecases:
             raise Refused(f"Pipewright Assist is not switched on for {usecase}")
 

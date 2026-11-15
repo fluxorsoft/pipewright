@@ -93,7 +93,7 @@ def score(case: dict, answer) -> dict:
     return out
 
 
-def run_cases(brain_factory, runs: int = 3, only: list | None = None, screen=None) -> dict:
+def run_cases(brain_factory, runs: int = 3, only: list | None = None, screen=None, progress=None) -> dict:
     rows = []
     for case in CASES:
         if only and case["id"] not in only:
@@ -109,6 +109,8 @@ def run_cases(brain_factory, runs: int = 3, only: list | None = None, screen=Non
                               "owner_ok": False, "advice_ok": False, "confident_wrong": False, "tokens": 0})
         rows.append({"case": case["id"], "about": case["about"], "kind": case["expect"]["kind"],
                      "passes": sum(t["passed"] for t in tries), "runs": runs, "tries": tries})
+        if progress:
+            progress(f"  {rows[-1]['passes']}/{runs}  {case['id']}")
     return {"cases": rows, **verdict(rows)}
 
 
@@ -182,7 +184,8 @@ def main(root: Path, env_name: str, runs: int = 3, only: list | None = None, out
 
         def factory():
             return brain_module.AdkBrain(env.project, s, creds)
-    report = run_cases(factory, runs=1 if scripted else runs, only=only)
+    report = run_cases(factory, runs=1 if scripted else runs, only=only,
+                       progress=None if scripted else lambda line: print(line, flush=True))
     print(render(report))
     if output:
         Path(output).write_text(json.dumps(report, indent=1), encoding="utf-8")
