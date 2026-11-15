@@ -23,7 +23,7 @@ on:
         type: string
         default: ""
       approve_model:
-        description: "Also make the promoted model the destination's champion"
+        description: "Approve the model with this promotion, when it is the destination's first version (it becomes the champion). A later version arrives as a candidate: approve it there"
         type: boolean
         default: false
       accept_template_change:
