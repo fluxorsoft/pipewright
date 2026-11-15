@@ -104,14 +104,17 @@ def _code(tb, components: str = COMPONENTS) -> dict | None:
     return {"file": path[len(root) + 1:], "line": line, "function": function, "code": text}
 
 
-def _raised_by_engine(tb, components: str = COMPONENTS) -> bool:
-    """Whether the error was raised by a line of Pipewright's own engine code in the image (the innermost frame)."""
+def _engine(tb, components: str = COMPONENTS) -> str | None:
+    """Where Pipewright's own engine code in the image stands in the error: "raised" when one of its lines raised it
+    (the innermost frame), "through" when the error only passed through it, None when it is not involved."""
     root = os.path.normpath(components).replace("\\", "/") + "/"
-    path = None
+    through, innermost = False, False
     while tb is not None:
         path = os.path.normpath(tb.tb_frame.f_code.co_filename).replace("\\", "/")
+        innermost = path.startswith(root) and os.path.basename(path) in ENGINE
+        through = through or innermost
         tb = tb.tb_next
-    return bool(path) and path.startswith(root) and os.path.basename(path) in ENGINE
+    return "raised" if innermost else "through" if through else None
 
 
 def _step(executor_input: dict, function: str | None) -> str:
@@ -173,7 +176,11 @@ def build(exc_type, exc, tb, argv: list, components: str = COMPONENTS) -> tuple[
     run_id = values.get("run_id")
     runtime = sys.modules.get("pipewright_runtime")
     checks = [value_free(str(c))[:MAX_CHECK] for c in (getattr(runtime, "_FAILURE_CHECKS", None) or [])][:MAX_CHECKS]
-    ours = bool(getattr(exc, "pipewright_value_free", False)) or _raised_by_engine(tb, components)
+    # Pipewright's own message: marked by the runtime, raised by a line of the engine, or one of Google's client
+    # errors inside the engine (the runtime keeps those the same way: type and value-free message).
+    engine = _engine(tb, components)
+    google = str(getattr(exc_type, "__module__", "")).startswith("google.")
+    ours = bool(getattr(exc, "pipewright_value_free", False)) or engine == "raised" or (engine == "through" and google)
     record = {
         "schema": SCHEMA, "time": datetime.now(timezone.utc).isoformat(),
         "usecase": ml_config.get("usecase"), "environment": ml_config.get("environment"),

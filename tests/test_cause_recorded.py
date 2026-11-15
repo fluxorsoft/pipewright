@@ -148,6 +148,35 @@ def test_an_error_pipewrights_own_engine_raised_keeps_its_message_and_names_no_t
     assert record["kind"] == "exception" and record["message"] is None
 
 
+def test_a_google_error_inside_the_engine_keeps_its_type_and_value_free_message(tmp_path):
+    """1.4.4 GA QA: an entity table that does not exist left 'bqml-rows: NotFound' and nothing else."""
+    components = tmp_path / "components"
+    components.mkdir()
+    engine = components / "bqml_steps.py"
+    engine.write_text("def bqml_rows(client):\n    return client()\n", encoding="utf-8")
+    scope: dict = {}
+    exec(compile(engine.read_text(encoding="utf-8"), str(engine), "exec"), scope)  # noqa: S102
+    not_found = type("NotFound", (Exception,), {"__module__": "google.api_core.exceptions"})
+
+    def client():
+        raise not_found("404 Not found: Table acme:sales.entities was not found (asked by 'jane.doe@example.com')")
+
+    def team_error():
+        raise KeyError("Jane Doe")
+
+    with pytest.raises(not_found) as e:
+        scope["bqml_rows"](client)
+    _, record = hook.build(type(e.value), e.value, e.value.__traceback__, argv(function="bqml_rows"),
+                           components=str(components))
+    assert record["kind"] == "pipewright_error" and record["error_type"] == "NotFound"
+    assert "acme:sales.entities was not found" in record["message"] and "jane.doe" not in json.dumps(record)
+    with pytest.raises(KeyError) as e:                                   # anything else passing through: no message
+        scope["bqml_rows"](team_error)
+    _, record = hook.build(type(e.value), e.value, e.value.__traceback__, argv(function="bqml_rows"),
+                           components=str(components))
+    assert record["kind"] == "exception" and record["message"] is None and "Jane" not in json.dumps(record)
+
+
 def test_a_pipewright_error_keeps_its_value_free_message_and_googles_type():
     class Forbidden(Exception):
         pass
