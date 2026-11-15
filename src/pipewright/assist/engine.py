@@ -152,15 +152,33 @@ class Engine:
         else:
             a.rule, a.owner = None, fixes.UNCLEAR
             error = run.get("error")
-            lines.append("Cause: not recorded." + (f" The orchestrator said only: {error}"
-                                                     if error and error != WITHHELD else ""))
-            fix = fixes.fix(None)
+            recent = _minutes_since(run.get("ended")) < RECORDED_WITHIN_MINUTES
+            lines.append(("Cause: not recorded yet." if recent else "Cause: not recorded.")
+                         + (f" The orchestrator said only: {error}" if error and error != WITHHELD else ""))
+            fix = fixes.fix(None, recent=recent)
         if explanation:
             lines.append(explanation)
         lines.append(f"Owner: {self._owner(a.owner)}.")
         lines.append(f"Next: {fix['what']}")
         lines.append(f"Where: {fix['where']}")
+        newer = self._newer(usecase, run)
+        if newer:
+            lines.append(newer)
         return "\n".join(lines)
+
+    def _newer(self, usecase: str, run: dict) -> str | None:
+        """Found live: asked about "the latest run", the model answered about the latest failed one while a newer
+        run was in progress. The answer says so, from the runs the tools returned."""
+        later = [r for (u, _), r in self.tools.seen.items()
+                 if u == usecase and r.get("pipeline") == run.get("pipeline")
+                 and str(r.get("created") or "") > str(run.get("created") or "")]
+        if not later:
+            return None
+        newest = max(later, key=lambda r: str(r.get("created") or ""))
+        state = _STATE_WORDS.get(newest.get("state"), {"failed": "failed too", "not_submitted": "was not submitted"}
+                                 .get(newest.get("state"), f"is {newest.get('state')}"))
+        return (f"Note: this is not the newest {run.get('pipeline') or ''} run of {usecase}: "
+                f"{newest.get('run_id')} (started {str(newest.get('created'))[:16]}) {state}.")
 
     def _owner(self, owner: str) -> str:
         """The owner in the asker's words: a team member reads "your team", a platform person "the team"."""
@@ -204,6 +222,20 @@ class Engine:
         listed = "\n".join(f"  {r.get('run_id')}  {r.get('pipeline')}  {r.get('state')}  {str(r.get('created'))[:16]}"
                            for r in runs[:5])
         return f"Assist could not tell which run of {usecase} you mean. Its latest runs:\n{listed}\nAsk about one."
+
+
+RECORDED_WITHIN_MINUTES = 75        # the launcher checks failed runs hourly: a cause can come this long after
+
+
+def _minutes_since(when) -> float:
+    from datetime import datetime, timezone
+
+    try:
+        then = datetime.fromisoformat(str(when).replace("Z", "+00:00"))
+        then = then if then.tzinfo else then.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - then).total_seconds() / 60
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def _reason(cause: dict) -> str:

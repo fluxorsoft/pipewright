@@ -42,13 +42,19 @@ FIXES = {
     "unclear": (UNCLEAR, "The recorded facts do not name the cause. Read the failed step's logs in the Google Cloud "
                          "console.", "the step's logs"),
 }
-NO_RECORD = (UNCLEAR, "The cause of this run was not recorded: failure records are off for this use case. Read the "
-                      "failed step's logs in the Google Cloud console, and switch on monitoring.failure_records "
-                      "(then release) so the next failure says why.", "config/operations.yaml")
+NO_RECORD = (UNCLEAR, "The cause of this run was not recorded: failure records were off for the release that ran, "
+                      "or the launcher no longer has its record. Read the failed step's logs in the Google Cloud "
+                      "console. With monitoring.failure_records on (then a release), the next failure says why.",
+             "config/operations.yaml")
+NOT_YET = (UNCLEAR, "The cause of this run is not recorded yet: the launcher records it on its hourly check of "
+                    "failed runs. Ask again in a while. Until then the failed step's logs in the Google Cloud "
+                    "console have it.", "ask again after the launcher's next check")
 RULES = tuple(FIXES)
 
 
-def fix(rule: str | None, step: str | None = None) -> dict:
-    """The fix for a rule: {who, what, where}. An unknown rule gets the unclear fix; never a guess."""
-    who, what, where = FIXES.get(rule or "", FIXES["unclear"]) if rule else NO_RECORD
+def fix(rule: str | None, step: str | None = None, recent: bool = False) -> dict:
+    """The fix for a rule: {who, what, where}. An unknown rule gets the unclear fix; never a guess. Without a rule
+    (no cause recorded): `recent` says the run ended within the launcher's check interval, so the cause may still
+    come."""
+    who, what, where = (FIXES.get(rule or "", FIXES["unclear"]) if rule else NOT_YET if recent else NO_RECORD)
     return {"who": who, "what": what, "where": where.replace("{step}", step or "<step>")}

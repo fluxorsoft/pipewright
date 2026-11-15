@@ -108,7 +108,8 @@ def test_every_rule_of_the_cause_has_a_fix_and_no_fix_names_a_role():
         assert f["what"] and f["who"] in ("team", "platform", "unclear"), rule
         assert "roles/" not in f["what"] and "roles/" not in f["where"]
     assert fixes.fix("something-new") == fixes.fix("unclear")
-    assert "failure records are off" in fixes.fix(None)["what"]
+    assert "failure records were off" in fixes.fix(None)["what"]
+    assert "hourly check" in fixes.fix(None, recent=True)["what"]
     assert fixes.fix("out_of_memory", "prepare-data")["where"] == "steps.prepare-data.memory in config/runtime.yaml"
 
 
@@ -498,3 +499,39 @@ def test_a_run_id_in_the_question_is_enough_when_the_model_names_no_run():
     assert a.run_id == "raac5375705f1" and a.owner == "platform"
     b = ask("ap-team-bug", Vague())                     # "last night's": no run ID to go by, so no guess
     assert b.run_id is None and "could not tell which run" in b.text
+
+
+# --------------------------------------------------------------------------- found in the live test --
+def test_the_orchestrators_line_loses_its_console_link():
+    from pipewright.assist.tools import _error_line
+
+    line = ("ingest-data: The replica workerpool0-0 exited with a non-zero status of 1. Termination reason: Error. "
+            "To find out more about why your job exited please check the logs: "
+            "https://console.cloud.google.com/logs/viewer?project=123456789012&resource=ml_job%2Fjob_id%2F1")
+    assert _error_line(line) == ("ingest-data: The replica workerpool0-0 exited with a non-zero status of 1. "
+                                 "Termination reason: Error.")
+    a = ask("no-cause-recorded")
+    assert "https://" not in a.text and "console.cloud.google.com" not in a.text
+
+
+def test_a_run_that_just_failed_says_its_cause_is_not_recorded_yet():
+    import datetime
+
+    c = json.loads(json.dumps(case("no-cause-recorded")))
+    run = c["data"]["runs"]["churn"]["runs"][0]
+    run["ended"] = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)).isoformat()
+    a = replay.engine_for(c, replay.ScriptedBrain()).ask(c["question"])
+    assert "Cause: not recorded yet." in a.text and "hourly check" in a.text and "were off" not in a.text
+    old = ask("no-cause-recorded")                       # ended days ago: it will not come
+    assert "Cause: not recorded." in old.text and "failure records were off for the release that ran" in old.text
+
+
+def test_the_answer_says_when_a_newer_run_exists():
+    c = json.loads(json.dumps(case("ap-permission")))
+    c["data"]["runs"]["churn"]["runs"].insert(0, {"run_id": "r9a8b7c6d5e4f", "pipeline": "training",
+                                                  "state": "running", "created": "2026-11-15T09:00:00Z"})
+    a = replay.engine_for(c, replay.ScriptedBrain()).ask(c["question"])
+    assert a.run_id == "raac5375705f1"
+    assert "Note: this is not the newest training run of churn: r9a8b7c6d5e4f" in a.text
+    assert "is still running" in a.text
+    assert "not the newest" not in ask("ap-permission").text

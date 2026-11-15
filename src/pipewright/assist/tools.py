@@ -188,7 +188,7 @@ class Tools:
     def _clean_run(self, run: dict) -> dict:
         run = dict(run)
         if run.get("error"):
-            run["error"] = self._clean("the orchestrator's error line", str(run["error"])[:300])
+            run["error"] = self._clean("the orchestrator's error line", _error_line(str(run["error"])))
         cause = run.get("cause")
         if isinstance(cause, dict):
             cause = dict(cause)
@@ -305,6 +305,16 @@ class Tools:
 
     def as_functions(self) -> list:
         return [self.runs, self.release, self.checks, self.known_fix]
+
+
+_LOGS_HINT = re.compile(r"\s*To find out more about why your job exited please check the logs.*$", re.DOTALL)
+_LINK = re.compile(r"https?://\S+")
+
+
+def _error_line(text: str) -> str:
+    """The orchestrator's error line, without its "check the logs" link (found live: the link carries the project's
+    number and adds nothing an answer can use)."""
+    return _LINK.sub("", _LOGS_HINT.sub("", text)).strip()[:300]
 
 
 def _when(text) -> datetime | None:
