@@ -59,6 +59,34 @@ recorded: `pipewright assist ask "why did last night's training fail?"`. The gui
 - `pipewright doctor` says when a use case's failure causes are not recorded, and how to switch them on.
 - `value_free()` keeps Python and pandas type names (`'float'`, `'str'`): they are not data.
 
+### Fixed (found in the 1.4.4 GA QA, live)
+
+- **Promotion compared the cause recorded's own step settings.** With failure records on in the source environment
+  (or in both), every step of every pipeline looked changed and `pipewright promote` refused until the difference was
+  accepted by hand. The comparison leaves out the four variables Pipewright writes into each step.
+- **A/B tests: a treatment could win without evidence.** `ab conclude --winner treatment` succeeded minutes into a
+  test, before `min_days` and with no outcome matured: the check asked only for an analysis that was not blocked. The
+  treatment now wins only when the analysis says a decision is due, or the approver groups chose it. The control can
+  still be kept at any time. (The same in 1.4.3.)
+- **Registration: two first versions trained side by side.** The launcher refused the second to register for not
+  comparing with a champion that did not exist when it trained. A champion is expected only from a version registered
+  before the run started (the rule `model approve` and `model list` already used). (The same in 1.4.3.)
+- **The cause recorded: Pipewright's own errors were reported as the team's code.** An error raised by the BigQuery
+  ML steps, one of Google's client errors inside them, a registration the launcher refused and a Ray cluster that did
+  not start now keep their message (through the value-free rule) and name no line of the team's code. A Ray cluster
+  refused for a quota is the platform's (`quota`). The one-line reason leaves out BigQuery's request line.
+- **KServe: capture without a receiver said nothing.** In an environment without the capture receiver a use case
+  with `model.serving.capture` deployed, and every record was dropped silently. `deploy-model` now says `capture on`
+  or `capture: NOT recorded`, with what the platform switches on.
+- **Online stores:** an answer of `invalidQuery` or `notFound` from the store says the usual cause (the table does
+  not hold this version's features yet) and names the online sync.
+- **Pipewright Assist:** at the token ceiling the answer ends cleanly and names the ceiling that was reached (it said
+  "8 tool calls" and printed the agent library's errors); a model call that stalls is tried once more, and a model
+  that does not answer is said in one line instead of a traceback; the hint for a hosted tool server that cannot be
+  reached says to ask from inside the environment's network.
+- `ci init`: the promote workflow's `approve_model` input says what it does (it approves a model's first version in
+  the destination; a later version arrives as a candidate).
+
 ### Upgrading
 
 Nothing to do to stay as you are. To switch on, set the key and release: the record writer ships in the component
