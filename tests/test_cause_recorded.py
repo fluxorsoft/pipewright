@@ -771,3 +771,17 @@ def test_a_run_with_two_failed_steps_lists_both_causes():
     assert got["also"] == [{"step": "validate-data", "rule": "checks", "owner": "team",
                             "summary": "validate-data: tenure_months: 715 values below 0"}]
     assert "also" not in cause.cause({**detail, "failed_steps": ["load-model"]}, [stale])
+
+
+def test_an_error_the_runtime_raised_keeps_its_message():
+    """1.4.4 GA QA (live): read_source's own ValueError was recorded as 'ValueError in ingest.py, line 41'."""
+    with pytest.raises(ValueError) as e:
+        rt.read_source("not-a-uri", "p", {}, "r1")
+    _, record = hook.build(type(e.value), e.value, e.value.__traceback__, argv(function="ingest_data"))
+    assert record["kind"] == "pipewright_error" and "source_uri must start with gs:// or bq://" in record["message"]
+    # a Ray job's own log lines are never kept
+    error = RuntimeError("Ray job j1 ended FAILED: customer Jane Doe has 3 orders")
+    error.pipewright_outside_text = True
+    _, record = hook.build(type(error), error, None, argv(function="tune_on_ray"))
+    assert record["message"] is None and "Jane" not in json.dumps(record)
+

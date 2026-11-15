@@ -1143,7 +1143,9 @@ def ray_job(ml_config: dict, cluster: str, entrypoint: str, run_id: str | None =
     if status != JobStatus.SUCCEEDED:
         if status not in (JobStatus.FAILED, JobStatus.STOPPED):
             client.stop_job(job)
-        raise RuntimeError(f"Ray job {job} ended {status}: {logs[-1000:]}")
+        error = RuntimeError(f"Ray job {job} ended {status}: {logs[-1000:]}")
+        error.pipewright_outside_text = True    # the job's own log lines: a failure record never keeps them
+        raise error
     return logs
 
 

@@ -104,6 +104,15 @@ def _code(tb, components: str = COMPONENTS) -> dict | None:
     return {"file": path[len(root) + 1:], "line": line, "function": function, "code": text}
 
 
+def _innermost_file(tb) -> str | None:
+    """The file name of the innermost frame: where the error was raised."""
+    name = None
+    while tb is not None:
+        name = os.path.basename(tb.tb_frame.f_code.co_filename)
+        tb = tb.tb_next
+    return name
+
+
 def _engine(tb, components: str = COMPONENTS) -> str | None:
     """Where Pipewright's own engine code in the image stands in the error: "raised" when one of its lines raised it
     (the innermost frame), "through" when the error only passed through it, None when it is not involved."""
@@ -179,8 +188,14 @@ def build(exc_type, exc, tb, argv: list, components: str = COMPONENTS) -> tuple[
     # Pipewright's own message: marked by the runtime, raised by a line of the engine, or one of Google's client
     # errors inside the engine (the runtime keeps those the same way: type and value-free message).
     engine = _engine(tb, components)
+    # 1.4.4 GA QA (live): an error the runtime raised (pipewright_runtime.py, the innermost frame) is Pipewright's
+    # message about names and settings ("the entity table ... already has num_products ... set a prefix"); it was
+    # recorded as the team's line with no message. Kept, unless it carries outside text (a Ray job's log lines).
+    runtime_raised = _innermost_file(tb) == "pipewright_runtime.py" and not getattr(exc, "pipewright_outside_text",
+                                                                                    False)
     google = str(getattr(exc_type, "__module__", "")).startswith("google.")
-    ours = bool(getattr(exc, "pipewright_value_free", False)) or engine == "raised" or (engine == "through" and google)
+    ours = (bool(getattr(exc, "pipewright_value_free", False)) or engine == "raised" or runtime_raised
+            or (engine == "through" and google))
     record = {
         "schema": SCHEMA, "time": datetime.now(timezone.utc).isoformat(),
         "usecase": ml_config.get("usecase"), "environment": ml_config.get("environment"),
