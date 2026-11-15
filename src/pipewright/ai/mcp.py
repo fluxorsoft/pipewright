@@ -52,6 +52,7 @@ class Server:
         self.log_path = self.root / ".pipewright" / "mcp-log.jsonl"
         self._gcp_factory = gcp_factory
         self.acting_as = None
+        self.kube_dns = not hosted                # private GKE: which of the cluster's endpoints this server reaches
         self.data_classes = (self.env.ai or {}).get("data_classes") or {}
 
     # -- set-up -------------------------------------------------------------------------------------------------
@@ -392,8 +393,10 @@ class Server:
 
         e = self.env
         namespace = (e.kubernetes or {}).get("namespace") or "kubeflow"
-        # outside the VPC (a person's machine, a hosted tool server): the cluster's DNS endpoint, IAM authorized
-        kube = KubeClient.from_manifest({"kubernetes": e.kubernetes}, self.gcp(), dns=True)
+        # Outside the VPC (a person's machine): the cluster's DNS endpoint, IAM authorized. A hosted tool server runs
+        # inside the network, where only the cluster's private endpoint answers (found live: from a pod the DNS
+        # endpoint timed out).
+        kube = KubeClient.from_manifest({"kubernetes": e.kubernetes}, self.gcp(), dns=self.kube_dns)
         r = kube.get(f"{api_path(namespace)}/runs", page_size=100, sort_by="created_at desc")
         if not r.ok:
             self.log("runs", "metadata", "error", usecase=usecase)
