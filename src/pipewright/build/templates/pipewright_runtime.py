@@ -166,6 +166,14 @@ def value_free(text: str) -> str:
     return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, _QUOTED.sub(quoted, str(text)))
 
 
+def _own(error: Exception) -> Exception:
+    """An error whose message Pipewright wrote from names, settings and the launcher's own answers: the failure record
+    may keep it (1.4.4 GA QA: a registration the launcher refused was recorded as a bug in the team's register.py,
+    without the reason)."""
+    error.pipewright_value_free = True
+    return error
+
+
 def _value_free_errors(fn):
     """Errors from Google's clients (BigQuery, Cloud Storage) leave fn with their data values taken out."""
     import functools
@@ -1416,7 +1424,8 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
         if r.status_code == 200:
             return r.json()
         if r.status_code in (400, 403):
-            raise RuntimeError(f"the launcher refused to register this version: {r.json().get('reason', r.text)}")
+            raise _own(RuntimeError("the launcher refused to register this version: "
+                                    f"{r.json().get('reason', r.text)}"))
         log(f"registration call returned {r.status_code}: {r.text[:300]}; waiting for the answer", ml_config,
             "WARNING", run_id)
     else:
@@ -1445,10 +1454,10 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
                 continue
             if answer.get("status") == "registered":
                 return answer
-            raise RuntimeError(f"the launcher refused to register this version: {answer.get('reason')}")
+            raise _own(RuntimeError(f"the launcher refused to register this version: {answer.get('reason')}"))
         time.sleep(15)
-    raise RuntimeError(f"no answer from the launcher after {wait_minutes} minutes (gs://"
-                       f"{platform['artifacts_bucket']}/{name}): see the launcher's logs ('registration')")
+    raise _own(RuntimeError(f"no answer from the launcher after {wait_minutes} minutes (gs://"
+                            f"{platform['artifacts_bucket']}/{name}): see the launcher's logs ('registration')"))
 
 
 def registry_model_id(display_name: str) -> str:

@@ -177,6 +177,20 @@ def test_a_google_error_inside_the_engine_keeps_its_type_and_value_free_message(
     assert record["kind"] == "exception" and record["message"] is None and "Jane" not in json.dumps(record)
 
 
+def test_a_refused_registration_keeps_the_launchers_reason():
+    """1.4.4 GA QA: 'the launcher refused to register this version: ...' was recorded as the team's code."""
+    error = rt._own(RuntimeError("the launcher refused to register this version: the evaluation record does not pass "
+                                 "churn's gates (release r1): gate auc=0.61 below min 0.75"))
+    try:
+        raise error
+    except RuntimeError as e:
+        _, record = hook.build(type(e), e, e.__traceback__, argv(function="register_model"))
+    assert record["kind"] == "pipewright_error" and "gate auc=0.61 below min 0.75" in record["message"]
+    kept = cause.clean(record)
+    assert cause._what(kept).startswith("the launcher refused to register this version")
+    assert cause.owner(kept)[0] != "team_code"
+
+
 def test_a_pipewright_error_keeps_its_value_free_message_and_googles_type():
     class Forbidden(Exception):
         pass
