@@ -88,7 +88,7 @@ class Registrations:
         labels = job.get("labels") or {}
         return {"state": job.get("state"), "service_account": job.get("serviceAccount"),
                 "usecase": labels.get("usecase") or labels.get("pipewright-usecase"), "name": job.get("name"),
-                "release": labels.get("pipewright-release")}
+                "release": labels.get("pipewright-release"), "started": job.get("createTime")}
 
     def check_caller(self, contract, caller: str | None) -> None:
         if caller is not None and caller.lower() != contract.runner_service_account.lower():
@@ -159,6 +159,27 @@ class Registrations:
         if problems:
             raise RegistrationRefused(f"the evaluation record does not pass {contract.usecase}'s gates (release "
                                       f"{contract.release_id}): {'; '.join(problems[:3])}")
+
+    def champion_expected(self, contract, model: dict | None, job: dict) -> bool:
+        """Whether a champion existed when this run started, so its evaluation record must hold a comparison: a
+        version of the model registered before the run began. Two runs that train a first version side by side had no
+        champion to compare with (1.4.4 GA QA, live: the second to register was refused for not comparing with the
+        first, which did not exist when it trained). The stricter answer where the run's start or the versions cannot
+        be read: any existing model counts, as before."""
+        if not model:
+            return False
+        started = _when(job.get("started"))
+        if not started:
+            return True
+        try:
+            r = self.gcp.get(f"{_api(contract.region)}/{model['name'].split('@')[0]}:listVersions", pageSize=100)
+            versions = ((r.body or {}).get("models") or []) if r.ok else []
+            created = [_when(v.get("versionCreateTime") or v.get("createTime")) for v in versions]
+        except Exception:  # noqa: BLE001 - the stricter rule when the registry cannot be read
+            return True
+        if not created or any(c is None for c in created):
+            return True
+        return any(c < started for c in created)
 
     # ------------------------------------------------------------------------------------------ registry --
 
@@ -259,13 +280,14 @@ class Registrations:
             job = self.check_run(contract, run_id)
             if bqml:
                 record = self.check_bqml(contract, body, ml)
-                self.check_gates(contract, record, ml, champion_expected=bool(
-                    self._registry_model(contract, ml["bqml"]["registry_id"])))
+                self.check_gates(contract, record, ml, champion_expected=self.champion_expected(
+                    contract, self._registry_model(contract, ml["bqml"]["registry_id"]), job))
             else:
                 self.check_model(contract, body, ml)
                 record = self.check_files(contract, body.get("artifact_uri") or "", body.get("evaluation"), ml)
                 existing = self._models(contract, body.get("display_name") or "")
-                self.check_gates(contract, record, ml, champion_expected=bool(existing))
+                self.check_gates(contract, record, ml, champion_expected=self.champion_expected(
+                    contract, existing[0] if existing else None, job))
         except RegistrationRefused as e:
             if run_id:
                 self.answer(contract, run_id, {"status": "refused", "reason": e.reason, "run_id": run_id,
@@ -452,9 +474,24 @@ def kfp_job_finder(manifest_getter, gcp):
             same = item.get("service_account") == tenant.get("kubernetes_service_account")
             return {"state": item.get("state"), "usecase": labels.get("pipewright-usecase"),
                     "service_account": contract.runner_service_account if same else item.get("service_account"),
-                    "name": item.get("run_id"), "release": labels.get("pipewright-release")}
+                    "name": item.get("run_id"), "release": labels.get("pipewright-release"),
+                    "started": item.get("created_at")}
         return None
     return find
+
+
+def _when(value):
+    """An RFC 3339 time from Agent Platform or Kubeflow as a datetime, or None."""
+    from datetime import datetime, timezone
+
+    try:
+        text = str(value or "").replace("Z", "+00:00")
+        # Python reads at most six fractional digits; Agent Platform may send nine
+        text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+        when = datetime.fromisoformat(text)
+        return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def _slug(value: str) -> str:

@@ -331,3 +331,50 @@ def test_the_version_is_labelled_with_the_release_that_ran(store):
     reg.Registrations(gcp, "acme-artifacts", dict, job(release="c9f57c514102-f0f6f3e0")).register(
         contract("auto"), body(labels={"release": "c9f57c514102"}), RUNNER)
     assert gcp.uploads[0]["model"]["labels"]["release"] == "c9f57c514102-f0f6f3e0"
+
+
+class VersionsGcp(FakeGcp):
+    """A registry whose model has one version, created at a given time."""
+
+    def __init__(self, created):
+        super().__init__(models=[{"name": "projects/p/locations/r/models/churn", "createTime": created}])
+        self.created = created
+
+    def get(self, url, **params):
+        if url.endswith(":listVersions"):
+            return Response(200, {"models": [{"versionId": "1", "versionCreateTime": self.created}]})
+        return super().get(url, **params)
+
+
+def comparing():
+    """A contract whose evaluation compares with the champion."""
+    c = contract("auto")
+    c.static_parameters["ml_config"]["evaluation"]["champion"] = {"enabled": True}
+    return c
+
+
+def started(at):
+    return lambda contract, run_id: {"state": "PIPELINE_STATE_RUNNING", "service_account": RUNNER, "usecase": "churn",
+                                     "started": at}
+
+
+def test_two_first_versions_trained_side_by_side_both_register(store):
+    """1.4.4 GA QA (live): the second of two parallel first runs was refused for not comparing with the first."""
+    # the other run's version appeared five minutes after this run started: there was no champion to compare with
+    gcp = VersionsGcp("2026-11-15T14:30:40.123456789Z")
+    reg.Registrations(gcp, "acme-artifacts", dict, started("2026-11-15T14:25:33.135925Z")).register(
+        comparing(), body(), RUNNER)
+    assert len(gcp.uploads) == 1 and answer(store)["status"] == "registered"
+
+
+def test_a_version_from_before_the_run_is_a_champion_to_compare_with(store):
+    gcp = VersionsGcp("2026-11-15T13:00:00Z")
+    with pytest.raises(reg.RegistrationRefused, match="no comparison with the champion"):
+        reg.Registrations(gcp, "acme-artifacts", dict, started("2026-11-15T14:25:33Z")).register(
+            comparing(), body(), RUNNER)
+    assert gcp.uploads == []
+    # a run whose start is unknown keeps the stricter rule
+    with pytest.raises(reg.RegistrationRefused, match="no comparison with the champion"):
+        reg.Registrations(VersionsGcp("2026-11-15T14:30:40Z"), "acme-artifacts", dict, job()).register(
+            comparing(), body(), RUNNER)
+
