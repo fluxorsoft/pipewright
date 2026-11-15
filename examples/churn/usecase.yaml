@@ -24,6 +24,10 @@ metadata:
 
 spec:
   tenant: my-tenant                      # given to you by the platform team
+  # Pipewright Assist (preview, 1.4.4), off by default: an assistant that answers "why did my run fail, whose is
+  # it, what next" from what Pipewright recorded. It reads no data rows or logs and changes nothing. Read
+  # `pipewright assist explain` first, then switch it on with the version of that page you read:
+  # e.g. assist: { enabled: true, understood: "1.4.4" }
   include: [config/*.yaml]
 
   pipelines:
