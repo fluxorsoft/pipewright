@@ -452,6 +452,7 @@ def launcher(monkeypatch):
         live = replace(CHURN, parameters=[*CHURN.parameters, "ml_config"],
                        static_parameters={**CHURN.static_parameters, "ml_config": ml})
         registry = FakeRegistry([live])
+        registry.manifest.setdefault("artifacts_bucket", "acme-artifacts")
         if on_manifest:
             registry.manifest["observability"] = {"submit_failed": True}
         failure = error or InvalidArgument("400 Unable to find available machine with cpu_limit: 4.0")
@@ -630,3 +631,32 @@ def test_a_kubernetes_refusal_keeps_its_names_and_nothing_else():
     # any other refusal still has its quoted text hidden
     other = cause.submit_refusal(RuntimeError('creating Kubeflow run x failed: 400 invalid value "Jane Doe"'))
     assert "Jane Doe" not in other["error"]
+
+
+def test_a_refused_submission_leaves_a_marker_for_the_runs_tool(launcher, monkeypatch):
+    """Assist preview (1.4.4): a run the orchestrator refused is in no orchestrator's list, so the launcher keeps a
+    marker under runs/failed/not-submitted/ in the shape of a failed run's."""
+    import pipewright.gcp as gcp_module
+
+    written = {}
+    monkeypatch.setattr(gcp_module, "gcs_write", lambda gcp, bucket, name, text, **k: written.update({name: text}))
+    client = launcher(on_manifest=True)
+    assert client.post("/run", json={"usecase": "churn", "schedule": "nightly"}).json["status"] == "submit_failed"
+    ((name, text),) = written.items()
+    assert name.startswith("runs/failed/not-submitted/churn/") and name.endswith(client.sent[0]["data"]["job_id"])
+    marker = json.loads(text)
+    assert marker["state"] == "not_submitted" and marker["owner"] == "team" and marker["failed_steps"] == []
+    assert marker["cause"] == {"rule": "machine_shape", "owner": "team", "source": "submission",
+                               "summary": marker["why"], "next": marker["next"]}
+    assert marker["why"].startswith("not submitted: ")
+
+
+def test_a_marker_that_cannot_be_written_does_not_change_the_answer(launcher, monkeypatch):
+    import pipewright.gcp as gcp_module
+
+    def fail(*a, **k):
+        raise RuntimeError("no bucket")
+
+    monkeypatch.setattr(gcp_module, "gcs_write", fail)
+    client = launcher(on_manifest=True)
+    assert client.post("/run", json={"usecase": "churn", "schedule": "nightly"}).json["status"] == "submit_failed"

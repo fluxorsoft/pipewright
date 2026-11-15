@@ -314,6 +314,15 @@ def create_app(registry: Registry | None = None) -> Flask:
             log.warning("submission of %s refused (%s): %s", jid, refusal["error_type"], refusal["error"])
             _event("run.submit_failed", contract, rid, pipeline=pipeline, trigger=trigger, job_id=jid,
                    source_uri=source_uri, **refusal, **({"loop": loop} if loop else {}))
+            # the same marker a failed run gets, so the `runs` tool can show a run the orchestrator never listed
+            try:
+                from pipewright.gcp import gcs_write
+
+                gcs_write(getattr(reg(), "gcp", None) or Gcp(), reg().manifest["artifacts_bucket"],
+                          _cause.submit_marker_name(contract.usecase, jid),
+                          json.dumps(_cause.submit_marker(contract, pipeline, trigger, jid, rid, refusal)))
+            except Exception:  # noqa: BLE001 - the event is the record; the marker is for the runs tool
+                log.exception("marker for the refused submission %s not written", jid)
             raise SubmitRefused(str(e), {
                 "usecase": contract.usecase, "pipeline": pipeline, "status": "submit_failed", "job_id": jid,
                 "run_id": rid, "release": contract.release_id, "reason": refusal["error"],

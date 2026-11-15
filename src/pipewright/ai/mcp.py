@@ -310,8 +310,9 @@ class Server:
     def runs(self, usecase: str, limit: int = 5) -> dict:
         """A use case's latest pipeline runs, newest first: state, release, and for a failed run the failed steps and
         their first error line (the same value-free summary as the run.failed event). With failure records on
-        (1.4.4), a failed run also has its cause: the step, the owner (team, platform or unclear) and why. Agent
-        Platform and Kubeflow runs. Step logs are not read: they can hold data values; the person reads them in the
+        (1.4.4), a failed run also has its cause: the step, the owner (team, platform or unclear) and why. A run the
+        orchestrator refused at submission is listed with state not_submitted and its cause. Agent Platform and
+        Kubeflow runs. Step logs are not read: they can hold data values; the person reads them in the
         console."""
         from pipewright.launcher import watch
 
@@ -338,6 +339,7 @@ class Server:
                 f = watch.failure(watch.full_job(self.gcp(), job, e.region))
                 run.update(failed_steps=f["failed_steps"], error=f["error"], **self._recorded_cause(f["job_id"]))
             out.append(run)
+        out = self._with_not_submitted(usecase, out, limit)
         self.log("runs", "metadata", "ok", usecase=usecase, runs=len(out))
         return {"ok": True, "usecase": usecase, "runs": out,
                 "note": "a run that succeeded without a new model version did not pass its gates (see model_list)"}
@@ -354,6 +356,33 @@ class Server:
             return {"cause": cause} if isinstance(cause, dict) else {}
         except Exception:  # noqa: BLE001 - no marker, or no read access to runs/failed/: the run without its cause
             return {}
+
+    def _not_submitted(self, usecase: str, limit: int) -> list[dict]:
+        """1.4.4, with submit_failed on: the runs the orchestrator refused at submission (the launcher's markers under
+        runs/failed/not-submitted/). They are in no orchestrator's list, so they are read here. [] when there are
+        none, or they are not readable."""
+        try:
+            from pipewright.gcp import gcs_list, gcs_read
+            from pipewright.launcher.cause import NOT_SUBMITTED_PREFIX
+
+            names = sorted(gcs_list(self.gcp(), self.env.artifacts_bucket, f"{NOT_SUBMITTED_PREFIX}/{usecase}/"))
+            out = []
+            for name in reversed(names[-max(1, min(int(limit), 20)):]):
+                text, _ = gcs_read(self.gcp(), self.env.artifacts_bucket, name)
+                d = json.loads(text) if text else {}
+                out.append({"run_id": d.get("run_id"), "pipeline": d.get("pipeline"), "release": d.get("release"),
+                            "trigger": d.get("trigger"), "state": "not_submitted", "created": d.get("ended"),
+                            "ended": d.get("ended"), "failed_steps": [], "error": d.get("error"),
+                            **({"cause": d["cause"]} if isinstance(d.get("cause"), dict) else {})})
+            return out
+        except Exception:  # noqa: BLE001 - no markers, or no read access: the orchestrator's runs only
+            return []
+
+    def _with_not_submitted(self, usecase: str, runs: list[dict], limit: int) -> list[dict]:
+        """The orchestrator's runs and the refused submissions together, newest first."""
+        merged = runs + self._not_submitted(usecase, limit)
+        merged.sort(key=lambda r: str(r.get("created") or ""), reverse=True)
+        return merged[:max(1, min(int(limit), 20))]
 
     def _kfp_runs(self, usecase: str, limit: int) -> dict:
         """The use case's latest Kubeflow runs, in the same shape as Agent Platform runs."""
@@ -385,6 +414,7 @@ class Server:
             out.append(run)
             if len(out) >= max(1, min(int(limit), 20)):
                 break
+        out = self._with_not_submitted(usecase, out, limit)
         self.log("runs", "metadata", "ok", usecase=usecase, runs=len(out))
         return {"ok": True, "usecase": usecase, "runs": out,
                 "note": "a run that succeeded without a new model version did not pass its gates (see model_list)"}

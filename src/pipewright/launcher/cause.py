@@ -282,3 +282,26 @@ def submit_refusal(error: BaseException) -> dict | None:
     if rule == "permission":          # at submission no step has run: it is the launcher or the run's identity
         hint = "the orchestrator refused the launcher or the run's identity: the platform grants the permission"
     return {"error_type": kind, "error": line, "rule": rule, "owner": who, "next": hint}
+
+
+NOT_SUBMITTED = "not_submitted"
+NOT_SUBMITTED_PREFIX = "runs/failed/not-submitted"
+
+
+def submit_marker_name(usecase: str, job_id: str, now: datetime | None = None) -> str:
+    """Under runs/failed/ (what an agent identity may read), by use case and time, so the newest are found by name."""
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    return f"{NOT_SUBMITTED_PREFIX}/{usecase}/{stamp}-{job_id}"
+
+
+def submit_marker(contract, pipeline: str, trigger: str, job_id: str, run_id: str | None, refusal: dict,
+                  now: datetime | None = None) -> dict:
+    """What the launcher keeps in runs/failed/<job> for a refused submission, in the shape of a failed run's marker,
+    so the `runs` tool (and Pipewright Assist) can show a run the orchestrator never listed."""
+    summary = f"not submitted: {refusal['error']}"[:MAX_TEXT]
+    return {"job_id": job_id, "usecase": contract.usecase, "pipeline": pipeline, "state": NOT_SUBMITTED,
+            "trigger": trigger, "run_id": run_id, "release": contract.release_id, "failed_steps": [],
+            "error": refusal["error"], "ended": (now or datetime.now(timezone.utc)).isoformat(),
+            "owner": refusal["owner"], "why": summary, "next": refusal["next"],
+            "cause": {"rule": refusal["rule"], "owner": refusal["owner"], "source": "submission",
+                      "summary": summary, "next": refusal["next"]}}

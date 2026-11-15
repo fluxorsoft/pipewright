@@ -362,3 +362,29 @@ def test_runs_lists_kubeflow_runs_too(server, monkeypatch):
     (run,) = out["runs"]
     assert out["ok"] and run["state"] == "failed" and run["run_id"] == "r9" and run["failed_steps"] == ["validate-data"]
     assert asked["dns"] is True and asked["path"].endswith("/runs")
+
+
+def test_runs_lists_a_refused_submission(server, monkeypatch):
+    """Assist preview (1.4.4): a run refused at submission is in no orchestrator's list; `runs` reads its marker."""
+    import pipewright.gcp as gcp_module
+
+    marker = {"run_id": "r9", "pipeline": "training", "release": "abc", "trigger": "api", "state": "not_submitted",
+              "ended": "2026-11-14T20:01:40+00:00", "error": "400 Unable to find available machine",
+              "cause": {"rule": "machine_shape", "owner": "team", "source": "submission",
+                        "summary": "not submitted: 400 Unable to find available machine"}}
+    name = "runs/failed/not-submitted/churn/20261114T200140Z-churn-r9"
+    monkeypatch.setattr(gcp_module, "gcs_list", lambda gcp, bucket, prefix: [name] if prefix.endswith("/churn/") else [])
+    monkeypatch.setattr(gcp_module, "gcs_read", lambda gcp, bucket, n: (json.dumps(marker), 1))
+
+    class G(FakeGcp):
+        def get(self, url, **params):
+            if url.endswith("/pipelineJobs"):
+                return Response(200, {"pipelineJobs": [{"name": "x/pipelineJobs/churn-r2",
+                                                        "state": "PIPELINE_STATE_SUCCEEDED", "labels": {"run-id": "r2"},
+                                                        "createTime": "2026-11-13T10:00:00Z"}]})
+            return super().get(url, **params)
+
+    server._gcp_factory = G
+    first, second = server.runs("churn")["runs"]
+    assert first["state"] == "not_submitted" and first["cause"]["owner"] == "team" and first["run_id"] == "r9"
+    assert second["run_id"] == "r2"
