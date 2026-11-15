@@ -1044,8 +1044,8 @@ class _RayCluster:
             deadline = time.time() + 600
             while self._state().get("state") != "RUNNING":
                 if time.time() > deadline:
-                    raise RuntimeError(f"the tenant's standing Ray cluster {self.cluster} does not answer at "
-                                       f"{self.name}: ask the platform team")
+                    raise _own(RuntimeError(f"the tenant's standing Ray cluster {self.cluster} does not answer "
+                                            f"at {self.name}: ask the platform team"))
                 time.sleep(15)
             namespace = (self.ml_config.get("platform") or {}).get("kubernetes_namespace") or "kubeflow"
             emit_event("ray.cluster.used", self.ml_config, self.run_id, step=self.step, mode="standing",
@@ -1071,8 +1071,8 @@ class _RayCluster:
                 # Still no cluster: the request may have been dropped (a dead-lettered message, a refusal). The ID is
                 # fixed for the run, so asking again is safe; after three tries, stop and say where to look.
                 if resends == 3:
-                    raise RuntimeError(f"the launcher has not created Ray cluster {self.name} after "
-                                       f"{resends + 1} requests: see the launcher's logs ('ray create')")
+                    raise _own(RuntimeError(f"the launcher has not created Ray cluster {self.name} after "
+                                            f"{resends + 1} requests: see the launcher's logs ('ray create')"))
                 _ray_request(self.ml_config, "create", self.step, self.run_id)
                 asked, resends = time.time(), resends + 1
                 log(f"asked again for Ray cluster {self._label()} ({resends})", self.ml_config,
@@ -1080,7 +1080,10 @@ class _RayCluster:
             time.sleep(20)
         self.__exit__(None, None, None)
         error = {} if self.kube else _ray_state(self.name, self.region).get("error") or {}
-        raise RuntimeError(f"Ray cluster {self.name} did not start (state {state}): {error.get('message', '')}")
+        # 1.4.4 GA QA (live): a cluster refused for a project quota was recorded as a bug in the team's step. The
+        # message is the orchestrator's own (names and a state), so the failure record may keep it.
+        raise _own(RuntimeError(f"Ray cluster {self.name} did not start (state {state}): "
+                                f"{error.get('message', '')}"))
 
     def __exit__(self, *exc) -> bool:
         if self.standing:

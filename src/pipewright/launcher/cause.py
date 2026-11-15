@@ -58,7 +58,8 @@ RULES = (
     # so they are read before the permission rule
     ("perimeter", PLATFORM, "record", r"VPC Service Controls|vpcServiceControls|SECURITY_POLICY_VIOLATED",
      "a service perimeter refused the call: the platform reviews the perimeter's rules"),
-    ("quota", PLATFORM, "record", r"[Qq]uota exceeded|RESOURCE_EXHAUSTED|TooManyRequests",
+    # "quotas are exceeded": Agent Platform's wording for a Ray cluster it cannot place (1.4.4 GA QA, live)
+    ("quota", PLATFORM, "record", r"[Qq]uotas? (?:is |are )?exceeded|RESOURCE_EXHAUSTED|TooManyRequests",
      "a Google Cloud quota was reached: the platform raises it or frees capacity"),
     ("permission", PLATFORM, "record",
      r"[Ff]orbidden|PermissionDenied|Permission \S+ denied|IAM_PERMISSION_DENIED|Unauthorized|\b403\b",

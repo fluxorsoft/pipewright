@@ -191,6 +191,22 @@ def test_a_refused_registration_keeps_the_launchers_reason():
     assert cause.owner(kept)[0] != "team_code"
 
 
+def test_a_ray_cluster_refused_for_a_quota_is_the_platforms():
+    """1.4.4 GA QA (live): six trainings and a Ray cluster at once reached the project's CPU quota; run.failed said
+    'RuntimeError in ray_tune.py, line 45', owner team."""
+    error = rt._own(RuntimeError(
+        "Ray cluster projects/acme/locations/europe-west2/persistentResources/pw-churn-tune-on-ray-32190b31e382 did "
+        "not start (state ERROR): The following quotas are exceeded: CustomModelTrainingCPUsPerProjectPerRegion"))
+    try:
+        raise error
+    except RuntimeError as e:
+        _, record = hook.build(type(e), e, e.__traceback__, argv(function="tune_on_ray"))
+    kept = cause.clean(record)
+    rule, who, _ = cause.owner(kept)
+    assert (rule, who) == ("quota", "platform")
+    assert "CustomModelTrainingCPUsPerProjectPerRegion" in cause._what(kept)
+
+
 def test_a_pipewright_error_keeps_its_value_free_message_and_googles_type():
     class Forbidden(Exception):
         pass
