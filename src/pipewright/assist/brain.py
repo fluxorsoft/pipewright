@@ -62,6 +62,7 @@ or, when no run matches:
 """
 
 
+THINKING_BUDGET = 256        # tokens of the model's own reasoning for one call
 MODEL_TIMEOUT = 120          # seconds for one job of the model, tools included: a hung call is an error, not a wait
 
 
@@ -70,7 +71,9 @@ class CeilingReached(Exception):
 
 
 def _last_json(text: str) -> dict:
-    """The last JSON object in the model's text."""
+    """The last JSON object in the model's text. A reply cut short (the output limit was reached in the middle of
+    the explanation: found testing against the model) still names the run: its complete fields are read, and the
+    unfinished explanation is dropped."""
     for m in reversed(list(re.finditer(r"\{", text))):
         try:
             got = json.loads(text[m.start():text.rindex("}") + 1])
@@ -78,7 +81,8 @@ def _last_json(text: str) -> dict:
                 return got
         except ValueError:
             continue
-    return {}
+    fields = dict(re.findall(r'"(kind|usecase|run_id)"\s*:\s*"([^"\\]{0,100})"', text))
+    return fields if fields.get("kind") else {}
 
 
 _LOOP = None
@@ -130,8 +134,11 @@ class AdkBrain:
     def _config(self):
         from google.genai import types
 
+        # Thinking counts against the output limit: left free, it used most of the 1,024 tokens and cut the reply
+        # short (found testing against the model). The job is small: a small thinking budget, the rest for the reply.
         return types.GenerateContentConfig(temperature=self.settings.temperature,
-                                           max_output_tokens=self.settings.max_output_tokens)
+                                           max_output_tokens=self.settings.max_output_tokens,
+                                           thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET))
 
     async def _run(self, name: str, instruction: str, question: str, tools: list) -> tuple[str, dict]:
         from google.adk.agents import LlmAgent

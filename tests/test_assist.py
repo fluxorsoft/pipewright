@@ -475,3 +475,26 @@ def test_the_hosted_call_carries_the_id_token_unless_a_proxy_signs(repo, monkeyp
     assert seen[0][1]["Authorization"] == "Bearer TOKEN" and seen[0][2]["usecase"] == "churn"
     assert seen[1][0] == "http://localhost:8765/mcp" and "Authorization" not in seen[1][1]
     assert seen[1][2] == {"question": "q", "usecase": "", "understood": "1.4.4"}
+
+
+# ------------------------------------------------------------------- found testing against the model --
+def test_a_reply_cut_short_still_names_the_run():
+    from pipewright.assist import brain
+
+    cut = '{"kind": "run", "usecase": "churn", "run_id": "r3c4d5e6f7a8b", "explanation": "The training run'
+    assert brain._last_json(cut) == {"kind": "run", "usecase": "churn", "run_id": "r3c4d5e6f7a8b"}
+    whole = 'Here it is: {"kind": "run", "usecase": "churn", "run_id": "r1", "explanation": "It failed."}'
+    assert brain._last_json(whole)["explanation"] == "It failed."
+    assert brain._last_json("no json at all") == {}
+
+
+def test_a_run_id_in_the_question_is_enough_when_the_model_names_no_run():
+    class Vague(replay.ScriptedBrain):
+        def investigate(self, question, context, tools):
+            tools.runs("churn")
+            return {}, {"model_calls": 1, "tokens_in": 10, "tokens_out": 10}
+
+    a = ask("ap-permission", Vague())
+    assert a.run_id == "raac5375705f1" and a.owner == "platform"
+    b = ask("ap-team-bug", Vague())                     # "last night's": no run ID to go by, so no guess
+    assert b.run_id is None and "could not tell which run" in b.text

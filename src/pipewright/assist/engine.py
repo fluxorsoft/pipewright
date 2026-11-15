@@ -73,7 +73,7 @@ class Engine:
         a.tokens_in += usage["tokens_in"]
         a.tokens_out += usage["tokens_out"]
         a.tool_calls, a.withheld = list(self.tools.calls), list(dict.fromkeys(self.tools.withheld))
-        body = self._compose(found or {}, a)
+        body = self._compose(found or {}, a, question)
         if usage.get("ceiling") or self.tools.ceiling_reached:
             body += ("\n\nAssist stopped at its ceiling for one question "
                      f"({self.tools.max_calls} tool calls). Ask about one run at a time.")
@@ -102,11 +102,21 @@ class Engine:
         return f"({FOOTER} {used}.{'' if a.screened else ' ' + NOT_SCREENED})"
 
     # -- composing: recorded facts first, the model's words second ------------------------------------------
-    def _compose(self, found: dict, a: Answer) -> str:
+    def _named_in(self, question: str, usecase: str | None) -> tuple:
+        """A run ID the person typed, among the runs the tools returned: no model needed to know which run it is."""
+        for rid in re.findall(r"\br[0-9a-f]{8,}\b", question):
+            for (u, r), run in self.tools.seen.items():
+                if r == rid and (not usecase or u == usecase):
+                    return u, rid, run
+        return usecase, None, None
+
+    def _compose(self, found: dict, a: Answer, question: str = "") -> str:
         if found.get("kind") == "summary" and self.tools.failures_seen is not None:
             return self._compose_summary(_explanation(found))
         usecase, run_id = found.get("usecase") or self.usecase, found.get("run_id")
         run = self.tools.seen.get((usecase, str(run_id))) if usecase and run_id else None
+        if run is None:                       # the model's reply did not name a run the tools returned
+            usecase, run_id, run = self._named_in(question, usecase)
         if run is None:
             return self._not_found(usecase)
         a.usecase, a.run_id = usecase, str(run_id)
