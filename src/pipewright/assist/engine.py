@@ -19,6 +19,7 @@ from pipewright.assist.tools import WITHHELD, Tools
 
 FOOTER = "Generated advice (preview). Check it before you act: Assist changes nothing and approves nothing."
 NOT_SCREENED = "Not screened by Model Armor."
+SCREENED = "Screened by Model Armor."
 _UNSAFE_EXPLANATION = re.compile(r"roles/|https?://|[\w.+-]+@[\w-]+\.[\w.-]+|\bgrant\b", re.IGNORECASE)
 _STATE_WORDS = {"succeeded": "succeeded", "running": "is still running", "pending": "has not started yet",
                 "cancelled": "was cancelled", "cancelling": "is being cancelled", "paused": "is paused"}
@@ -99,7 +100,7 @@ class Engine:
     def _footer(self, a: Answer) -> str:
         used = (f"{len(a.tool_calls)} tool call{'s' if len(a.tool_calls) != 1 else ''}, "
                 f"{a.tokens_in + a.tokens_out:,} tokens")
-        return f"({FOOTER} {used}.{'' if a.screened else ' ' + NOT_SCREENED})"
+        return f"({FOOTER} {used}. {SCREENED if a.screened else NOT_SCREENED})"
 
     # -- composing: recorded facts first, the model's words second ------------------------------------------
     def _named_in(self, question: str, usecase: str | None) -> tuple:
@@ -147,6 +148,9 @@ class Engine:
             for check in ((cause.get("record") or {}).get("checks") or [])[:5]:
                 if check != WITHHELD and check not in lines[1]:
                     lines.append(f"    check: {check}")
+            for other in (cause.get("also") or [])[:5]:
+                if other.get("summary") and other["summary"] != WITHHELD:
+                    lines.append(f"Also failed: {other['summary']} (owner: {other.get('owner') or fixes.UNCLEAR})")
             rule = "refused_submission" if state == "not_submitted" and a.rule == "permission" else a.rule
             fix = fixes.fix(rule, (cause.get("step") or (run.get("failed_steps") or [None])[0]))
         else:

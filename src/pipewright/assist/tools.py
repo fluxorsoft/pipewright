@@ -210,6 +210,9 @@ class Tools:
                 cause["record"] = record
             if cause.get("summary"):
                 cause["summary"] = self._clean("the recorded reason", cause["summary"])
+            if cause.get("also"):
+                cause["also"] = [{**o, "summary": self._clean("a recorded reason", o.get("summary"))}
+                                 for o in cause["also"] if isinstance(o, dict)]
             run["cause"] = cause
         return run
 

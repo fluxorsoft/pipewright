@@ -660,3 +660,18 @@ def test_a_marker_that_cannot_be_written_does_not_change_the_answer(launcher, mo
     monkeypatch.setattr(gcp_module, "gcs_write", fail)
     client = launcher(on_manifest=True)
     assert client.post("/run", json={"usecase": "churn", "schedule": "nightly"}).json["status"] == "submit_failed"
+
+
+def test_a_run_with_two_failed_steps_lists_both_causes():
+    """Found in the Assist live test: a contract check and an unrelated step failed in the same run, and the cause
+    named only one of them."""
+    stale = {"step": "load-model", "kind": "exception", "error_type": "RuntimeError",
+             "code": {"file": "champion.py", "line": 66, "function": "load_model", "code": "raise RuntimeError(x)"}}
+    contract = {"step": "validate-data", "kind": "exception", "error_type": "ValueError",
+                "checks": ["tenure_months: 715 values below 0"]}
+    detail = {"state": "failed", "failed_steps": ["load-model", "validate-data"], "error": "load-model: replica exited"}
+    got = cause.cause(detail, [stale, contract])
+    assert got["step"] == "load-model" and got["rule"] == "team_code"
+    assert got["also"] == [{"step": "validate-data", "rule": "checks", "owner": "team",
+                            "summary": "validate-data: tenure_months: 715 values below 0"}]
+    assert "also" not in cause.cause({**detail, "failed_steps": ["load-model"]}, [stale])

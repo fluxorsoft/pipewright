@@ -191,6 +191,22 @@ def records(gcp, where: str, usecase: str, run_id: str | None, job_id: str, sinc
     return out
 
 
+def _what(record: dict) -> str:
+    """What a cleaned failure record says, in one line."""
+    if record.get("message"):
+        return _URL.sub("", record["message"])              # the request line says nothing the rest does not
+    if record.get("checks"):
+        return "; ".join(record["checks"][:3])
+    if record.get("code"):
+        c = record["code"]
+        return f"{record.get('error_type') or 'error'} in {c.get('file')}, line {c.get('line')}"
+    return record.get("error_type") or "error"
+
+
+def _one_line(record: dict) -> str:
+    return f"{record.get('step')}: {_what(record)}"[:MAX_TEXT]
+
+
 def cause(detail: dict, found: list[dict], pod: dict | None = None) -> dict:
     """The cause run.failed carries. detail: launcher.watch.failure() of the job; found: the run's cleaned failure
     records; pod: on Kubeflow, the failed pod's status ({step, reason, exit_code})."""
@@ -205,15 +221,7 @@ def cause(detail: dict, found: list[dict], pod: dict | None = None) -> dict:
     step = (record or {}).get("step") or (pod or {}).get("step") or (steps[0] if steps else None)
     if record and rule not in ("out_of_memory", "machine_shape", "missing_image"):
         source = "failure_record"
-        if record.get("message"):
-            what = _URL.sub("", record["message"])          # the request line says nothing the rest does not
-        elif record.get("checks"):
-            what = "; ".join(record["checks"][:3])
-        elif record.get("code"):
-            c = record["code"]
-            what = f"{record.get('error_type') or 'error'} in {c.get('file')}, line {c.get('line')}"
-        else:
-            what = record.get("error_type") or "error"
+        what = _what(record)
     elif rule != "unclear":
         source = "pod_status" if pod and pod.get("reason") and re.search(
             next(p for r, _, _, p, _ in RULES if r == rule), f"{pod['reason']} exit {pod.get('exit_code')}") \
@@ -225,6 +233,16 @@ def cause(detail: dict, found: list[dict], pod: dict | None = None) -> dict:
            "summary": f"{step + ': ' if step else ''}{what}"[:MAX_TEXT], "next": hint}
     if record:
         out["record"] = record
+    # More than one step failed (found live: a contract check and an unrelated step in the same run): the other
+    # steps' causes are listed too, each from its own record, so the summary of one does not hide the others.
+    also = []
+    for other in found:
+        if other is record or not other.get("step") or other.get("step") == step:
+            continue
+        o_rule, o_who, _ = owner(other, "")
+        also.append({"step": other["step"], "rule": o_rule, "owner": o_who, "summary": _one_line(other)})
+    if also:
+        out["also"] = also[:5]
     if pod and pod.get("reason"):
         out["pod"] = {k: pod[k] for k in ("reason", "exit_code") if pod.get(k) is not None}
     return {k: v for k, v in out.items() if v is not None}

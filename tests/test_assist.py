@@ -265,7 +265,7 @@ def test_with_screening_on_the_question_each_tool_field_and_the_answer_are_scree
     a = ask("ap-team-bug", screen=screen)
     verbs = [v for v, _ in armor.seen]
     assert verbs[0] == "sanitizeUserPrompt" and verbs[-1] == "sanitizeModelResponse" and len(verbs) >= 4
-    assert "Not screened" not in a.text and a.screened
+    assert "Not screened" not in a.text and "Screened by Model Armor." in a.text and a.screened
     assert any("prepare.py" in text or "monthly_charges" in text for _, text in armor.seen[1:-1])
 
 
@@ -535,3 +535,13 @@ def test_the_answer_says_when_a_newer_run_exists():
     assert "Note: this is not the newest training run of churn: r9a8b7c6d5e4f" in a.text
     assert "is still running" in a.text
     assert "not the newest" not in ask("ap-permission").text
+
+
+def test_the_answer_lists_every_failed_step():
+    c = json.loads(json.dumps(case("kf-stale-model")))
+    run = c["data"]["runs"]["churn-gke"]["runs"][0]
+    run["failed_steps"] = ["load-model", "validate-data"]
+    run["cause"]["also"] = [{"step": "validate-data", "rule": "checks", "owner": "team",
+                             "summary": "validate-data: tenure_months: 715 values below 0"}]
+    a = replay.engine_for(c, replay.ScriptedBrain()).ask(c["question"])
+    assert "Also failed: validate-data: tenure_months: 715 values below 0 (owner: team)" in a.text
