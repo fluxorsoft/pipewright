@@ -31,7 +31,8 @@ MAX_TEXT = 300
 MAX_RECORD_BYTES = 32_000
 MAX_LISTED = 500                     # failure records looked at per failed run
 _NAME = re.compile(r"^[A-Za-z0-9_.@:/ -]{1,200}$")
-_URL = re.compile(r"\b\d{3} (?:GET|POST|PUT|PATCH|DELETE) https?://\S+ ")   # "403 GET https://...: " in a Google error
+# "403 GET https://...: " in a Google error; BigQuery's job errors carry the request without the status (GA QA)
+_URL = re.compile(r"(?:\b\d{3} )?\b(?:GET|POST|PUT|PATCH|DELETE) https?://\S+ ")
 
 # The rules, in order: the first that matches names the owner. `on` says what a rule reads: "line" is Google's error
 # line or a pod's status, "record" the step's failure record. Patterns confirmed live in the 1.4.4 spikes.

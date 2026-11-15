@@ -607,6 +607,13 @@ def test_the_one_line_reason_leaves_out_the_request_url():
     assert c["summary"] == ("record-metrics: write_table: Forbidden: Access Denied: Table p:d.t: Permission "
                             "bigquery.tables.get denied on table p:d.t")
     assert c["owner"] == "platform" and "https://" in c["record"]["message"]
+    # 1.4.4 GA QA (live): BigQuery's job errors carry the request line without a status in front
+    record = {"step": "bqml-rows", "kind": "pipewright_error", "error_type": "RuntimeError",
+              "message": "the run's rows failed (job j1): GET https://bigquery.googleapis.com/bigquery/v2/projects/p/"
+                         "queries/j1?maxResults=0&location=europe-west2&prettyPrint=false: Unrecognized name: "
+                         "no_such_column at [10:15]"}
+    c = cause.cause({"state": "failed", "failed_steps": ["bqml-rows"], "error": GENERIC}, [record])
+    assert c["summary"] == "bqml-rows: the run's rows failed (job j1): Unrecognized name: no_such_column at [10:15]"
 
 
 def test_a_step_without_ml_config_records_too(monkeypatch):
