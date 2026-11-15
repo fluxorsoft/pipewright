@@ -636,3 +636,49 @@ def test_the_token_ceiling_is_named_and_stops_the_tools():
     assert "Assist stopped at its ceiling for one question (1,500 tokens)" in a.text
     assert "tool calls)" not in a.text.split("ceiling for one question")[1].split("\n")[0]
 
+
+def test_a_model_that_does_not_answer_is_said_in_one_line():
+    """1.4.4 GA QA (live): about one model call in ten stalled on a busy network and ended in a traceback."""
+    from pipewright.assist.brain import ModelUnavailable
+
+    c = CASES[0]
+
+    class Silent(replay.ScriptedBrain):
+        def classify(self, question):
+            raise ModelUnavailable("the model (gemini-3.8-flash) did not answer within 120 seconds, in 2 tries")
+
+    a = Engine(Silent(), Tools(FrozenSource(c["data"]), "retail", None, 8), "test", None, "churn").ask(c["question"])
+    assert a.kind == "refused" and a.text.startswith("Assist did not answer: the model (gemini-3.8-flash)")
+    assert "Nothing was changed" in a.text and "pipewright status --env test" in a.text
+
+
+def test_a_stalled_model_call_is_tried_once_more(monkeypatch):
+    import asyncio
+
+    from pipewright.assist import brain as brain_module
+
+    monkeypatch.setattr(brain_module, "MODEL_TIMEOUT", 0.4)
+    b = brain_module.AdkBrain.__new__(brain_module.AdkBrain)
+    b.settings = SimpleNamespace(model="gemini-3.8-flash")
+    tries = []
+
+    async def stalls_once():
+        tries.append(1)
+        if len(tries) == 1:
+            await asyncio.sleep(5)
+        return "answered"
+
+    assert b._wait(stalls_once) == "answered" and len(tries) == 2
+
+    async def never():
+        await asyncio.sleep(5)
+
+    with pytest.raises(brain_module.ModelUnavailable, match="did not answer within"):
+        b._wait(never)
+
+    async def refused():
+        raise PermissionError("403 the caller lacks aiplatform.endpoints.predict")
+
+    with pytest.raises(brain_module.ModelUnavailable, match="could not be called: PermissionError"):
+        b._wait(refused)
+

@@ -58,6 +58,19 @@ class Engine:
 
     # ---------------------------------------------------------------------------------------------------
     def ask(self, question: str) -> Answer:
+        """The answer. A model that does not answer (a stall, an API error) is said in one line, with where the
+        facts are (1.4.4 GA QA: a stalled call ended in a traceback)."""
+        from pipewright.assist.brain import ModelUnavailable
+
+        try:
+            return self._ask(question)
+        except ModelUnavailable as e:
+            return Answer(f"Assist did not answer: {e}. Nothing was changed. Ask again; the facts are in "
+                          f"`pipewright status --env {self.env_name}` and the run.failed event.", "refused",
+                          tool_calls=list(self.tools.calls), refused=str(e),
+                          screened=bool(self.screen is not None and self.screen.on))
+
+    def _ask(self, question: str) -> Answer:
         screened = bool(self.screen is not None and self.screen.on)
         if screened:
             problem = self.screen.screen("question", question)

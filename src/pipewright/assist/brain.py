@@ -64,6 +64,12 @@ or, when no run matches:
 
 THINKING_BUDGET = 256        # tokens of the model's own reasoning for one call
 MODEL_TIMEOUT = 120          # seconds for one job of the model, tools included: a hung call is an error, not a wait
+MODEL_TRIES = 2              # a stalled call is tried once more (1.4.4 GA QA: about one call in ten stalled on a busy
+                             # network; a second try answered in seconds). The time above is shared by the tries.
+
+
+class ModelUnavailable(RuntimeError):
+    """The model did not answer: said to the person in one line, never as a traceback."""
 
 
 class CeilingReached(Exception):
@@ -117,18 +123,33 @@ class AdkBrain:
             "vertexai": True, "project": project, "location": settings.location,
             **({"credentials": credentials} if credentials is not None else {})})
 
-    def _wait(self, coroutine):
-        """One event loop for the process, closed at exit: a loop per call leaves the model client's connections
-        to be closed after their loop is gone (noisy on Windows)."""
+    def _wait(self, job):
+        """Runs job() (a coroutine factory) to its end, with the time limit and one more try after a stall. One
+        event loop for the process, closed at exit: a loop per call leaves the model client's connections to be
+        closed after their loop is gone (noisy on Windows)."""
+        each = MODEL_TIMEOUT / MODEL_TRIES
+        for attempt in range(MODEL_TRIES):
+            try:
+                return self._once(job(), each)
+            except (asyncio.TimeoutError, TimeoutError):
+                if attempt + 1 == MODEL_TRIES:
+                    raise ModelUnavailable(f"the model ({self.settings.model}) did not answer within "
+                                           f"{MODEL_TIMEOUT} seconds, in {MODEL_TRIES} tries") from None
+            except Exception as e:  # noqa: BLE001 - the model's API refused or failed: one line, not a traceback
+                raise ModelUnavailable(f"the model ({self.settings.model}) could not be called: "
+                                       f"{type(e).__name__}") from e
+
+    @staticmethod
+    def _once(coroutine, seconds: float):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return _loop().run_until_complete(asyncio.wait_for(coroutine, MODEL_TIMEOUT))
+            return _loop().run_until_complete(asyncio.wait_for(coroutine, seconds))
         # inside a running loop (the hosted tool server answers a request): a thread with a loop of its own
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(lambda: asyncio.run(asyncio.wait_for(coroutine, MODEL_TIMEOUT))).result()
+            return pool.submit(lambda: asyncio.run(asyncio.wait_for(coroutine, seconds))).result()
 
     # -- one agent run --------------------------------------------------------------------------------------
     def _config(self):
@@ -184,13 +205,13 @@ class AdkBrain:
 
     # -- the two jobs ---------------------------------------------------------------------------------------
     def classify(self, question: str) -> tuple[str, dict]:
-        text, usage = self._wait(self._run("sorter", CLASSIFY, question, []))
+        text, usage = self._wait(lambda: self._run("sorter", CLASSIFY, question, []))
         word = re.sub(r"[^a-z]", "", text.lower().split("\n")[0])
         return (word if word in replies.KINDS else replies.UNRELATED), usage
 
     def investigate(self, question: str, context: str, tools) -> tuple[dict, dict]:
-        text, usage = self._wait(self._run("incident", INVESTIGATE.format(context=context), question,
-                                           tools.as_functions(), on_ceiling=getattr(tools, "stop", None)))
+        text, usage = self._wait(lambda: self._run("incident", INVESTIGATE.format(context=context), question,
+                                                   tools.as_functions(), on_ceiling=getattr(tools, "stop", None)))
         return _last_json(text), usage
 
 
