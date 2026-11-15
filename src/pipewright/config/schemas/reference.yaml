@@ -461,6 +461,9 @@ model.serving.online_store.bigquery: Settings for type bigquery.
 model.serving.online_store.cloudsql: Settings for type cloudsql.
 model.serving.online_store.http: Settings for type http.
 
+assist: "Pipewright Assist (preview, 1.4.4, off by default): an assistant that answers incident questions about this use case from what Pipewright recorded (why did a run fail, whose is it). It reads no data rows and no logs, and changes nothing. Read `pipewright assist explain` first."
+assist.enabled: "true - this team opts in. Where the environment has a platform manifest, the platform must also allow Assist."
+assist.understood: "The version of the `pipewright assist explain` page the team read, for example \"1.4.4\". Assist does not start without it, or when the page has changed since."
 approvals: Which changes need a person.
 approvals.promote_model: manual - a passing model is a candidate until `pipewright model approve`; auto - training makes it the default.
 approvals.deploy_model: manual - `pipewright deploy-model` asks for --approve; auto - no confirmation; ci (Pipewright 1.2.0) - `pipewright decisions pending` lists a deploy-approve item for each new default version that passes its gates and is not served, and a pipewright-gate run deploys it once the GitHub environment's reviewers approve; on_register (1.2.0) - the pipewright-decisions workflow deploys such a version without a person.

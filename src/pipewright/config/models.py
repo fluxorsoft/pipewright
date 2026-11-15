@@ -61,6 +61,7 @@ class ResolvedUseCase:
     synthetic_requirements: Path | None = None     # extra packages for the synthetic image (synthetic.requirements)
     warnings: tuple = ()                           # not problems: `validate` prints them (Pipewright 1.2.0)
     release_refusals: tuple = ()                   # 1.4.3: `validate` and `release` refuse these; others warn
+    assist: dict = field(default_factory=dict)    # 1.4.4 (preview): {enabled, understood}; never compiled into a run
 
     @property
     def ray(self) -> dict | None:
@@ -121,6 +122,7 @@ class ResolvedUseCase:
             "triggers": self.triggers,
             "parameters": self.parameters,
             "steps": self.steps,
+            **({"assist": self.assist} if self.assist else {}),
             **self.ml,
             "outputs": {
                 "store": self.outputs.get("store", "bigquery"),

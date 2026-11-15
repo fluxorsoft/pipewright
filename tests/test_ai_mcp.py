@@ -373,7 +373,8 @@ def test_runs_lists_a_refused_submission(server, monkeypatch):
               "cause": {"rule": "machine_shape", "owner": "team", "source": "submission",
                         "summary": "not submitted: 400 Unable to find available machine"}}
     name = "runs/failed/not-submitted/churn/20261114T200140Z-churn-r9"
-    monkeypatch.setattr(gcp_module, "gcs_list", lambda gcp, bucket, prefix: [name] if prefix.endswith("/churn/") else [])
+    monkeypatch.setattr(gcp_module, "gcs_list",
+                        lambda gcp, bucket, prefix: [name] if prefix.endswith("/churn/") else [])
     monkeypatch.setattr(gcp_module, "gcs_read", lambda gcp, bucket, n: (json.dumps(marker), 1))
 
     class G(FakeGcp):

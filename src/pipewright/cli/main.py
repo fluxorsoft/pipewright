@@ -1679,6 +1679,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                          "service with your ID token, no local proxy")
     sp.set_defaults(func=cmd_mcp)
 
+    from pipewright.assist import cli as assist_cli
+
+    assist_cli.add_parser(sub)
+
     sp = sub.add_parser("review", help="the review bundle for a change: a pull request description (1.3.0)")
     sp.add_argument("--root", default=".", help="MLOps repo root (contains environments/ and usecases/)")
     sp.add_argument("--env", required=True, help="environment to check the change against")

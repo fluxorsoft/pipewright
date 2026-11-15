@@ -42,6 +42,11 @@ online = ["pg8000>=1.31,<2"]   # Cloud SQL online store (FR-104): the sync and t
 mcp = [
     "mcp>=1.9,<2",
 ]
+# Pipewright Assist (preview, 1.4.4): Google's Agent Development Kit, pinned: it releases every week or two, and each
+# Pipewright release is tested with one version.
+assist = [
+    "google-adk==2.14.1",
+]
 
 [project.urls]
 Homepage = "https://www.fluxorsoft.com/pipewright.html"

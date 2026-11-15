@@ -226,6 +226,15 @@
           }
         },
         "approvals": { "$ref": "#/$defs/approvals" },
+        "assist": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Pipewright Assist (preview, 1.4.4, off by default): an assistant that answers incident questions about this use case (why did a run fail, whose is it) from what Pipewright recorded. It reads no data rows and no logs, and changes nothing. Read `pipewright assist explain` before switching it on.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "true: this team opts in. Where the environment has a platform manifest, the platform must also allow Assist (ai.assist.enabled)." },
+            "understood": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "The version of the `pipewright assist explain` page the team read, for example \"1.4.4\". Without it, or when the page has changed since, Assist does not start and `pipewright doctor` says so." }
+          }
+        },
         "features_store": { "type": "null", "description": "Reserved for v1.x" },
         "environments": {
           "type": "object",

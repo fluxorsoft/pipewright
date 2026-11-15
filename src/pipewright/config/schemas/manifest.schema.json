@@ -197,6 +197,34 @@
             }
           }
         },
+        "assist": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Pipewright Assist (preview, 1.4.4, off by default): whether teams of this environment may switch on the incident assistant, and what it runs with. Each team still opts in for itself (assist.enabled in its use case).",
+          "properties": {
+            "enabled": {"type": "boolean", "description": "true: teams may opt in. false or absent: Assist does not start in this environment."},
+            "model": {"type": "string", "minLength": 1, "description": "The Gemini model Assist calls (default gemini-3.8-flash)."},
+            "location": {"type": "string", "minLength": 1, "description": "Where the model is called: global (the default; the fast model runs only there) or a region."},
+            "screening": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Model Armor screening of the question, of each text field a tool returns and of the answer.",
+              "properties": {
+                "enabled": {"type": "boolean", "description": "true: screened. false or absent: every answer says it was not screened."},
+                "template": {"type": "string", "minLength": 1, "description": "The Model Armor template: projects/<project>/locations/<location>/templates/<name>."}
+              }
+            },
+            "budget": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Questions a team may ask (enforced by Pipewright Enterprise's hosted tool server; counted everywhere).",
+              "properties": {
+                "questions_per_month": {"type": "integer", "minimum": 0, "description": "Per team and calendar month (default 200)."}
+              }
+            },
+            "model_service_account": {"type": "string", "minLength": 1, "description": "Pipewright Enterprise: the identity that calls the model, so the team's agent identity stays metadata-only."}
+          }
+        },
         "certified_agents": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},

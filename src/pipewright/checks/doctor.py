@@ -434,6 +434,7 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     platform = "ask the platform team"
     res = uc.resources
     _check_failure_records(uc, report, s)
+    _check_assist(uc, env, report, s)
 
     _exists(gcp, report, s, "runner service account", f"{IAM}/projects/-/serviceAccounts/"
             f"{res['runner_service_account']}", platform, lambda b: b.get("email", ""))
@@ -495,6 +496,25 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     _check_serving_1_4_2(uc, env, gcp, report)
     _check_permissions(uc, env, gcp, report, as_agent=as_agent)
 
+
+
+def _check_assist(uc: ResolvedUseCase, env: Environment, report: Report, s: str) -> None:
+    """1.4.4 (preview): says whether Pipewright Assist is on for this use case, and why not. A note when off (it is
+    off by default); a warning only when the team switched it on and it still cannot start, or cannot say why."""
+    from pipewright.assist import settings as assist
+
+    off = assist.why_off(env, uc)
+    asked = bool((uc.assist or {}).get("enabled"))
+    if off:
+        report.add(s, Result(WARN if asked else INFO, "Pipewright Assist (preview)",
+                             "switched on by the team but it does not start" if asked else "off",
+                             off if asked else "to use it: read `pipewright assist explain` first"))
+        return
+    recorded = bool((uc.platform or {}).get("failure_records"))
+    report.add(s, Result(OK if recorded else WARN, "Pipewright Assist (preview)",
+                         "on: `pipewright assist ask` answers incident questions about this use case" if recorded
+                         else "on, but failure causes are not recorded: its answers will be 'read the logs'",
+                         "" if recorded else "set monitoring.failure_records: true in usecase.yaml, then release"))
 
 
 def _check_failure_records(uc: ResolvedUseCase, report: Report, s: str) -> None:
