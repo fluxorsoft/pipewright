@@ -545,3 +545,29 @@ def test_the_answer_lists_every_failed_step():
                              "summary": "validate-data: tenure_months: 715 values below 0"}]
     a = replay.engine_for(c, replay.ScriptedBrain()).ask(c["question"])
     assert "Also failed: validate-data: tenure_months: 715 values below 0 (owner: team)" in a.text
+
+
+def test_a_port_forward_into_the_cluster_still_carries_the_id_token(repo, monkeypatch):
+    from pipewright.assist import hosted
+    from pipewright.config import load_environment
+
+    assist_repo(repo)
+    repo.manifests["dev"]["tenants"]["churn"]["agent_server"] = {
+        "url": "http://pipewright-mcp-churn.pipewright-mcp.svc.cluster.local", "runtime": "gke",
+        "service": "pipewright-mcp-churn", "namespace": "pipewright-mcp"}
+    repo.write()
+    env = load_environment(repo.root, "dev")
+    monkeypatch.setattr(hosted, "identity_token", lambda: "TOKEN")
+    seen = []
+    hosted.ask(env, "churn", "q", "churn", "1.4.4", server_url="http://localhost:8765",
+               call=lambda url, headers, arguments: seen.append((url, headers)) or {"ok": True, "answer": "a"})
+    assert seen[0][0] == "http://localhost:8765/mcp" and seen[0][1]["Authorization"] == "Bearer TOKEN"
+
+    def down(*a):
+        raise ConnectionError("refused")
+
+    from pipewright.errors import ConfigError
+
+    forward = "kubectl port-forward -n pipewright-mcp service/pipewright-mcp-churn 8765:80"
+    with pytest.raises(ConfigError, match=forward):
+        hosted.ask(env, "churn", "q", "churn", "1.4.4", call=down)

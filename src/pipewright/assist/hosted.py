@@ -72,7 +72,8 @@ def ask(env, tenant: str, question: str, usecase: str | None, understood: str, s
     url = (server_url or hosted["url"]).rstrip("/")
     url = url if url.endswith("/mcp") else url + "/mcp"
     headers = {"X-Pipewright-Agent": "pipewright-assist"}
-    if not proxied:
+    in_cluster = bool(hosted) and hosted.get("runtime") == "gke"
+    if not proxied or in_cluster:             # Cloud Run's proxy signs for you; a port-forward into GKE does not
         headers["Authorization"] = f"Bearer {identity_token()}"
     arguments = {"question": question, "usecase": usecase or "", "understood": understood or ""}
     try:
@@ -80,9 +81,14 @@ def ask(env, tenant: str, question: str, usecase: str | None, understood: str, s
     except ConfigError:
         raise
     except Exception as e:  # noqa: BLE001 - not reachable, not admitted: said plainly, with how to reach it
-        how = ("" if proxied else
-               f" If its ingress is internal, run the proxy and pass --server http://localhost:8765:\n  "
-               f"gcloud run services proxy {hosted.get('service', 'pipewright-mcp')} --project {env.project} "
-               f"--region {env.region} --port 8765" if hosted and hosted.get("runtime") != "gke" else "")
+        how = ""
+        if in_cluster and not proxied:
+            how = (" It runs in the cluster: keep a port-forward running and pass --server http://localhost:8765:\n  "
+                   f"kubectl port-forward -n {hosted.get('namespace', 'pipewright-mcp')} "
+                   f"service/{hosted.get('service', 'pipewright-mcp')} 8765:80")
+        elif hosted and not proxied:
+            how = (" If its ingress is internal, run the proxy and pass --server http://localhost:8765:\n  "
+                   f"gcloud run services proxy {hosted.get('service', 'pipewright-mcp')} --project {env.project} "
+                   f"--region {env.region} --port 8765")
         raise ConfigError(f"the hosted tool server at {url} could not be reached "
                           f"({type(e).__name__}: {str(e)[:200]}).{how}") from None
