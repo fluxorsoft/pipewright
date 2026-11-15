@@ -74,6 +74,11 @@ class Engine:
         a.tokens_in += usage["tokens_in"]
         a.tokens_out += usage["tokens_out"]
         a.tool_calls, a.withheld = list(self.tools.calls), list(dict.fromkeys(self.tools.withheld))
+        if self.tools.unscreened:                 # with screening on, an answer built on unscreened text is not given
+            return Answer(f"Assist did not answer: {self.tools.unscreened}. Ask the platform team; the facts are "
+                          f"in `pipewright status --env {self.env_name}` and the run.failed event.", "refused",
+                          tool_calls=a.tool_calls, model_calls=a.model_calls, tokens_in=a.tokens_in,
+                          tokens_out=a.tokens_out, screened=True, refused=self.tools.unscreened)
         body = self._compose(found or {}, a, question)
         if usage.get("ceiling") or self.tools.ceiling_reached:
             body += ("\n\nAssist stopped at its ceiling for one question "

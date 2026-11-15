@@ -571,3 +571,48 @@ def test_a_port_forward_into_the_cluster_still_carries_the_id_token(repo, monkey
     forward = "kubectl port-forward -n pipewright-mcp service/pipewright-mcp-churn 8765:80"
     with pytest.raises(ConfigError, match=forward):
         hosted.ask(env, "churn", "q", "churn", "1.4.4", call=down)
+
+
+def test_a_reply_is_read_whether_or_not_it_is_really_chunked():
+    from pipewright.assist.hosted import _unchunk
+
+    plain = b'{"jsonrpc":"2.0","id":1,"result":{}}'
+    assert _unchunk(plain) == plain                                    # a chunked header on a plain body (found live)
+    assert _unchunk(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n") == b"hello world"
+    assert _unchunk(b"") == b""
+
+
+def test_model_armor_that_cannot_be_reached_refuses_and_never_raises():
+    class Unreachable:
+        def post(self, url, body):
+            raise ConnectionError("certificate verify failed")
+
+    screen = Screen(TEMPLATE, Unreachable())
+    assert "could not be reached: ConnectionError" in screen.screen("question", "why did it fail?")
+    a = ask("ap-contract", screen=screen)                       # refused at the question: the model is not called
+    assert a.kind == "refused" and "could not run" in a.text and a.model_calls == 0
+
+    class OnlyQuestions:                                        # the question passes; the tool text cannot be screened
+        def __init__(self):
+            self.n = 0
+
+        def post(self, url, body):
+            self.n += 1
+            if self.n > 1:
+                raise ConnectionError("down")
+            return SimpleNamespace(ok=True, status=200,
+                                   body={"sanitizationResult": {"filterMatchState": "NO_MATCH_FOUND"}})
+
+    b = ask("ap-contract", screen=Screen(TEMPLATE, OnlyQuestions()))
+    assert b.kind == "refused" and "Assist did not answer" in b.text and "tenure_months" not in b.text
+
+
+def test_a_hosted_answer_wrapped_by_the_tool_server_is_unwrapped(monkeypatch):
+    from pipewright.assist import hosted
+
+    inner = {"ok": True, "answer": "It failed."}
+    reply = {"jsonrpc": "2.0", "id": 1, "result": {"structuredContent": {"result": inner}, "content": []}}
+    monkeypatch.setattr(hosted, "_post", lambda url, headers, body: (200, "application/json", json.dumps(reply)))
+    assert hosted._call("http://x/mcp", {}, {"question": "q"}) == {"ok": True, "answer": "It failed."}
+    monkeypatch.setattr(hosted, "_post", lambda url, headers, body: (401, "application/json", "{}"))
+    assert "did not admit you (401)" in hosted._call("http://x/mcp", {}, {})["refused"]

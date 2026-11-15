@@ -40,10 +40,15 @@ class Screen:
 
             self._gcp = Gcp()
         self.calls += 1
-        if kind == "answer":
-            r = self._gcp.post(self._url("sanitizeModelResponse"), {"modelResponseData": {"text": text}})
-        else:
-            r = self._gcp.post(self._url("sanitizeUserPrompt"), {"userPromptData": {"text": text}})
+        try:
+            if kind == "answer":
+                r = self._gcp.post(self._url("sanitizeModelResponse"), {"modelResponseData": {"text": text}})
+            else:
+                r = self._gcp.post(self._url("sanitizeUserPrompt"), {"userPromptData": {"text": text}})
+        except Exception as e:  # noqa: BLE001 - not reachable (found live: a private network without a route to
+            # Model Armor's regional address): said, and the text is refused, never let through unscreened
+            return (f"screening could not run (Model Armor at {self._url('').rsplit('/v1/', 1)[0]} could not be "
+                    f"reached: {type(e).__name__})")
         if not r.ok:
             # screening that cannot run is said, never silently skipped
             return f"screening could not run (Model Armor answered {r.status})"

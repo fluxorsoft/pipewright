@@ -151,6 +151,7 @@ class Tools:
         self.blocked_seen: list[dict] | None = None
         self.withheld: list[str] = []           # fields that looked like instructions
         self.ceiling_reached = False
+        self.unscreened: str | None = None      # screening could not run on a tool's text: the answer is refused
         self.refusals: list[str] = []           # what the guard refused, in its own words
 
     # -- the guard ------------------------------------------------------------------------------------------
@@ -180,7 +181,14 @@ class Tools:
         """One text field a tool returned: withheld when it reads like an instruction."""
         if not isinstance(text, str) or not text:
             return text
-        if _STEERING.search(text) or (self.screen is not None and self.screen.screen("tool", text)):
+        if _STEERING.search(text):
+            self.withheld.append(where)
+            return WITHHELD
+        problem = self.screen.screen("tool", text) if self.screen is not None else None
+        if problem and "could not run" in problem:      # not screened is not the same as an instruction found
+            self.unscreened = problem
+            return text
+        if problem:
             self.withheld.append(where)
             return WITHHELD
         return text
