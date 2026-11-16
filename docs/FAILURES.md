@@ -32,6 +32,8 @@ next: an error in the use case's own code: see the file and line
 | The region cannot provide the machine you asked for | team | Google's error line |
 | A quota was reached | platform | Google's error line |
 | The step's image is missing | platform | Google's error line; on Kubeflow the pod's status |
+| Pipewright refused the step because of the use case's settings or data (an entity table that already has a feature's column, a champion whose model is gone, a registration the launcher refused) | team | Pipewright's own message, which says what to change |
+| Pipewright refused the step because the environment is missing something (no launcher address, no ID token for the runner, a Ray cluster the launcher did not create) | platform | Pipewright's own message, which says what is missing |
 | Anything else | unclear | nothing names the cause: read the step's logs |
 
 The owner comes from a fixed, ordered table of rules (`pipewright.launcher.cause`). No model decides it, so the same

@@ -35,7 +35,7 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
     )
 
     if not source_uri.startswith("bq://"):
-        raise ValueError(f"{source_uri!r}: a bqml use case reads a bq:// table or view")
+        raise rt.refused(ValueError(f"{source_uri!r}: a bqml use case reads a bq:// table or view"), "team")
     data = ml_config["data"]
     jobs = rt.Jobs(project, ml_config, run_id, labels(ml_config, run_id, **{"pipewright-step": "bqml-rows"}))
     ref = named = bq_table(source_uri, project)
@@ -80,7 +80,8 @@ def bqml_rows(project: str, source_uri: str, run_id: str, mode: str, ml_config: 
     columns = [f.name for f in jobs.client.get_table(rows_table).schema]
     label = (data.get("label") or {}).get("column")
     if mode == "training" and label and label not in columns:
-        raise ValueError(f"the run's rows have no label column {label!r}: bqml.prepare must keep it")
+        raise rt.refused(ValueError(f"the run's rows have no label column {label!r}: bqml.prepare must keep it"),
+                   "team")
     emit_event("data.snapshot.written", ml_config, run_id, table=rows_table, rows=int(counts["n"]),
                test_rows=int(counts["test"]), source_uri=source_uri, mode=mode,
                **({"prepare_sha256": ml_config["bqml"]["prepare"]["sha256"]} if ml_config["bqml"].get("prepare")
@@ -103,7 +104,7 @@ def bqml_validate(project: str, rows_table: str, run_id: str, mode: str, ml_conf
     row = jobs.run(rt.render("contract.sql", checks=checks, rows_table=table), "data contract")[0]
     errors = rt.contract_errors(row, rules, ml_config["data"].get("contract") or {}, mode)
     if errors:
-        raise ValueError("data contract failed:\n  " + "\n  ".join(errors))
+        raise rt.refused(ValueError("data contract failed:\n  " + "\n  ".join(errors)), "team")
     return json.dumps({"rows": int(row["_rows"]), "errors": [], "passed": True})
 
 
@@ -174,7 +175,9 @@ def bqml_evaluate(project: str, region: str, rows_table: str, model: str, run_id
     # The champion: the default version, or the one a closed retrain loop names (what production serves).
     champion = rt.default_version(project, region, section["registry_id"], version=champion_version)
     if champion_version and champion is None:
-        raise ValueError(f"champion_version {champion_version}: {section['registry_id']} has no such version")
+        raise rt.refused(
+            ValueError(f"champion_version {champion_version}: {section['registry_id']} has no such version"),
+                   "team")
     champion_model = ((champion or {}).get("labels") or {}).get("pipewright-bq-model")
     if champion and not champion_model and not forecast:
         rt.unlabelled_champion(champion, section["registry_id"])
@@ -381,8 +384,9 @@ def bqml_champion(project: str, region: str, ml_config: dict, model_version: str
         return namedtuple("Champion", ["model", "version", "record"])("ai_forecast", str(version["versionId"]), record)
     if not labels.get("pipewright-bq-model"):
         which = f"version {model_version}" if model_version else "default version"
-        raise ValueError(f"{section['registry_id']} has no {which} from a bqml training run: train and approve one "
-                         "first (`pipewright model approve`)")
+        raise rt.refused(
+            ValueError(f"{section['registry_id']} has no {which} from a bqml training run: train and approve one "
+                         "first (`pipewright model approve`)"), "team")
     model = f"{project}.{ml_config['platform']['bigquery_dataset']}.{labels['pipewright-bq-model']}"
     record = f"{section['records']}{labels.get('pipewright-run', '')}/"
     return namedtuple("Champion", ["model", "version", "record"])(model, str(version["versionId"]), record)
@@ -409,8 +413,8 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
             "forecast") or ml_config["bqml"]["forecast"]
         if settings["engine"] == "ai_forecast" and ml_config["data"]["label"]["column"] not in {
                 f.name for f in jobs.client.get_table(rows_table).schema}:
-            raise ValueError(f"the rows have no {ml_config['data']['label']['column']} column: AI.FORECAST "
-                             "forecasts from the series' history")
+            raise rt.refused(ValueError(f"the rows have no {ml_config['data']['label']['column']} column: AI.FORECAST "
+                             "forecasts from the series' history"), "team")
         jobs.run(rt.forecast_table_sql(ml_config, rt.forecast_sql(ml_config, settings, model, rows_table, "TRUE",
                                                                    settings["horizon"]), scored, jobs.labels),
                  "forecast")
@@ -422,8 +426,9 @@ def bqml_score(project: str, rows_table: str, model: str, model_version: str, ru
                                 version=str(test["treatment"]["version"])) or {}
         tlabel = (tv.get("labels") or {}).get("pipewright-bq-model")
         if not tlabel:
-            raise ValueError(f"treatment v{test['treatment']['version']} has no BigQuery model (its registry labels "
-                             "name none): it cannot be scored")
+            raise rt.refused(
+                ValueError(f"treatment v{test['treatment']['version']} has no BigQuery model (its registry labels "
+                             "name none): it cannot be scored"), "team")
         treatment_version = str(tv["versionId"])
         tmodel = f"{project}.{ml_config['platform']['bigquery_dataset']}.{tlabel}"
         arm = ab_sql_arm(test["name"], rt.q(test["unit"]), int(test["treatment_bp"]), test.get("layer"))

@@ -14,6 +14,13 @@ OWNER_WORDS = {TEAM: "your team", PLATFORM: "the platform team", UNCLEAR: "uncle
 FIXES = {
     "checks": (TEAM, "The data broke the contract your use case declares. Correct the data at its source, or, if the "
                      "contract is what is wrong, change data.contract and release again.", "config/data.yaml"),
+    "use_case_settings": (TEAM, "Pipewright refused the step because of the use case's own settings or data. The "
+                                "cause's message says what to change; change it and release again.",
+                          "the setting or table the message names"),
+    "platform_settings": (PLATFORM, "Pipewright refused the step because the environment is missing something the "
+                                    "message names. The platform team provides it through the environment's "
+                                    "Terraform; nothing to change in the use case.",
+                          "the platform's Terraform for the environment"),
     "team_code": (TEAM, "Fix the line shown and release the use case again. Nothing is wrong with the platform.",
                   "the file and line in the cause"),
     "out_of_memory": (TEAM, "Give the step more memory and release again.",

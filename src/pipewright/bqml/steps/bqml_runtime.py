@@ -14,6 +14,12 @@ import re
 import time
 from pathlib import Path
 
+
+def refused(error: Exception, owner: str) -> Exception:
+    """A refusal Pipewright wrote, and who changes something: "team" or "platform" (the cause recorded, 1.4.4)."""
+    error.pipewright_owner = owner
+    return error
+
 SQL_DIR = Path(__file__).resolve().parent / "sql"
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,299}$")
@@ -34,13 +40,13 @@ def render(name: str, **values) -> str:
     text = (SQL_DIR / name).read_text(encoding="utf-8")
     missing = sorted(set(_PLACEHOLDER.findall(text)) - set(values))
     if missing:
-        raise ValueError(f"{name}: no value for {', '.join(missing)}")
+        raise refused(ValueError(f"{name}: no value for {', '.join(missing)}"), "team")
     return _PLACEHOLDER.sub(lambda m: str(values[m.group(1)]), text).strip()
 
 
 def ident(name: str) -> str:
     if not _IDENT.match(name):
-        raise ValueError(f"{name!r} is not a BigQuery column name")
+        raise refused(ValueError(f"{name!r} is not a BigQuery column name"), "team")
     return name
 
 
@@ -369,7 +375,7 @@ def forecast_steps(jobs: Jobs, ml_config: dict, rows_table: str) -> int:
                           group_by=f" GROUP BY {', '.join(q(c) for c in ids)}" if ids else ""), "held-out period")
     steps = int(row[0]["steps"]) if row else 0
     if not steps:
-        raise ValueError("a forecast needs held-out rows: the test rows (the latest period) are empty")
+        raise refused(ValueError("a forecast needs held-out rows: the test rows (the latest period) are empty"), "team")
     return steps
 
 
@@ -444,8 +450,9 @@ def evaluate_forecast(jobs: Jobs, ml_config: dict, settings: dict, model: str, r
     forecast_failures(jobs, out_table)
     result = evaluate_rows(jobs, ml_config, out_table)
     if not result["rows"]:
-        raise ValueError("the forecast matched none of the held-out rows: is data.split.time_column a regular series "
-                         "(one row per series and time point)?")
+        raise refused(
+            ValueError("the forecast matched none of the held-out rows: is data.split.time_column a regular series "
+                         "(one row per series and time point)?"), "team")
     ids = settings.get("id_columns") or []
     if ids:                    # each series' metrics (Pipewright 1.2.0, FR-69): the one that fails is named
         names = ml_config["evaluation"]["metrics"]
@@ -657,10 +664,11 @@ def unlabelled_champion(champion: dict, registry_id: str) -> None:
     """A champion whose registry labels no longer name its BigQuery model. Found live in phase 6 (ent): an ALTER
     MODEL outside Pipewright resyncs the registry version and drops its labels; every later version then failed the
     champion gate with no reason given. Training stops here, saying why."""
-    raise ValueError(f"the champion, v{champion.get('versionId')} of {registry_id}, has no pipewright-bq-model label: "
+    raise refused(
+        ValueError(f"the champion, v{champion.get('versionId')} of {registry_id}, has no pipewright-bq-model label: "
                      "its registry labels were removed (an ALTER MODEL outside Pipewright drops them), so it cannot be "
                      "compared; make a version Pipewright registered the default (`pipewright model approve`), or "
-                     "turn off evaluation.champion")
+                     "turn off evaluation.champion"), "team")
 
 
 def require_champion(jobs: Jobs, ref: str, version, registry_id: str) -> None:
@@ -671,9 +679,10 @@ def require_champion(jobs: Jobs, ref: str, version, registry_id: str) -> None:
     try:
         jobs.client.get_model(ref)
     except NotFound:
-        raise ValueError(f"the champion, v{version} of {registry_id}, names BigQuery model {ref}, which no longer "
+        raise refused(
+            ValueError(f"the champion, v{version} of {registry_id}, names BigQuery model {ref}, which no longer "
                          "exists: make a version whose model exists the default (`pipewright model approve`), or "
-                         "turn off evaluation.champion") from None
+                         "turn off evaluation.champion"), "team") from None
 
 
 def registered_version(jobs: Jobs, model: str, wait_s: int = 300) -> str:

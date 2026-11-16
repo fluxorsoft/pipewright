@@ -66,7 +66,7 @@ RULES = (
      "the step's identity was refused a permission: the platform grants it, or the use case asks for less"),
 )
 RULE_NAMES = ("out_of_memory", "machine_shape", "quota", "missing_image", "perimeter", "permission", "checks",
-              "team_code", "cancelled", "unclear")
+              "use_case_settings", "platform_settings", "team_code", "cancelled", "unclear")
 
 
 def _text(value, limit: int = MAX_TEXT) -> str | None:
@@ -101,6 +101,7 @@ def clean(record: dict) -> dict:
     out = {
         "step": _name(record.get("step")), "function": _name(record.get("function")),
         "identity": _name(record.get("identity")),
+        "owner": (record.get("owner") if ours and record.get("owner") in (TEAM, PLATFORM) else None),
         "kind": "pipewright_error" if ours else "exception",
         "error_type": _name(record.get("error_type")),
         # without the request line ("403 GET https://...: "): it repeats what follows and used up the length
@@ -124,6 +125,14 @@ def owner(record: dict | None, line: str = "") -> tuple[str, str, str]:
             return rule, who, hint
     if record and record.get("checks"):
         return "checks", TEAM, "the step's own checks failed (a data contract, a gate): see the checks"
+    # Pipewright's own refusal, which says who changes something (1.4.4, founder's decision 16 November 2026)
+    if record and record.get("kind") == "pipewright_error" and record.get("message"):
+        if record.get("owner") == TEAM:
+            return ("use_case_settings", TEAM, "Pipewright refused the step: the message says what to change in the "
+                    "use case's settings or data")
+        if record.get("owner") == PLATFORM:
+            return ("platform_settings", PLATFORM, "Pipewright refused the step: the message says what the "
+                    "environment is missing")
     if record and record.get("kind") == "exception" and record.get("code"):
         return "team_code", TEAM, "an error in the use case's own code: see the file and line"
     return "unclear", UNCLEAR, "the recorded facts do not name the cause: read the step's logs"

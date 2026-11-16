@@ -208,6 +208,9 @@ def build(exc_type, exc, tb, argv: list, components: str = COMPONENTS) -> tuple[
                           or getattr(exc_type, "__name__", exc_type))[:120],
         # Only Pipewright's own messages are kept: they are value-free already (and pass the rule once more).
         "message": value_free(str(exc))[:MAX_TEXT] if ours else None,
+        # who changes something, where Pipewright's own refusal says so (1.4.4): "team" or "platform"
+        "owner": (getattr(exc, "pipewright_owner", None) if ours
+                  and getattr(exc, "pipewright_owner", None) in ("team", "platform") else None),
         "code": _code(tb, components), "checks": checks, "where": _where(executor_input),
     }
     return folder, record

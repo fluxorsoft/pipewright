@@ -75,7 +75,11 @@ recorded: `pipewright assist ask "why did last night's training fail?"`. The gui
   ML steps, one of Google's client errors inside them, a registration the launcher refused and a Ray cluster that did
   not start now keep their message (through the value-free rule) and name no line of the team's code. So does an
   error the runtime itself raises (for example an entity table that already has a feature table's columns); a Ray
-  job's failure, which quotes the job's log lines, never does. A Ray cluster
+  job's failure, which quotes the job's log lines, never does.
+- **The cause recorded: Pipewright's own refusals name their owner.** A refusal about the use case's settings or data
+  is the team's (`use_case_settings`), one about what the environment is missing is the platform's
+  (`platform_settings`), and the next step points at the message instead of the logs. Refusals Pipewright cannot
+  place stay `unclear`. A Ray cluster
   refused for a quota is the platform's (`quota`). The one-line reason leaves out BigQuery's request line.
 - **KServe: capture without a receiver said nothing.** In an environment without the capture receiver a use case
   with `model.serving.capture` deployed, and every record was dropped silently. `deploy-model` now says `capture on`

@@ -785,3 +785,44 @@ def test_an_error_the_runtime_raised_keeps_its_message():
     _, record = hook.build(type(error), error, None, argv(function="tune_on_ray"))
     assert record["message"] is None and "Jane" not in json.dumps(record)
 
+
+
+# -- the owner of Pipewright's own refusals (1.4.4, founder's decision 16 November 2026) ----------------------------
+
+def _refusal(owner):
+    error = rt._own(ValueError("the entity table p.d.e already has num_products, which data.features_from.sources[0] "
+                               "adds; drop them from the entity table or set a prefix"), owner)
+    try:
+        raise error
+    except ValueError as e:
+        _, record = hook.build(type(e), e, e.__traceback__, argv(function="ingest_data"))
+    return record
+
+
+def test_a_refusal_marked_for_the_team_is_the_teams():
+    kept = cause.clean(_refusal("team"))
+    rule, who, hint = cause.owner(kept)
+    assert (rule, who) == ("use_case_settings", "team") and "the message says what to change" in hint
+    from pipewright.assist import fixes
+
+    assert fixes.fix("use_case_settings")["who"] == "team"
+
+
+def test_a_refusal_marked_for_the_platform_is_the_platforms():
+    rule, who, _ = cause.owner(cause.clean(_refusal("platform")))
+    assert (rule, who) == ("platform_settings", "platform")
+
+
+def test_an_unmarked_refusal_stays_unclear_and_no_owner_is_taken_from_a_team_error():
+    assert cause.owner(cause.clean(_refusal(None)))[0] == "unclear"
+    forged = {"step": "s", "kind": "exception", "owner": "platform", "error_type": "ValueError"}
+    assert "owner" not in cause.clean(forged)               # only Pipewright's own message can carry an owner
+
+
+def test_the_runtime_marks_its_refusals():
+    with pytest.raises(ValueError) as e:
+        rt.read_source("not-a-uri", "p", {}, "r1")
+    assert e.value.pipewright_owner == "team"
+    from pipewright.bqml.steps import bqml_runtime
+
+    assert bqml_runtime.refused(ValueError("x"), "team").pipewright_owner == "team"

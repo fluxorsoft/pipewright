@@ -166,11 +166,14 @@ def value_free(text: str) -> str:
     return _AFTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, _QUOTED.sub(quoted, str(text)))
 
 
-def _own(error: Exception) -> Exception:
+def _own(error: Exception, owner: str | None = None) -> Exception:
     """An error whose message Pipewright wrote from names, settings and the launcher's own answers: the failure record
     may keep it (1.4.4 GA QA: a registration the launcher refused was recorded as a bug in the team's register.py,
-    without the reason)."""
+    without the reason). owner: who changes something, where Pipewright knows it: "team" (the use case's settings or
+    data) or "platform" (what the environment provides); the cause recorded names it (1.4.4, founder's decision)."""
     error.pipewright_value_free = True
+    if owner in ("team", "platform"):
+        error.pipewright_owner = owner
     return error
 
 
@@ -211,7 +214,7 @@ def bq_table(source_uri: str, default_project: str) -> str:
     """bq://project.dataset.table or bq://dataset.table -> project.dataset.table"""
     m = _BQ.match(source_uri)
     if not m:
-        raise ValueError(f"{source_uri!r} is not bq://project.dataset.table (or bq://dataset.table)")
+        raise _own(ValueError(f"{source_uri!r} is not bq://project.dataset.table (or bq://dataset.table)"), "team")
     project, dataset, table = m.groups()
     return f"{project or default_project}.{dataset}.{table}"
 
@@ -252,7 +255,9 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None, ru
         return _read_snapshot(source_uri, project, ml_config or {}, run_id)
     if (features_from or label_source) and not source_uri.startswith("bq://"):
         what = "data.features_from" if features_from else "data.label_source"
-        raise ValueError(f"{source_uri!r}: with {what} the run's source is the entity table, a bq:// table or view")
+        raise _own(
+            ValueError(f"{source_uri!r}: with {what} the run's source is the entity table, a bq:// table or view"),
+                   "team")
     if source_uri.startswith("bq://"):
         ref = bq_table(source_uri, project)
         client = bigquery_client(project, ml_config)
@@ -274,7 +279,7 @@ def read_source(source_uri: str, project: str, ml_config: dict | None = None, ru
         bucket, _, name = source_uri.removeprefix("gs://").partition("/")
         payload = storage.Client(project=project).bucket(bucket).blob(name).download_as_bytes()
         return pd.read_parquet(io.BytesIO(payload)) if name.endswith(".parquet") else pd.read_csv(io.BytesIO(payload))
-    raise ValueError(f"{source_uri!r}: source_uri must start with gs:// or bq://")
+    raise _own(ValueError(f"{source_uri!r}: source_uri must start with gs:// or bq://"), "team")
 
 
 def needs_labels(source_uri: str, project: str, ml_config: dict) -> bool:
@@ -325,19 +330,19 @@ def _labelled_entities(client, entity_ref: str, project: str, label_source: dict
     feature join, when there is one, reads it like any entity table."""
     label_column = (data.get("label") or {}).get("column")
     if not label_column:
-        raise ValueError("data.label_source needs data.label.column")
+        raise _own(ValueError("data.label_source needs data.label.column"), "team")
     columns = [f.name for f in client.get_table(entity_ref).schema]
     if label_column in columns:
-        raise ValueError(f"{entity_ref} already has the label column {label_column!r}: with data.label_source the "
-                         "label comes from the label table")
+        raise _own(ValueError(f"{entity_ref} already has the label column {label_column!r}: with data.label_source the "
+                         "label comes from the label table"), "team")
     for col in [*label_source["key"], label_source["cutoff_column"]]:
         if col not in columns:
-            raise ValueError(f"{entity_ref} has no column {col!r} (data.label_source)")
+            raise _own(ValueError(f"{entity_ref} has no column {col!r} (data.label_source)"), "team")
     table = bq_table(label_source["table"], project)
     tcol = _q(label_source["time_column"])
     row = list(client.query(f"SELECT MAX(CAST({tcol} AS TIMESTAMP)) AS anchor FROM `{table}`").result())[0]
     if row["anchor"] is None:
-        raise ValueError(f"{table} has no label events: nothing to anchor the label window on")
+        raise _own(ValueError(f"{table} has no label events: nothing to anchor the label window on"), "team")
     anchor = row["anchor"].isoformat()
     total = list(client.query(f"SELECT COUNT(*) AS n FROM `{entity_ref}`").result())[0]["n"]
     job = client.query(label_query(entity_ref, label_source, label_column, anchor, project))
@@ -366,7 +371,9 @@ def snapshot_table_ref(ml_config: dict, project: str) -> str:
     """project.dataset.table of data.snapshot_table, in the use case's dataset."""
     table = ((ml_config.get("data") or {}).get("snapshot_table"))
     if not table:
-        raise ValueError(f"{ml_config.get('usecase')} sets no data.snapshot_table: there is no snapshot to replay")
+        raise _own(
+            ValueError(f"{ml_config.get('usecase')} sets no data.snapshot_table: there is no snapshot to replay"),
+                   "team")
     dataset = (ml_config.get("platform") or {}).get("bigquery_dataset")
     return f"{project}.{dataset}.{table}"
 
@@ -376,9 +383,9 @@ def _read_snapshot(source_uri: str, project: str, ml_config: dict, run_id: str |
 
     replayed = source_uri.removeprefix(SNAPSHOT_SCHEME)
     if not _RUN_ID.match(replayed):
-        raise ValueError(f"{source_uri!r} is not snapshot://<run id>")
+        raise _own(ValueError(f"{source_uri!r} is not snapshot://<run id>"), "team")
     if ((ml_config.get("outputs") or {}).get("store") or "bigquery") == "gcs":
-        raise ValueError("replaying a snapshot needs the BigQuery store (outputs.store bigquery or both)")
+        raise _own(ValueError("replaying a snapshot needs the BigQuery store (outputs.store bigquery or both)"), "team")
     ref = snapshot_table_ref(ml_config, project)
     client = bigquery_client(project, ml_config)
     schema = client.get_table(ref).schema
@@ -388,7 +395,7 @@ def _read_snapshot(source_uri: str, project: str, ml_config: dict, run_id: str |
                            bigquery.ScalarQueryParameter("run_id", "STRING", replayed)]))
     df = job.to_dataframe(create_bqstorage_client=False)
     if df.empty:
-        raise ValueError(f"no rows of run {replayed} in {ref}: nothing to replay")
+        raise _own(ValueError(f"no rows of run {replayed} in {ref}: nothing to replay"), "team")
     for col in df.columns:
         if str(df[col].dtype) == "dbdate":
             import pandas as pd
@@ -444,11 +451,12 @@ def write_snapshot(rows, ml_config: dict, project: str, dataset: str, run_id: st
 
     table = (ml_config.get("data") or {}).get("snapshot_table")
     if not table:
-        raise ValueError(f"{ml_config.get('usecase')} sets no data.snapshot_table")
+        raise _own(ValueError(f"{ml_config.get('usecase')} sets no data.snapshot_table"), "team")
     fields = ((ml_config.get("outputs") or {}).get("tables") or {}).get(table) or []
     missing = [c for c in SNAPSHOT_COLUMNS if c not in {f.get("name") for f in fields}]
     if missing:
-        raise ValueError(f"data.snapshot_table {table}: its schema needs the columns {', '.join(missing)}")
+        raise _own(ValueError(f"data.snapshot_table {table}: its schema needs the columns {', '.join(missing)}"),
+                   "team")
     df = (rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))).copy()
     fingerprint = rows_fingerprint(df, fields, _snapshot_key(ml_config))     # FR-85: what a replay compares with
     df["run_id"], df["source_uri"], df["ingested_at"] = run_id, source_uri, datetime.now(timezone.utc)
@@ -474,8 +482,8 @@ def features_query(entity_ref: str, entity_columns: list[str], features_from: di
     keys, tc = entity["columns"], entity["time_column"]
     missing = [c for c in keys if c not in entity_columns]
     if missing:
-        raise ValueError(f"the entity table {entity_ref} has no column {', '.join(missing)} "
-                         "(data.features_from.entity.columns)")
+        raise _own(ValueError(f"the entity table {entity_ref} has no column {', '.join(missing)} "
+                         "(data.features_from.entity.columns)"), "team")
     cutoff = (lambda alias: f"CAST({alias}{_q(tc)} AS TIMESTAMP)") if tc in entity_columns else \
         (lambda _alias: "CURRENT_TIMESTAMP()")
     ctes = ["entity AS (SELECT * FROM " + _q(entity_ref) + ")",
@@ -489,8 +497,9 @@ def features_query(entity_ref: str, entity_columns: list[str], features_from: di
         prefix = src.get("prefix", "")
         clash = [prefix + c for c in src["features"] if prefix + c in entity_columns]
         if clash:
-            raise ValueError(f"the entity table {entity_ref} already has {', '.join(clash)}, which "
-                             f"data.features_from.sources[{i}] adds; drop them from the entity table or set a prefix")
+            raise _own(ValueError(f"the entity table {entity_ref} already has {', '.join(clash)}, which "
+                             f"data.features_from.sources[{i}] adds; drop them from the entity table or set a prefix"),
+                       "team")
         on = " AND ".join(f"f.{_q(fk)} = k.{_q(k)}" for fk, k in zip(fkeys, keys, strict=True))
         columns = src.get("columns") or {}             # a registered feature's column, when it differs from its name
         values = ", ".join(f"f.{_q(columns.get(c, c))} AS {_q(prefix + c)}" for c in src["features"])
@@ -517,13 +526,13 @@ def group_source(src: dict, group: dict, features: list[dict]) -> dict:
     bq = group.get("bigQuery") or {}
     uri = (bq.get("bigQuerySource") or {}).get("inputUri")
     if not uri:
-        raise ValueError(f"feature group {src['feature_group']} has no BigQuery source")
+        raise _own(ValueError(f"feature group {src['feature_group']} has no BigQuery source"), "team")
     registered = {f["name"].rsplit("/", 1)[-1]: f.get("versionColumnName") or f["name"].rsplit("/", 1)[-1]
                   for f in features}
     missing = [f for f in src["features"] if f not in registered]
     if missing:
-        raise ValueError(f"feature group {src['feature_group']} has no feature {', '.join(missing)} "
-                         f"(registered: {', '.join(sorted(registered)) or 'none'})")
+        raise _own(ValueError(f"feature group {src['feature_group']} has no feature {', '.join(missing)} "
+                         f"(registered: {', '.join(sorted(registered)) or 'none'})"), "team")
     out = {"table": uri, "entity_columns": list(bq.get("entityIdColumns") or ["entity_id"]),
            "time_column": (bq.get("timeSeries") or {}).get("timestampColumn") or "feature_timestamp",
            "features": list(src["features"]), "columns": {f: registered[f] for f in src["features"]},
@@ -633,8 +642,8 @@ def fairness_measures(df, label: str, score: str, threshold: float, ml_config: d
     out = {}
     for attr in fair["attributes"]:
         if attr not in df.columns:
-            raise ValueError(f"evaluation.fairness: the test set has no column {attr!r} (keep it in the data, "
-                             "it need not be a feature)")
+            raise _own(ValueError(f"evaluation.fairness: the test set has no column {attr!r} (keep it in the data, "
+                             "it need not be a feature)"), "team")
         groups, rates = {}, []
         for value, g in df.groupby(attr, dropna=False):
             entry = {"rows": int(len(g))}
@@ -783,7 +792,7 @@ def conform(df, fields: list[dict]):
         name, kind = f["name"], f["type"]
         if name not in df.columns:
             if f.get("mode") == "REQUIRED":
-                raise ValueError(f"column {name} is REQUIRED but missing")
+                raise _own(ValueError(f"column {name} is REQUIRED but missing"), "team")
             out[name] = None
             continue
         col = df[name]
@@ -845,7 +854,7 @@ def write_table(table: str, rows, ml_config: dict, project: str, dataset: str, r
     outputs = ml_config.get("outputs") or {"store": "bigquery", "tables": {}}
     fields = outputs["tables"].get(table)
     if fields is None:
-        raise ValueError(f"{table} is not in outputs.bigquery.tables of {ml_config.get('usecase')}")
+        raise _own(ValueError(f"{table} is not in outputs.bigquery.tables of {ml_config.get('usecase')}"), "team")
     df = conform(rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows)), fields)
     written = []
     if outputs["store"] in ("bigquery", "both"):
@@ -952,8 +961,8 @@ def id_token(audience: str, attempts: int = 3, wait: float = 10.0) -> str:
             return token
         if attempt < attempts - 1:
             time.sleep(wait)
-    raise RuntimeError(f"no ID token for {audience} after {attempts} tries (the runner needs "
-                       "roles/iam.serviceAccountOpenIdTokenCreator on itself): " + "; ".join(tried[-4:]))
+    raise _own(RuntimeError(f"no ID token for {audience} after {attempts} tries (the runner needs "
+                       "roles/iam.serviceAccountOpenIdTokenCreator on itself): " + "; ".join(tried[-4:])), "platform")
 
 
 def _ray_request(ml_config: dict, action: str, step: str, run_id: str) -> None:
@@ -962,7 +971,8 @@ def _ray_request(ml_config: dict, action: str, step: str, run_id: str) -> None:
     platform = ml_config.get("platform") or {}
     url = (platform.get("launcher_url") or "").rstrip("/")
     if not url:
-        raise RuntimeError("Ray clusters need the launcher, and the environment manifest has no launcher.url")
+        raise _own(RuntimeError("Ray clusters need the launcher, and the environment manifest has no launcher.url"),
+                   "platform")
     token = id_token(url)
     body = {"action": action, "usecase": ml_config["usecase"], "run_id": run_id, "step": step}
     topic = platform.get("run_requests_topic")
@@ -994,8 +1004,8 @@ class _RayCluster:
         platform = ml_config.get("platform") or {}
         steps = (platform.get("ray") or {}).get("steps") or {}
         if step not in steps:
-            raise ValueError(f"step {step!r} has no Ray cluster: set steps.{step}.ray in the use case "
-                             f"(Ray steps: {', '.join(steps) or 'none'})")
+            raise _own(ValueError(f"step {step!r} has no Ray cluster: set steps.{step}.ray in the use case "
+                             f"(Ray steps: {', '.join(steps) or 'none'})"), "team")
         self.ml_config, self.step, self.run_id = ml_config, step, run_id
         self.region = platform["region"]
         self.minutes = int(steps[step]["max_minutes"])
@@ -1045,7 +1055,7 @@ class _RayCluster:
             while self._state().get("state") != "RUNNING":
                 if time.time() > deadline:
                     raise _own(RuntimeError(f"the tenant's standing Ray cluster {self.cluster} does not answer "
-                                            f"at {self.name}: ask the platform team"))
+                                            f"at {self.name}: ask the platform team"), "platform")
                 time.sleep(15)
             namespace = (self.ml_config.get("platform") or {}).get("kubernetes_namespace") or "kubeflow"
             emit_event("ray.cluster.used", self.ml_config, self.run_id, step=self.step, mode="standing",
@@ -1072,7 +1082,8 @@ class _RayCluster:
                 # fixed for the run, so asking again is safe; after three tries, stop and say where to look.
                 if resends == 3:
                     raise _own(RuntimeError(f"the launcher has not created Ray cluster {self.name} after "
-                                            f"{resends + 1} requests: see the launcher's logs ('ray create')"))
+                                            f"{resends + 1} requests: see the launcher's logs ('ray create')"),
+                               "platform")
                 _ray_request(self.ml_config, "create", self.step, self.run_id)
                 asked, resends = time.time(), resends + 1
                 log(f"asked again for Ray cluster {self._label()} ({resends})", self.ml_config,
@@ -1413,8 +1424,8 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
     platform = ml_config.get("platform") or {}
     url = (platform.get("launcher_url") or "").rstrip("/")
     if not url:
-        raise RuntimeError("registration through the launcher needs the launcher, and the manifest has no "
-                           "launcher.url")
+        raise _own(RuntimeError("registration through the launcher needs the launcher, and the manifest has no "
+                           "launcher.url"), "platform")
     token = id_token(url)
     body = {**request, "usecase": ml_config["usecase"], "run_id": run_id}
     # The answer names the request it answers (GA QA): an answer to another request of this run is not this one's.
@@ -1430,7 +1441,7 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
             return r.json()
         if r.status_code in (400, 403):
             raise _own(RuntimeError("the launcher refused to register this version: "
-                                    f"{r.json().get('reason', r.text)}"))
+                                    f"{r.json().get('reason', r.text)}"), "team")
         log(f"registration call returned {r.status_code}: {r.text[:300]}; waiting for the answer", ml_config,
             "WARNING", run_id)
     else:
@@ -1459,10 +1470,11 @@ def register_version(ml_config: dict, run_id: str, request: dict, wait_minutes: 
                 continue
             if answer.get("status") == "registered":
                 return answer
-            raise _own(RuntimeError(f"the launcher refused to register this version: {answer.get('reason')}"))
+            raise _own(RuntimeError(f"the launcher refused to register this version: {answer.get('reason')}"), "team")
         time.sleep(15)
     raise _own(RuntimeError(f"no answer from the launcher after {wait_minutes} minutes (gs://"
-                            f"{platform['artifacts_bucket']}/{name}): see the launcher's logs ('registration')"))
+                            f"{platform['artifacts_bucket']}/{name}): see the launcher's logs ('registration')"),
+               "platform")
 
 
 def registry_model_id(display_name: str) -> str:
