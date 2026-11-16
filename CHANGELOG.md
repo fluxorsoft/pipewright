@@ -3,7 +3,7 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [1.4.4] - unreleased
+## [1.4.4] - 2026-11-16
 
 Two things, both off until turned on: a use case or environment that sets neither releases and runs exactly as
 before.
