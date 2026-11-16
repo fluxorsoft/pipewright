@@ -157,6 +157,12 @@ it publishes the request to the environment's run requests topic and the launche
 query BigQuery with `bigquery_client(project, ml_config)` from `pipewright_runtime` (private environments require
 an encryption key on every query), and keep files your pipelines read under your landing or read prefixes.
 
+When a run fails (1.4.4): switch on `monitoring.failure_records` in the use case (or ask the platform team for
+`failure_records` across the environment) and `run.failed` and its alert email say why the run
+failed and whose it is: your team's or the platform team's ([FAILURES.md](FAILURES.md)). Where the platform allows
+it, you can also ask Pipewright Assist (preview): `pipewright assist ask "why did last night's training fail?" --env
+<env> --usecase <usecase>`, after reading `pipewright assist explain` ([ASSIST.md](ASSIST.md)).
+
 ## 4. What you own, and what you do not
 
 | You own (ML team) | The platform team owns |

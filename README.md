@@ -6,14 +6,16 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
 
-> **Status: 1.4.3, the complete MLOps loop.** A team on Google Cloud can take a model from a data contract to
-> production and back with Pipewright alone: train on any of four runners, release through gates and named approvals,
+> **Status: 1.4.4, why a run failed.** When a run fails, Pipewright now records why and whose it is: the step, the
+> error, the line that raised it, the checks that failed, and whether the team or the platform team changes something
+> ([docs/FAILURES.md](docs/FAILURES.md)). On top of it, a preview of **Pipewright Assist** answers incident questions
+> in plain words, reads no data and changes nothing ([docs/ASSIST.md](docs/ASSIST.md)). Both are off until set.
+> Since 1.4.3 the MLOps loop is complete: train on any of four runners, release through gates and named approvals,
 > score in batch or serve online, A/B test a candidate against the champion ([docs/AB_TESTING.md](docs/AB_TESTING.md)),
 > watch serving health and quality on live traffic ([docs/SERVING.md](docs/SERVING.md)), hold scoring runs for a
 > person ([docs/BATCH_SCORING.md](docs/BATCH_SCORING.md)) and retrain when a signal says so, with a person deciding at
-> every point that matters. All of it is off until set. What runs is still what was approved: approvals fingerprint
-> the model files, serving image, rules and feature definitions, and deploy, promote and scoring refuse anything that
-> changed since.
+> every point that matters. What runs is still what was approved: approvals fingerprint the model files, serving
+> image, rules and feature definitions, and deploy, promote and scoring refuse anything that changed since.
 > Working end to end on Google Cloud, including private environments with
 > customer-managed keys, enforced organization policies and an enforced VPC Service Controls perimeter. The
 > configuration format is stable ([STABILITY.md](https://github.com/fluxorsoft/pipewright/blob/main/STABILITY.md)). Releases are on GitHub (the wheel as a release
@@ -154,7 +156,7 @@ pipewright retrain approve --env dev --usecase churn --reason "real shift after 
 | Serve | Model Registry with the default version as the champion, promotion following an approval policy, online serving with an approval gate, canary, promote and undeploy (Agent Platform endpoints, or KServe on private GKE with the same request format), `pipewright model predict` |
 | Monitor | Feature drift and prediction drift (PSI) against training baselines, live performance once outcomes arrive, `monitor status`, email alerts configured in YAML |
 | Decide | Retrain decision cases: modes, decision packs, approver groups with a quorum, snoozes and declines that expire, re-opening when things get worse, escalation, a weekly digest, an opt-in Pub/Sub feed for your own apps; the closed retrain loop (production never trains); a failed retrain recorded on its case and retried; approvals in GitHub |
-| Observe | Lifecycle events on Pub/Sub and labelled structured logs for every key moment, with no vendor code in pipelines |
+| Observe | Lifecycle events on Pub/Sub and labelled structured logs for every key moment, with no vendor code in pipelines; **the cause recorded** with every failed run, its owner (team or platform) and the next step, in `run.failed`; **Pipewright Assist** (preview) to ask why a run failed |
 | Protect | Personal data declared in the data contract and never used as a feature; erasure by key across a team's tables (BigQuery and Parquet) |
 | Synthesize | **Synthetic data**, off until a team switches it on: learned inside the environment by an engine (MOSTLY AI local mode by default; SDV if the team installs it), gated on fidelity, utility and privacy before anything is published; one table, or an entity table with its feature tables and event sequences, keys and timing intact; or rows from the data contract alone, with no real data |
 | Automate | `pipewright ci init` writes GitHub Actions workflows for pull requests, releases and operations, including self-hosted runners |
@@ -631,6 +633,31 @@ feature and label sources, and its evaluation against the champion. A promoted v
 the environment it came from. The register step writes `lineage.json` next to the evaluation record
 (`write_lineage()` in the component runtime; the example and the BigQuery ML pipelines call it), new in 1.1.
 
+## Why a run failed, and Pipewright Assist (1.4.4)
+
+Switch on `monitoring.failure_records` (or `observability.failure_records` for a whole environment) and a failed step
+leaves a small, value-free record of why: the error's type, Pipewright's own message, the place in your code and your
+check results. The launcher adds the cause, the owner (your team, the platform team or unclear, from a fixed rules
+table) and the next step to `run.failed`, its marker and the alert email. `monitoring.submit_failed` records a run the
+orchestrator refused to start. The guide: [docs/FAILURES.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/FAILURES.md).
+
+**Pipewright Assist** (a preview, off by default) answers incident questions from that record:
+
+```
+$ pipewright assist ask "why did last night's churn training fail?" --env test --usecase churn
+The training run r4f7fc4901cbb of churn failed at prepare-data.
+Cause: TypeError in prepare.py, line 39
+Owner: your team.
+Next: Fix the line shown and release the use case again. Nothing is wrong with the platform.
+```
+
+The cause, the owner and the advice come from Pipewright's rules and a fixed list of fixes; the model
+(`gemini-3.8-flash`, in your own project, temperature 0) finds the run and explains it. It reads no data rows, logs or
+monitoring results, and it never runs, releases, approves or grants. Questions and answers can be screened by
+Google's Model Armor, and every answer is recorded. Two switches turn it on: the platform allows it, and the team opts
+in after reading `pipewright assist explain`. `pipewright assist test` replays 22 real failures against the model as a
+release gate. The guide: [docs/ASSIST.md](https://github.com/fluxorsoft/pipewright/blob/main/docs/ASSIST.md).
+
 ## AI build assistance
 
 Build and change use cases with the coding agent you already use (new in 1.3.0). The agent writes, Pipewright
@@ -776,11 +803,12 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.4.3"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp]==1.4.4"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp,assist]==1.4.4"     # with Pipewright Assist (preview)
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.4.3 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.4.4 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -838,7 +866,7 @@ user credentials. Behind a TLS-inspecting proxy, set `REQUESTS_CA_BUNDLE`, `GRPC
 | Stage | Commands |
 |---|---|
 | Configure | `new-usecase`, `validate`, `resolve`, `explain`, `schemas`, `doctor`, `test`, `context build`, `context check` |
-| AI agents | `mcp` (the tool server), `review` (the review bundle) |
+| AI agents | `mcp` (the tool server), `review` (the review bundle), `assist explain`, `assist ask`, `assist test` (Pipewright Assist, preview) |
 | Release | `tables sync`, `release`, `status`, `rollback`, `promote`, `schedules sync`, `alerts sync`, `ci init` |
 | Operate | `run`, `model list`, `model check`, `model approve`, `model restore-files`, `model retire`, `integrity check`, `integrity renew`, `features register`, `features contract`, `deploy-model`, `model endpoint`, `model predict`, `monitor status`, `lineage`, `images prune`, `data erase`, `synthetic generate`, `synthetic gates`, `pipelines-ui` (private GKE) |
 | Decide | `retrain list`, `retrain show`, `retrain approve`, `retrain decline`, `retrain snooze`, `retrain retry`, `loop start`, `loop advance`, `loop show`, `loop rollback`, `decisions pending` |
@@ -886,8 +914,10 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner ([docs/AB_TESTING.md](docs/AB_TESTING.md)) | Released in 1.4.3; used end to end in the starter and on private GKE with KServe |
 | Serving health per deployed version, rollback proposals, request capture, quality on live traffic ([docs/SERVING.md](docs/SERVING.md)) | Released in 1.4.3; used end to end on Agent Platform endpoints and KServe |
 | Registration through the launcher (runners cannot write the registry; `release` refuses a component that does), scoring runs that wait for a person, pull request checks without a reviewer (`ci init --checks-environment`) | Released in 1.4.3; used end to end, with real GitHub reviewers |
+| The cause recorded with every failed run, its owner and the next step; runs refused at submission recorded ([docs/FAILURES.md](docs/FAILURES.md)) | Released in 1.4.4; used end to end on Agent Platform and on Kubeflow in private GKE |
+| Pipewright Assist, a preview: incident questions answered from the recorded cause, screened by Model Armor ([docs/ASSIST.md](docs/ASSIST.md)) | Released in 1.4.4 as a preview; 66 of 66 test runs against the model |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2, 1.4.3) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2, 1.4.3, 1.4.4) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |
