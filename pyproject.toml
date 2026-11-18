@@ -39,6 +39,9 @@ gcp = [
 
 launcher = ["flask>=3", "gunicorn>=22"]
 online = ["pg8000>=1.31,<2"]   # Cloud SQL online store (FR-104): the sync and the lookup service, in the launcher image
+# FR-127: OpenTelemetry export from the launcher (off until the manifest sets observability.otlp); OTLP over HTTP,
+# no gRPC. The launcher image installs it.
+otel = ["opentelemetry-api>=1.27,<2", "opentelemetry-sdk>=1.27,<2", "opentelemetry-exporter-otlp-proto-http>=1.27,<2"]
 mcp = [
     "mcp>=1.9,<2",
 ]

@@ -13,6 +13,7 @@ A change that breaks any of these needs a new major version (2.0):
 | Release contract | Contract version 3: its fields and their meaning; contracts are write-once |
 | CLI | Command names, flags, their meaning and exit codes (0 success, 1 a check failed, 2 a configuration error) |
 | Lifecycle events | Event types and their fields, on Pub/Sub and in structured logs |
+| Telemetry (1.x, FR-127) | The metric names, types, units and attributes and the span names in [docs/TELEMETRY.md](docs/TELEMETRY.md). Telemetry never fails a run, changes an outcome or a refusal, modifies evidence or blocks the launcher: it is for operations, and the record stays the event log |
 | Plugin API | `register(subparsers, common)` for the `pipewright.commands` entry point group (plugin API v1) |
 | Component runtime | The documented functions of `pipewright_runtime` (`read_source`, `write_table`, `bigquery_client`, `log`, `emit_event`, `ray_cluster`, `ray_job`) |
 

@@ -45,6 +45,43 @@ def failed_jobs(gcp, project: str, region: str, since: datetime) -> list[dict]:
             return jobs
 
 
+ENDED = ("PIPELINE_STATE_SUCCEEDED", "PIPELINE_STATE_FAILED", "PIPELINE_STATE_CANCELLED")
+
+
+def _when(value):
+    from datetime import datetime as _dt
+
+    return _dt.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+def trace_runs(gcp, project: str, region: str, since: datetime) -> int:
+    """FR-127: for each run that carries its trigger's trace (label pipewright-trace) and ended after `since`, a run
+    span and one span per step from Agent Platform's own task times. Telemetry only: nothing else changes."""
+    from pipewright import telemetry
+
+    if not telemetry.is_on():
+        return 0
+    api = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/pipelineJobs"
+    states = " OR ".join(f'state="{s}"' for s in ENDED)
+    r = gcp.get(api, filter=f'({states}) AND end_time>"{since.strftime("%Y-%m-%dT%H:%M:%SZ")}"', pageSize=100)
+    written = 0
+    for j in (r.body or {}).get("pipelineJobs", []) if r.ok else []:
+        labels = j.get("labels") or {}
+        tp = labels.get("pipewright-trace")
+        if not tp or not j.get("startTime") or not j.get("endTime"):
+            continue
+        full = full_job(gcp, j, region)
+        steps = [{"name": t.get("taskName"), "start": _when(t.get("startTime")), "end": _when(t.get("endTime")),
+                  "state": t.get("state")} for t in ((full.get("jobDetail") or {}).get("taskDetails") or [])
+                 if t.get("taskName") and not str(t.get("taskName")).endswith("-driver")]
+        written += telemetry.run_spans(tp, {"start": _when(j["startTime"]), "end": _when(j["endTime"]),
+                                            "state": j.get("state"), "usecase": labels.get("pipewright-usecase"),
+                                            "pipeline": labels.get("pipewright-pipeline"),
+                                            "run_id": labels.get("run-id"), "job_id": j["name"].rsplit("/", 1)[-1]},
+                                       steps)
+    return written
+
+
 def full_job(gcp, job: dict, region: str) -> dict:
     """The job with its steps: a list leaves out jobDetail.taskDetails (found live), a get has them."""
     r = gcp.get(f"https://{region}-aiplatform.googleapis.com/v1/{job['name']}")

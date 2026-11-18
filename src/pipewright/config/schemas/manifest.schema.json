@@ -813,11 +813,24 @@
           "description": "informational: where the platform routes logs (e.g. dynatrace)"
         },
         "otlp_endpoint": {
-          "description": "Reserved for an OpenTelemetry collector; not read by this version",
+          "description": "FR-127: the OTLP endpoint as a single value (the key reserved since 1.0); observability.otlp, when set, takes precedence",
           "type": [
             "string",
             "null"
           ]
+        },
+        "otlp": {
+          "description": "FR-127, off by default: the launcher exports its metrics and traces over OTLP (HTTP) to this endpoint, usually an OpenTelemetry Collector (a sidecar in the starter, the gateway in Pipewright Enterprise). docs/TELEMETRY.md lists what is exported; never data, file names or personal data. Telemetry never fails a run",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "description": "false: nothing is exported (default true when the block is present)"},
+            "endpoint": {"type": "string", "pattern": "^https?://", "description": "the OTLP/HTTP base URL; https for anything remote, plain http only to localhost (a sidecar) or a Collector inside the cluster"},
+            "headers_secret": {"type": "string", "pattern": "^projects/[^/]+/secrets/[^/]+/versions/[^/]+$", "description": "a Secret Manager secret version holding the exporter's headers as key=value,key=value (a vendor token); never the value itself"},
+            "sample_ratio": {"type": "number", "minimum": 0, "maximum": 1, "description": "the share of traces kept at the launcher (default 1: every trace)"},
+            "interval_seconds": {"type": "integer", "minimum": 10, "maximum": 600, "description": "how often metrics are exported (default 60)"}
+          },
+          "required": ["endpoint"]
         },
         "evidence_dataset": {
           "type": [

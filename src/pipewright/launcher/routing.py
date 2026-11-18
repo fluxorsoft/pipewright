@@ -31,6 +31,7 @@ class FileEvent:
     name: str
     generation: str
     message_id: str | None = None
+    created: str | None = None          # FR-127: the object's timeCreated, where trigger latency starts
 
     @property
     def uri(self) -> str:
@@ -53,7 +54,7 @@ def parse_pubsub(envelope: dict | None) -> FileEvent:
     if not bucket or not name:
         raise BadRequest("event is missing bucket/object")
     return FileEvent(bucket, name, str(attrs.get("objectGeneration") or data.get("generation", "0")),
-                     message.get("messageId"))
+                     message.get("messageId"), data.get("timeCreated"))
 
 
 def parse_run_request(envelope: dict | None) -> dict:

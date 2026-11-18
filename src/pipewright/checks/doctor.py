@@ -92,6 +92,24 @@ def _test_permissions(gcp: Gcp, url: str, permissions: list[str], body_style: bo
 
 # ---------------------------------------------------------- environment --
 
+def _check_telemetry(env: Environment, report: Report, s: str) -> None:
+    """FR-127: whether the launcher exports telemetry, and a setting it would refuse (it turns telemetry off then,
+    never the launcher). The token in headers_secret is not read here."""
+    from pipewright import telemetry
+
+    manifest = {"blueprint": env.blueprint, "observability": dict(env.observability or {})}
+    try:
+        cfg = telemetry.settings(manifest, env={}, secret=lambda name: "")
+    except ValueError as e:
+        report.add(s, Result(FAIL, "telemetry (observability.otlp)", str(e), "ask the platform team"))
+        return
+    if cfg is None:
+        report.add(s, Result(INFO, "telemetry", "off (FR-127: observability.otlp is not set)"))
+    else:
+        report.add(s, Result(OK, "telemetry", f"the launcher exports to {cfg.endpoint}, sample ratio "
+                                              f"{cfg.sample_ratio} (docs/TELEMETRY.md)"))
+
+
 def check_environment(env: Environment, gcp: Gcp, report: Report) -> None:
     s = f"Environment {env.name} ({env.blueprint or 'no blueprint'}, project {env.project})"
     platform = "ask the platform team"
@@ -108,6 +126,7 @@ def check_environment(env: Environment, gcp: Gcp, report: Report) -> None:
 
     _exists(gcp, report, s, "project", f"{CRM}/projects/{env.project}", "check the project ID and your access",
             lambda b: b.get("state", ""))
+    _check_telemetry(env, report, s)
     _exists(gcp, report, s, f"artifacts bucket {env.artifacts_bucket}", f"{GCS}/b/{env.artifacts_bucket}", platform,
             lambda b: b.get("location", "").lower())
     if env.landing_bucket:

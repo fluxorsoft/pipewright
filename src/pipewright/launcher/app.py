@@ -38,10 +38,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
-from pipewright import adapters
+from pipewright import adapters, telemetry
 from pipewright.adapters.vertex import AlreadySubmitted
 from pipewright.gcp import Gcp
 from pipewright.launcher.registry import Registry
@@ -183,9 +184,36 @@ def create_app(registry: Registry | None = None) -> Flask:
 
         return SimpleNamespace(name=contract.environment, policies=reg().manifest.get("policies") or {})
 
-    def start(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str,
-              hint: str = "", extra: dict | None = None, loop: str | None = None, ml: dict | None = None,
-              recorded: dict | None = None, released: str | None = None) -> dict:
+    def start(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str, *args,
+              **kwargs) -> dict:
+        """FR-127: every run start, measured (off until telemetry is configured; never changes the outcome)."""
+        kind = _trigger_kind(trigger)
+        telemetry.know(contract.usecase, contract.tenant)
+        with telemetry.span("pipewright.run.start", usecase=contract.usecase, tenant=contract.tenant,
+                            pipeline=pipeline, trigger=kind, release=contract.release_id, run_id=rid) as sp:
+            try:
+                answer = _start_run(contract, pipeline, source_uri, rid, trigger, *args, **kwargs)
+            except SubmitRefused:
+                sp.set(outcome="submit_failed", reason="submit_failed")
+                telemetry.count("pipewright.runs.refused", usecase=contract.usecase, trigger=kind,
+                                reason="submit_failed")
+                raise
+            status = (answer or {}).get("status")
+            if status == "submitted":
+                telemetry.count("pipewright.runs.started", usecase=contract.usecase, pipeline=pipeline, trigger=kind)
+                telemetry.trigger_latency(_since_trigger(), kind, contract.tenant)
+            elif status == "duplicate":
+                telemetry.count("pipewright.runs.deduplicated", usecase=contract.usecase, trigger=kind)
+            elif status in ("refused", "held"):
+                reason = "held" if status == "held" else _refusal_kind(answer.get("reason"))
+                telemetry.count("pipewright.runs.refused", usecase=contract.usecase, trigger=kind, reason=reason)
+                sp.set(reason=reason)
+            sp.set(outcome=status, job_id=(answer or {}).get("job_id"))
+            return answer
+
+    def _start_run(contract: ReleaseContract, pipeline: str, source_uri: str, rid: str, trigger: str,
+                   hint: str = "", extra: dict | None = None, loop: str | None = None, ml: dict | None = None,
+                   recorded: dict | None = None, released: str | None = None) -> dict:
         # FR-130 (1.4.3, off by default): with approvals.batch_scoring manual a scoring run waits for a person.
         # Every trigger reaches here, so a schedule, a landing file, the API and the CLI are all held. Retrain loops
         # are not: their runs belong to a case a person approved. released: the hold a person just approved.
@@ -287,7 +315,8 @@ def create_app(registry: Registry | None = None) -> Flask:
             params = parameters_for(contract, target, source_uri, rid, {**(extra or {}), **params_extra,
                                                                         **({"ml_config": ml} if ml else {})})
             name = adapters.submit(contract, target, params, jid,
-                                   labels_for(contract, trigger, rid, pipeline, loop), reg().manifest.get("security"),
+                                   {**labels_for(contract, trigger, rid, pipeline, loop), **_trace_label()},
+                                   reg().manifest.get("security"),
                                    manifest=reg().manifest, gcp=getattr(reg(), "gcp", None))
             log.info("submitted %s (%s %s, release %s) for %s", name, contract.usecase, pipeline,
                      contract.release_id, source_uri)
@@ -730,6 +759,17 @@ def create_app(registry: Registry | None = None) -> Flask:
             except Exception as e:  # noqa: BLE001
                 log.exception("approved runs not checked for a registration")
                 out.append({"error": f"registrations not checked: {str(e)[:280]}"})
+        if telemetry.is_on():         # FR-127: spans for the runs that ended since the last look (Agent Platform)
+            from datetime import datetime as _dt
+            from datetime import timedelta as _td
+            from datetime import timezone as _tz
+
+            now = _dt.now(_tz.utc)
+            try:
+                watch.trace_runs(r.gcp, m["project"], m["region"], state.get("trace_since", now - _td(minutes=65)))
+                state["trace_since"] = now
+            except Exception:  # noqa: BLE001 - telemetry never fails the tick
+                log.debug("run spans not written", exc_info=True)
         return out
 
     # ---------------------------------------------------------------------------------- Ray clusters --
@@ -836,6 +876,7 @@ def create_app(registry: Registry | None = None) -> Flask:
     def pubsub():
         try:
             event = parse_pubsub(request.get_json(silent=True))
+            g.pw_trigger_at = _parse_time(event.created)            # FR-127: latency from the file's creation
             targets = route_file(reg().live(), event)
         except BadRequest as e:
             log.warning("dropping malformed message: %s", e)
@@ -1026,6 +1067,56 @@ def create_app(registry: Registry | None = None) -> Flask:
             log.exception("removing the lookup service of %s", contract.usecase)
             return jsonify(status="error", reason=str(e)[:400]), 500
 
+    # FR-127: one span per trigger; the trigger's own time for latency; failed scheduled checks counted.
+    TICKS = {"/retraining/tick": "retraining", "/integrity/tick": "integrity"}
+
+    @app.before_request
+    def _telemetry_begin():
+        g.pw_received = time.time()
+        g.pw_trigger_at = _parse_time(request.headers.get("X-CloudScheduler-ScheduleTime"))
+        if request.path in ("/health",) or not telemetry.is_on():
+            return
+        if request.path == "/pubsub/run":
+            env = request.get_json(silent=True) or {}
+            g.pw_trigger_at = _parse_time((env.get("message") or {}).get("publishTime")) or g.pw_trigger_at
+        kind = ("landing" if request.path == "/pubsub" else "request" if request.path == "/pubsub/run"
+                else "tick" if request.path in TICKS else "api")
+        g.pw_span = telemetry.span("pipewright.trigger", incoming=request.headers.get("traceparent"), trigger=kind,
+                                   check=TICKS.get(request.path))
+        g.pw_span_handle = g.pw_span.__enter__()
+
+    @app.after_request
+    def _telemetry_status(response):
+        if request.path in TICKS and response.status_code >= 500:
+            telemetry.count("pipewright.tick.failures", check=TICKS[request.path])
+        return response
+
+    @app.teardown_request
+    def _telemetry_end(error=None):
+        cm = g.pop("pw_span", None)
+        if cm is not None:
+            try:
+                cm.__exit__(type(error) if error else None, error, None)
+            except Exception:  # noqa: BLE001 - telemetry never fails a request
+                pass
+
+    def _open_cases() -> dict:
+        """{usecase: 1 when its current retrain case waits for a decision}, cached for 5 minutes."""
+        now = time.monotonic()
+        if now - state.get("cases_at", -1e9) > 300:
+            found = {}
+            try:
+                store = decisions().store
+                for c in reg().live():
+                    cur = store.current(c.usecase)
+                    found[c.usecase] = 1 if cur and cur.get("state") == "open" else 0
+            except Exception:  # noqa: BLE001 - not readable: no reading this time
+                return state.get("cases", {})
+            state["cases"], state["cases_at"] = found, now
+        return state.get("cases", {})
+
+    telemetry.cases_source(_open_cases)
+
     @app.get("/health")
     def health():
         usecases = {c.usecase: {"release": c.release_id, "pipelines": c.pipeline_names} for c in reg().live()}
@@ -1033,6 +1124,47 @@ def create_app(registry: Registry | None = None) -> Flask:
                        errors=reg().errors)
 
     return app
+
+
+def _trigger_kind(trigger: str) -> str:
+    """The trigger as the telemetry contract names it (anything else is `other`)."""
+    t = (trigger or "").lower()
+    return {"cli": "request", "run_request": "request", "pubsub": "request"}.get(t, t)
+
+
+def _refusal_kind(reason) -> str:
+    text = str(reason or "").lower()
+    for needle, kind in (("feature", "features"), ("integrity", "integrity"), ("approv", "integrity"),
+                         ("policy", "policy"), ("live release", "no_live_release")):
+        if needle in text:
+            return kind
+    return "other"
+
+
+def _parse_time(value):
+    """An RFC 3339 time as epoch seconds, or None."""
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _since_trigger():
+    try:
+        start = getattr(g, "pw_trigger_at", None) or getattr(g, "pw_received", None)
+        return None if start is None else max(0.0, time.time() - start)
+    except RuntimeError:            # outside a request (a retrain loop started by the tick): no latency
+        return None
+
+
+def _trace_label() -> dict:
+    """FR-127: the run carries its trigger's trace, so the run's and its steps' spans join it."""
+    value = telemetry.label_of(telemetry.traceparent())
+    return {"pipewright-trace": value} if value else {}
 
 
 def _slug_label(value: str) -> str:
@@ -1049,6 +1181,11 @@ def _startup_app() -> Flask | None:
         return None
     registry = Registry(Gcp(), uri, int(os.environ.get("POINTER_TTL", "60")))
     live = registry.live(force=True)
+    from pipewright import __version__
+
+    telemetry.configure(registry.manifest, __version__, gcp=registry.gcp)      # FR-127: off unless the manifest asks
+    for c in live:
+        telemetry.know(c.usecase, c.tenant)
     log.info("launcher for %s: %d live use case(s) %s, errors %s", registry.manifest["environment"], len(live),
              [c.usecase for c in live], registry.errors)
     return create_app(registry)
