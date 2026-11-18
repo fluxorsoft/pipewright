@@ -404,3 +404,19 @@ def test_telemetry_follows_an_otlp_setting_added_after_startup(monkeypatch):
     assert not telemetry.follow(changed, "1.4.5") and len(started) == 1
     assert not telemetry.follow(None, "1.4.5")                          # never raises
     telemetry.reset()
+
+
+def test_a_trigger_without_a_live_release_is_counted(otel):
+    # phase 11 Enterprise round: the contract lists no_live_release, but such a trigger is answered 503 before
+    # start() and was never counted
+    pytest.importorskip("flask")
+    from pipewright.launcher.app import create_app
+    from tests.test_launcher import CHURN, FakeRegistry, run_envelope
+
+    _, reader = otel
+    telemetry.know("churn-nimbus")
+    client = create_app(FakeRegistry([CHURN])).test_client()
+    assert client.post("/pubsub/run", json=run_envelope({"usecase": "gone"})).status_code == 503
+    assert client.post("/pubsub/run", json=run_envelope({"usecase": "gone"})).status_code == 503
+    refused = [(a, v) for a, v in points(reader, "pipewright.runs.refused") if v]
+    assert refused == [({"usecase": "other", "trigger": "request", "reason": "no_live_release"}, 2)]

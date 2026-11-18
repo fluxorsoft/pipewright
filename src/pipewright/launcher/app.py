@@ -1098,6 +1098,18 @@ def create_app(registry: Registry | None = None) -> Flask:
     def _telemetry_status(response):
         if request.path in TICKS and response.status_code >= 500:
             telemetry.count("pipewright.tick.failures", check=TICKS[request.path])
+        elif response.status_code in (404, 503) and telemetry.is_on():
+            # A trigger for a use case without a live release never reaches start(): counted here, once per
+            # delivery (phase 11 Enterprise round: the contract's no_live_release was never counted)
+            try:
+                body = response.get_json(silent=True) or {}
+                if str(body.get("reason", "")).endswith("no live release"):
+                    kind = ("landing" if request.path == "/pubsub" else "request" if request.path == "/pubsub/run"
+                            else "api")
+                    usecase = str(body["reason"]).split(":", 1)[0]
+                    telemetry.count("pipewright.runs.refused", usecase=usecase, trigger=kind, reason="no_live_release")
+            except Exception:  # noqa: BLE001 - telemetry never fails a request
+                pass
         return response
 
     @app.teardown_request
