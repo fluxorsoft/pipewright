@@ -73,7 +73,11 @@ def trace_runs(gcp, project: str, region: str, since: datetime) -> int:
         full = full_job(gcp, j, region)
         steps = [{"name": t.get("taskName"), "start": _when(t.get("startTime")), "end": _when(t.get("endTime")),
                   "state": t.get("state")} for t in ((full.get("jobDetail") or {}).get("taskDetails") or [])
-                 if t.get("taskName") and not str(t.get("taskName")).endswith("-driver")]
+                 if t.get("taskName") and not str(t.get("taskName")).endswith("-driver")
+                 # found live: the job's root task (named as the job) and the compiler's condition-* wrappers are
+                 # not steps; the Kubeflow path leaves them out too
+                 and t.get("taskName") != j["name"].rsplit("/", 1)[-1]
+                 and not str(t.get("taskName")).startswith(("condition-", "exit-handler-"))]
         written += telemetry.run_spans(tp, {"start": _when(j["startTime"]), "end": _when(j["endTime"]),
                                             "state": j.get("state"), "usecase": labels.get("pipewright-usecase"),
                                             "pipeline": labels.get("pipewright-pipeline"),

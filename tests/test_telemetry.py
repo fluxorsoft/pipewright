@@ -278,6 +278,8 @@ def test_the_tick_writes_spans_for_traced_runs_only(otel):
     untraced = {**job, "name": "projects/p/locations/r/pipelineJobs/x", "labels": {"pipewright-usecase": "x"}}
     detail = {**job, "jobDetail": {"taskDetails": [
         {"taskName": "churn-driver", "startTime": "2026-11-18T10:00:00Z", "endTime": "2026-11-18T10:00:05Z"},
+        {"taskName": "churn-r1", "startTime": "2026-11-18T10:00:00Z", "endTime": "2026-11-18T10:05:00Z"},
+        {"taskName": "condition-4", "startTime": "2026-11-18T10:01:00Z", "endTime": "2026-11-18T10:01:30Z"},
         {"taskName": "ingest-data", "startTime": "2026-11-18T10:00:05Z", "endTime": "2026-11-18T10:02:00Z",
          "state": "SUCCEEDED"}]}}
 
