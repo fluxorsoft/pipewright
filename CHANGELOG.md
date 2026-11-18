@@ -22,6 +22,14 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   of the runner's role. Pipewright's own steps only read feature groups, so nothing a run does changes; a team
   whose own components register groups from a run gets 403 and sets `runners_write`.
 
+- **Pull request checks with a read-only identity (FR-131).** `pipewright doctor --checks` checks for what the
+  checks need, not what a release needs, and says whether the identity it runs as can change anything (a warning,
+  never a failure). The pull request workflow `ci init` writes uses it. `ci init` names the GitHub environments the
+  platform may bind the CI identity to, so no other job of the repository can act as it. The identities come from the
+  platform's Terraform: the starter's `github.checks_environment` and `github.environments`, Pipewright Enterprise's
+  `spec.ci.identities.<k>.checks_environment` and `.environments`; both off by default. Regenerate the workflows
+  (`pipewright ci init`) to use `doctor --checks`.
+
 ### Fixed
 
 - **`deploy-model --undeploy` for a use case that no longer validates (FR-136).** Taking an endpoint down was refused
