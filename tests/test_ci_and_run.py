@@ -177,7 +177,7 @@ def test_pull_request_checks_can_run_under_an_environment_without_reviewers():
     flagged = ci.render(["test", "prod"], checks_environment="test-checks")[pr]
     assert flagged.count("    environment: test-checks   # ci init --checks-environment") == 2
     assert flagged.count("      ENV: test\n") == 2                    # still checked against the test environment
-    assert flagged.replace("test-checks   # ci init --checks-environment: test's variables, no reviewers",
+    assert flagged.replace("test-checks   # ci init --checks-environment: no reviewers; the read-only checks identity (FR-131) or test's variables",
                            "test") == plain
     others = {k: v for k, v in ci.render(["test", "prod"], checks_environment="test-checks").items() if k != pr}
     assert others == {k: v for k, v in ci.render(["test", "prod"]).items() if k != pr}
