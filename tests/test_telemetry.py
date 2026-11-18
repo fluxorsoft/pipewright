@@ -385,3 +385,22 @@ def test_counters_start_at_zero_for_what_a_release_can_produce(otel, monkeypatch
 def test_priming_is_a_no_op_when_telemetry_is_off():
     telemetry.reset()
     assert telemetry.prime("churn", {"api": True}) == 0
+
+
+def test_telemetry_follows_an_otlp_setting_added_after_startup(monkeypatch):
+    # phase 11 Enterprise round: the gateway was written into the manifest after the launcher started, which then
+    # ran without telemetry; the launcher re-reads its manifest every minute and telemetry now follows it on
+    telemetry.reset()
+    started = []
+    monkeypatch.setattr(telemetry, "_start", lambda cfg, manifest, version, **k: started.append(cfg.endpoint))
+    before = {"environment": "ent", "observability": {}}
+    assert not telemetry.configure(before, "1.4.5")                     # startup: off
+    assert not telemetry.follow(before, "1.4.5") and started == []      # unchanged: nothing
+    after = {"environment": "ent", "observability": {"otlp": {"endpoint": "https://gateway.example"}}}
+    assert telemetry.follow(after, "1.4.5") and started == ["https://gateway.example"]
+    assert not telemetry.follow(after, "1.4.5") and len(started) == 1   # once
+    telemetry._s.on = True                                              # a change while on waits for a restart
+    changed = {"environment": "ent", "observability": {"otlp": {"endpoint": "https://other.example"}}}
+    assert not telemetry.follow(changed, "1.4.5") and len(started) == 1
+    assert not telemetry.follow(None, "1.4.5")                          # never raises
+    telemetry.reset()

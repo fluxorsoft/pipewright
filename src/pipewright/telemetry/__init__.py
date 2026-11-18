@@ -55,6 +55,7 @@ class _State:
         self.last_diagnostic = 0.0
         self.cases = None               # a callable: {usecase: open cases}
         self.primed: set[str] = set()   # use cases whose counters were created at 0
+        self.followed = None            # the manifest's otlp setting last seen (follow)
         self.lock = threading.Lock()
 
 
@@ -124,8 +125,36 @@ def _secret(gcp):
 
 # --------------------------------------------------------------------------------------------- set up --
 
+def _otlp_key(manifest: dict) -> str:
+    obs = (manifest or {}).get("observability") or {}
+    return json.dumps([obs.get("otlp"), obs.get("otlp_endpoint")], sort_keys=True, default=str)
+
+
+def follow(manifest: dict, version: str, gcp=None) -> bool:
+    """The launcher re-reads its manifest every minute; telemetry follows it on (found in the phase 11 Enterprise
+    round: the gateway and the manifest are written after the launcher's revision starts, so the launcher began
+    without telemetry and, with min_instances above 0, never restarted). A setting that changes while telemetry is
+    on is applied at the launcher's next restart, never by swapping exporters under live traffic. Never raises."""
+    try:
+        key = _otlp_key(manifest)
+        if key == _s.followed:
+            return False
+        _s.followed = key
+        if _s.on:
+            log.warning("telemetry: observability.otlp changed; the launcher applies it at its next restart")
+            return False
+        return configure(manifest, version, gcp)
+    except Exception:  # noqa: BLE001
+        log.debug("telemetry: manifest not followed", exc_info=True)
+        return False
+
+
 def configure(manifest: dict, version: str, gcp=None, env: dict | None = None) -> bool:
     """Start exporting if the manifest says so. Never raises: a telemetry problem is logged, and the launcher runs."""
+    try:
+        _s.followed = _otlp_key(manifest)
+    except Exception:  # noqa: BLE001
+        pass
     try:
         cfg = settings(manifest, env, secret=_secret(gcp) if gcp else None)
     except Exception as e:  # noqa: BLE001 - a bad setting turns telemetry off, never the launcher

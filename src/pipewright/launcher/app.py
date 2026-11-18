@@ -1078,6 +1078,10 @@ def create_app(registry: Registry | None = None) -> Flask:
     @app.before_request
     def _telemetry_begin():
         g.pw_received = time.time()
+        from pipewright import __version__
+
+        r = reg()                                                         # an otlp setting added after startup
+        telemetry.follow(getattr(r, "manifest", None), __version__, gcp=getattr(r, "gcp", None))
         g.pw_trigger_at = _parse_time(request.headers.get("X-CloudScheduler-ScheduleTime"))
         if request.path in ("/health",) or not telemetry.is_on():
             return
