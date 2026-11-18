@@ -329,3 +329,28 @@ def test_kubeflow_runs_get_step_spans_from_their_task_times(otel, monkeypatch):
                                 datetime(2026, 11, 18, tzinfo=timezone.utc)) == 3          # the run + 2 steps
     assert sorted(s.attributes.get("pipewright.step", "") for s in finished(spans)
                   if s.name == "pipewright.step") == ["ingest-data", "train"]
+
+
+def test_shutdown_is_bounded_even_when_the_backend_hangs():
+    """Found in the phase 11 round: 85 s against a hung endpoint; now one deadline for everything."""
+    import socket
+    import threading
+    import time
+
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(50)
+    held = []
+    threading.Thread(target=lambda: [held.append(srv.accept()) for _ in iter(int, 1)], daemon=True).start()
+    telemetry.reset()
+    telemetry._start(telemetry.Settings(f"http://localhost:{srv.getsockname()[1]}", {}, 1.0, 60, "manifest"), {},
+                     "p11", metric_reader=InMemoryMetricReader())
+    for i in range(3000):
+        with telemetry.span("pipewright.run.start", usecase="x", run_id=str(i)):
+            pass
+    t0 = time.perf_counter()
+    telemetry.shutdown(deadline_ms=1500)
+    assert time.perf_counter() - t0 < 3 and not telemetry.is_on()
+    telemetry.reset()

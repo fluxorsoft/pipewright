@@ -234,16 +234,27 @@ def _failed(n: int) -> None:
                             "pipewright_telemetry": {"failed_items_so_far": count}}))
 
 
-def shutdown() -> None:
-    """A bounded flush, then stop (Cloud Run allows 10 s after SIGTERM)."""
-    for p in _s.providers:
-        try:
-            if hasattr(p, "force_flush"):
-                p.force_flush(SHUTDOWN_FLUSH_MS)
-            p.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
-    _s.providers, _s.on = [], False
+def shutdown(deadline_ms: int = SHUTDOWN_FLUSH_MS) -> None:
+    """A bounded flush, then stop: everything, flush and the providers' own shutdown, within one deadline (Cloud Run
+    allows 10 s after SIGTERM). Found in the phase 11 round: against a hung endpoint the providers' shutdown exported
+    every queued batch with its own timeout, 85 s in all. It now runs in a daemon thread that is abandoned at the
+    deadline, so a telemetry backend can never hold the launcher's exit."""
+    providers, _s.providers, _s.on = list(_s.providers), [], False
+    if not providers:
+        return
+
+    def stop():
+        for p in providers:
+            try:
+                if hasattr(p, "force_flush"):
+                    p.force_flush(deadline_ms)
+                p.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+
+    t = threading.Thread(target=stop, name="pipewright-telemetry-shutdown", daemon=True)
+    t.start()
+    t.join(deadline_ms / 1000)
 
 
 def reset() -> None:
