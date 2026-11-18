@@ -288,3 +288,40 @@ def test_the_tick_writes_spans_for_traced_runs_only(otel):
     assert watch.trace_runs(G(), "p", "r", datetime(2026, 11, 18, tzinfo=timezone.utc)) == 2   # the run + 1 step
     names = sorted(s.name for s in finished(spans))
     assert names == ["pipewright.run", "pipewright.step", "pipewright.trigger"]
+
+
+def test_kubeflow_runs_get_step_spans_from_their_task_times(otel, monkeypatch):
+    from pipewright.adapters.kfp import run_description
+    from pipewright.gcp.session import Response
+    from pipewright.launcher import watch
+
+    spans, _ = otel
+    with telemetry.span("pipewright.trigger", trigger="landing"):
+        tp = telemetry.traceparent()
+    labels = {"pipewright-usecase": "churn-gke", "run-id": "r1", "pipewright-pipeline": "training",
+              "pipewright-release": "1c2d3e4f5a6b", "pipewright-tenant": "churn", "trigger": "landing",
+              "pipewright-trace": tp}
+    desc = run_description(labels)
+    from pipewright.adapters.kfp import run_labels
+
+    assert len(desc) <= 255 and "pipewright-trace" in run_labels(desc)
+    run = {"run_id": "u1", "display_name": "churn-gke-r1", "state": "SUCCEEDED", "description": desc,
+           "created_at": "2026-11-18T10:00:00Z", "finished_at": "2026-11-18T10:06:00Z",
+           "pipeline_spec": {"root": {"dag": {"tasks": {"ingest-data": {}, "train": {}}}}},
+           "run_details": {"task_details": [
+               {"display_name": "ingest-data", "start_time": "2026-11-18T10:00:10Z", "end_time": "2026-11-18T10:02:00Z",
+                "state": "SUCCEEDED"},
+               {"display_name": "train-driver", "start_time": "2026-11-18T10:02:00Z",
+                "end_time": "2026-11-18T10:02:05Z"},
+               {"display_name": "train", "start_time": "2026-11-18T10:02:05Z", "end_time": "2026-11-18T10:06:00Z",
+                "state": "SUCCEEDED"}]}}
+
+    class Kube:
+        def get(self, path, **params):
+            return Response(200, {"runs": [run]})
+
+    monkeypatch.setattr("pipewright.kube.KubeClient.from_manifest", classmethod(lambda cls, m, g, **k: Kube()))
+    assert watch.trace_kfp_runs({"kubernetes": {"namespace": "kubeflow"}}, None,
+                                datetime(2026, 11, 18, tzinfo=timezone.utc)) == 3          # the run + 2 steps
+    assert sorted(s.attributes.get("pipewright.step", "") for s in finished(spans)
+                  if s.name == "pipewright.step") == ["ingest-data", "train"]

@@ -82,6 +82,39 @@ def trace_runs(gcp, project: str, region: str, since: datetime) -> int:
     return written
 
 
+KFP_ENDED = ("SUCCEEDED", "FAILED", "CANCELED")
+
+
+def trace_kfp_runs(manifest: dict, gcp, since: datetime) -> int:
+    """FR-127 on Kubeflow: the run and step spans for runs that carry their trigger's trace and ended after `since`,
+    from Kubeflow's own task times (the pipeline's steps only, as kfp_job). Telemetry only."""
+    from pipewright import telemetry
+    from pipewright.adapters.kfp import api_path, run_labels
+    from pipewright.kube import KubeClient
+
+    if not telemetry.is_on():
+        return 0
+    namespace = (manifest.get("kubernetes") or {}).get("namespace") or "kubeflow"
+    kube = KubeClient.from_manifest(manifest, gcp)
+    stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
+    r = kube.get(f"{api_path(namespace)}/runs", page_size=100, sort_by="created_at desc")
+    written = 0
+    for run in (r.body or {}).get("runs") or [] if r.ok else []:
+        labels = run_labels(run.get("description"))
+        tp = labels.get("pipewright-trace")
+        if not tp or run.get("state") not in KFP_ENDED or (run.get("finished_at") or "") <= stamp:
+            continue
+        steps = _kfp_steps(run.get("pipeline_spec") or {})
+        tasks = [{"name": t.get("display_name"), "start": _when(t.get("start_time")), "end": _when(t.get("end_time")),
+                  "state": t.get("state")} for t in ((run.get("run_details") or {}).get("task_details")) or []
+                 if t.get("display_name") in steps]
+        written += telemetry.run_spans(tp, {"start": _when(run.get("created_at")), "end": _when(run.get("finished_at")),
+                                            "state": run.get("state"), "usecase": labels.get("pipewright-usecase"),
+                                            "pipeline": labels.get("pipewright-pipeline"),
+                                            "run_id": labels.get("run-id"), "job_id": run.get("display_name")}, tasks)
+    return written
+
+
 def full_job(gcp, job: dict, region: str) -> dict:
     """The job with its steps: a list leaves out jobDetail.taskDetails (found live), a get has them."""
     r = gcp.get(f"https://{region}-aiplatform.googleapis.com/v1/{job['name']}")

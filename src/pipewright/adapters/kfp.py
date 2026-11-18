@@ -27,7 +27,7 @@ DESCRIPTION_MAX = 255     # Kubeflow Pipelines stores a run's description in a V
 # The labels a run keeps (Kubeflow Pipelines v2 runs have no labels of their own), most important first: what does not
 # fit in the description is left out.
 _DESCRIBED = ("pipewright-usecase", "run-id", "pipewright-pipeline", "pipewright-release", "pipewright-tenant",
-              "trigger")
+              "trigger", "pipewright-trace")       # FR-127: the trigger's trace, the first to go when it does not fit
 
 
 def run_description(labels: dict) -> str:

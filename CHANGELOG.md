@@ -19,8 +19,8 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   a budget of 5,000 series. A caller's `traceparent` is a link, never the parent. Bounded queues that drop, a 10 s
   export timeout, a 5 s flush at shutdown, a log line a minute while exports fail: telemetry never fails a run or
   blocks the launcher. `doctor` says whether it is on and refuses an invalid setting. The `otel` extra (OTLP over
-  HTTP, no gRPC) is in the launcher image; without the setting nothing is imported. Step spans are written for Agent
-  Platform runs; Kubeflow runs get their trigger and run-start spans.
+  HTTP, no gRPC) is in the launcher image; without the setting nothing is imported. Step spans on Agent Platform and
+  on Kubeflow (whose runs keep the trace in their description).
 - **A team reads its own view of the event log (FR-134).** A manifest may name a tenant's own view of the event log
   (`tenants.<t>.events_view`, `project.dataset.view`; Pipewright Enterprise writes its `pipewright_events` view
   there). Commands run for that tenant's use cases (`deploy-model`, `promote`, the integrity checks, `lineage`) read

@@ -759,14 +759,18 @@ def create_app(registry: Registry | None = None) -> Flask:
             except Exception as e:  # noqa: BLE001
                 log.exception("approved runs not checked for a registration")
                 out.append({"error": f"registrations not checked: {str(e)[:280]}"})
-        if telemetry.is_on():         # FR-127: spans for the runs that ended since the last look (Agent Platform)
+        if telemetry.is_on():         # FR-127: spans for the runs that ended since the last look
             from datetime import datetime as _dt
             from datetime import timedelta as _td
             from datetime import timezone as _tz
 
             now = _dt.now(_tz.utc)
             try:
-                watch.trace_runs(r.gcp, m["project"], m["region"], state.get("trace_since", now - _td(minutes=65)))
+                since = state.get("trace_since", now - _td(minutes=65))
+                if any(c.orchestrator != "kfp" for c in live):
+                    watch.trace_runs(r.gcp, m["project"], m["region"], since)
+                if any(c.orchestrator == "kfp" for c in live):
+                    watch.trace_kfp_runs(m, r.gcp, since)
                 state["trace_since"] = now
             except Exception:  # noqa: BLE001 - telemetry never fails the tick
                 log.debug("run spans not written", exc_info=True)
