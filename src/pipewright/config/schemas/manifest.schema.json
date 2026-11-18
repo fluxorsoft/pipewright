@@ -246,6 +246,10 @@
           "enum": ["runner", "launcher"],
           "description": "1.4.3 (FR-100): who writes the model registry. runner (default): each run's runner uploads its version. launcher: runners cannot write the registry; the launcher registers each version after checking the run, its files and the gates, and moves the default only by the release's policy"
         },
+        "feature_registry": {
+          "enum": ["runners_write", "runners_read"],
+          "description": "FR-149: who may write the Feature Store registry (feature groups, features, online stores, views). runners_write (default, as before): every runner holds roles/aiplatform.user, which lets it change any team's groups. runners_read: the runner's role leaves out those writes (the platform's Terraform); runs still read them, and registering stays with people and producer identities"
+        },
         "ab_test": {
           "type": "object",
           "additionalProperties": false,
