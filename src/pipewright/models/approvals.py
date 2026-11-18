@@ -27,6 +27,10 @@ _lock = threading.Lock()
 _caches: dict[tuple, dict] = {}
 _store: dict = {}                       # {"bucket", "name"}: the launcher's state file, when set
 _recent: list[dict] = []                # events this process published, until the event log has them (GA QA)
+# FR-134: use case -> tenant, for the use cases this process resolved from a checkout (the CLI). The launcher resolves
+# none, so it reads the evidence dataset's events table as before; the CLI reads a tenant's own view where the
+# manifest names one (tenants.<t>.events_view), so a team's identities need no access to every team's events.
+_tenants: dict[str, str] = {}
 
 
 def remember(event: dict) -> None:
@@ -51,27 +55,63 @@ def reset() -> None:
     with _lock:
         _caches.clear()
         _recent.clear()
+        _tenants.clear()
+
+
+def know(usecase: str, tenant: str) -> None:
+    _tenants[usecase] = tenant
+
+
+def view_for(env, usecase: str) -> str | None:
+    """The tenant's own view of the event log for this use case (FR-134), when the manifest names one and the use
+    case was resolved here; None means the evidence dataset's table."""
+    tenant = _tenants.get(usecase)
+    if not tenant:
+        return None
+    return ((getattr(env, "tenants", None) or {}).get(tenant) or {}).get("events_view") or None
 
 
 def _p(name, value, kind="STRING"):
     return {"name": name, "parameterType": {"type": kind}, "parameterValue": {"value": value}}
 
 
-def _query(gcp, env, dataset: str, since: str | None) -> list[dict]:
+def _query(gcp, env, dataset: str, since: str | None, view: str | None = None) -> list[dict]:
     from pipewright.gcp.bigquery import query, rows
 
     kinds = ", ".join(f"'{k}'" for k in KINDS)
+    params = [_p("env", env.name)] + ([_p("since", since)] if since else [])
+    kms = (env.security or {}).get("bigquery_kms_key")
+    if view:
+        return _query_view(gcp, env, view, kinds, since, params, kms)
     sql = (f"SELECT message_id, CAST(publish_time AS STRING) AS published, TO_JSON_STRING(data) AS event "
            f"FROM `{env.project}.{dataset}.events` WHERE JSON_VALUE(data, '$.event_type') IN ({kinds}) "
            "AND JSON_VALUE(data, '$.environment') = @env"
            + (" AND publish_time >= TIMESTAMP(@since)" if since else ""))
-    params = [_p("env", env.name)] + ([_p("since", since)] if since else [])
     out = []
-    for row in rows(query(gcp, env.project, sql, params, kms_key=(env.security or {}).get("bigquery_kms_key"))):
+    for row in rows(query(gcp, env.project, sql, params, kms_key=kms)):
         event = json.loads(row["event"] or "{}")
         out.append({"id": row.get("message_id") or f"{row['published']}|{hash(row['event'])}",
                     "at": (row["published"] or "")[:19], "type": event.get("event_type"),
                     "usecase": event.get("usecase"), "data": event.get("data") or {}})
+    return out
+
+
+def _query_view(gcp, env, view: str, kinds: str, since, params, kms) -> list[dict]:
+    """FR-134: the same events from a tenant's view, whose columns are its own (Pipewright Enterprise's
+    pipewright_events: publish_time, event_type, usecase, environment, release, run_id, details = the event's data)."""
+    import hashlib
+
+    from pipewright.gcp.bigquery import query, rows
+
+    sql = (f"SELECT CAST(publish_time AS STRING) AS published, event_type, usecase, TO_JSON_STRING(details) AS details "
+           f"FROM `{view}` WHERE event_type IN ({kinds}) AND environment = @env"
+           + (" AND publish_time >= TIMESTAMP(@since)" if since else ""))
+    out = []
+    for row in rows(query(gcp, env.project, sql, params, kms_key=kms)):
+        details = row.get("details") or "{}"
+        key = f"{row['published']}|{row.get('event_type')}|{row.get('usecase')}|{details}"
+        out.append({"id": hashlib.sha256(key.encode()).hexdigest()[:32], "at": (row["published"] or "")[:19],
+                    "type": row.get("event_type"), "usecase": row.get("usecase"), "data": json.loads(details) or {}})
     return out
 
 
@@ -114,7 +154,8 @@ def _refresh(gcp, env, dataset: str, cache: dict) -> None:
     since = None
     if cache.get("through"):
         since = (datetime.fromisoformat(cache["through"]) - OVERLAP).strftime("%Y-%m-%d %H:%M:%S")
-    for e in _query(gcp, env, dataset, since):
+    view = cache.get("view")
+    for e in (_query(gcp, env, dataset, since, view) if view else _query(gcp, env, dataset, since)):
         cache["events"][e["id"]] = e
     cache["through"] = now.isoformat()
     cache["checked"] = time.monotonic()
@@ -122,17 +163,19 @@ def _refresh(gcp, env, dataset: str, cache: dict) -> None:
     _save_store(gcp, cache)
 
 
-def _cache(gcp, env) -> dict | None:
-    """The environment's kept events, loaded or refreshed as needed (call with _lock held)."""
+def _cache(gcp, env, view: str | None = None) -> dict | None:
+    """The environment's kept events, loaded or refreshed as needed (call with _lock held). With `view` (FR-134), one
+    tenant's events through its own view, kept apart from the table's."""
     dataset = (getattr(env, "observability", None) or {}).get("evidence_dataset")
-    if not dataset:
+    if not dataset and not view:
         return None
-    key = (env.project, dataset, env.name)
+    key = (env.project, view or dataset, env.name)
     cache = _caches.get(key)
     if cache is None:
-        cache = _load_store(gcp) or {"through": None, "events": {}}
+        cache = (None if view else _load_store(gcp)) or {"through": None, "events": {}}
         cache.setdefault("checked", 0)
         cache["dataset"] = dataset
+        cache["view"] = view
         _caches[key] = cache
         _refresh(gcp, env, dataset, cache)
     elif time.monotonic() - cache.get("checked", 0) > REFRESH_SECONDS:
@@ -144,7 +187,7 @@ def events(gcp, env, kind: str, usecase: str, version: str) -> list[dict] | None
     """`kind` events of one version, newest first, each {"at", **data}. None when the environment keeps no event
     log. A version with nothing kept is looked up again before the answer is no (an approval made a moment ago)."""
     with _lock:
-        cache = _cache(gcp, env)
+        cache = _cache(gcp, env, view_for(env, usecase))
         if cache is None:
             return None
 

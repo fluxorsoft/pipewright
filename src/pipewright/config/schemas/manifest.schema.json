@@ -694,6 +694,11 @@
               "service_account": {"type": "string", "minLength": 1, "description": "The server's own identity (metadata only; writes the audit)."}
             }
           },
+          "events_view": {
+            "description": "FR-134: the tenant's own view of the event log, project.dataset.view (Pipewright Enterprise writes its pipewright_events view here). Commands run for the tenant's use cases (deploy-model, promote, the integrity checks, lineage) read approvals and releases through it, so the team's identities need no access to the evidence dataset. Unset: the evidence dataset's events table, as before",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9][.][A-Za-z_][A-Za-z0-9_]{0,1023}[.][A-Za-z_][A-Za-z0-9_]{0,1023}$"
+          },
           "runner_service_account": {
             "description": "The identity the tenant's pipeline runs, scoring and syncs run as; it reads only the tenant's own data and prefixes",
             "type": "string",

@@ -449,6 +449,9 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
     if problems:
         raise ConfigError(problems, source=f"{path} ({env.name})")
 
+    from pipewright.models import approvals as event_log
+
+    event_log.know(meta["name"], tenant)        # FR-134: whose view of the event log the CLI reads for it
     return ResolvedUseCase(
         name=meta["name"], environment=env.name, owner=meta["owner"], tenant=tenant, resources=resources,
         directory=directory, pipelines=pipelines, components_dir=components_dir, requirements=requirements,

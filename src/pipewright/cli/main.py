@@ -1724,7 +1724,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--usecase", required=True)
     sp.add_argument("--approve", action="store_true", help="confirm a manual deploy approval")
     sp.add_argument("--dry-run", action="store_true", help="show what would be deployed")
-    sp.add_argument("--undeploy", action="store_true", help="remove all models from the endpoint (stops cost); works from the live release when the use case does not validate (FR-136)")
+    sp.add_argument("--undeploy", action="store_true",
+                    help="remove all models from the endpoint (stops cost); works from the live release when the use "
+                         "case does not validate (FR-136)")
     sp.add_argument("--keep-lookup-service", action="store_true",
                     help="with --undeploy: keep the use case's lookup service (by default the launcher removes it)")
     rollout = sp.add_mutually_exclusive_group()

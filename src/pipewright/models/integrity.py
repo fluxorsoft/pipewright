@@ -898,20 +898,27 @@ def contract_check(gcp, env: Environment, usecase: str, release: str, text: str)
     """Pipewright 1.4.1 (FR-101 item 7): a release contract against the SHA-256 its release.live event recorded
     (1.4.0 records it). A release with no such event (before 1.4.0) passes with a note."""
     from pipewright.gcp.bigquery import query, rows
+    from pipewright.models import approvals
 
     check = Check()
     dataset = (env.observability or {}).get("evidence_dataset")
-    if not dataset:
+    view = approvals.view_for(env, usecase)         # FR-134: the tenant's own view, where the manifest names one
+    if not dataset and not view:
         check.notes.append("this environment keeps no event log: the contract's fingerprint cannot be compared")
         return check
 
     def p(name, value):
         return {"name": name, "parameterType": {"type": "STRING"}, "parameterValue": {"value": value}}
 
-    sql = (f"SELECT JSON_VALUE(data, '$.data.contract_sha256') AS sha FROM `{env.project}.{dataset}.events` "
-           "WHERE JSON_VALUE(data, '$.event_type') = 'release.live' AND JSON_VALUE(data, '$.usecase') = @uc "
-           "AND JSON_VALUE(data, '$.environment') = @env AND JSON_VALUE(data, '$.release') = @release "
-           "ORDER BY publish_time DESC LIMIT 5")
+    if view:
+        sql = (f"SELECT JSON_VALUE(details, '$.contract_sha256') AS sha FROM `{view}` WHERE event_type = "
+               "'release.live' AND usecase = @uc AND environment = @env AND release = @release "
+               "ORDER BY publish_time DESC LIMIT 5")
+    else:
+        sql = (f"SELECT JSON_VALUE(data, '$.data.contract_sha256') AS sha FROM `{env.project}.{dataset}.events` "
+               "WHERE JSON_VALUE(data, '$.event_type') = 'release.live' AND JSON_VALUE(data, '$.usecase') = @uc "
+               "AND JSON_VALUE(data, '$.environment') = @env AND JSON_VALUE(data, '$.release') = @release "
+               "ORDER BY publish_time DESC LIMIT 5")
     try:
         found = [r["sha"] for r in rows(query(gcp, env.project, sql, [p("uc", usecase), p("env", env.name),
                                                                        p("release", release)],
