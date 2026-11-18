@@ -521,6 +521,41 @@ def undeploy_canary(uc: ResolvedUseCase, env: Environment, creds, log=print) -> 
     log(f"removed canary v{newest.model_version_id}; v{rest[0].model_version_id} serves all traffic")
 
 
+def released_for_undeploy(env: Environment, usecase: str, gcp, problem: Exception, log=print):
+    """FR-136: what `deploy-model --undeploy` needs when the use case does not validate: its name, its team, the
+    model's name and where it serves, from the live release (the working copy is not read). Undeploy needs nothing
+    else, so a broken configuration never keeps an endpoint, and its cost, running. Only for undeploy: every other
+    deploy-model action still needs a use case that validates."""
+    from types import SimpleNamespace
+
+    from pipewright.abtest.watch import released_usecase
+    from pipewright.release import service
+
+    first = str(problem).splitlines()[0][:200]
+    pointer, _ = service.read_pointer(gcp, env, usecase)
+    if pointer is None:
+        raise ConfigError(f"{usecase} does not validate ({first}) and has no live release in {env.name}, so what it "
+                          "serves cannot be found: fix the use case, then run deploy-model --undeploy") from problem
+    contract = service.read_contract(gcp, env, pointer.contract)
+    rel = released_usecase(contract)
+    target = "vertex"
+    kserve_cfg = getattr(env, "kserve", None) or {}
+    if (kserve_cfg.get("namespaces") or {}).get(contract.tenant):
+        from pipewright.models import kserve
+
+        probe = SimpleNamespace(name=usecase, tenant=contract.tenant, model={"serving": {}})
+        try:
+            if kserve.KServe(probe, env, gcp).current() is not None:
+                target = "kserve"
+        except Exception:  # noqa: BLE001 - no cluster to ask: what serves is an Agent Platform endpoint, if anything
+            pass
+    model_name = (contract.metadata or {}).get("model") or (rel.ml or {}).get("model_name")
+    log(f"warning: {usecase} does not validate ({first}); undeploying from what release {contract.release_id} "
+        "recorded. Fix the use case before its next release")
+    return SimpleNamespace(name=usecase, tenant=contract.tenant, environment=env.name, ml=rel.ml or {},
+                           model={"name": model_name, "serving": {"target": target}}, released_only=True)
+
+
 def undeploy(uc: ResolvedUseCase, env: Environment, creds, log=print) -> None:
     ai = _aiplatform(env, creds)
     endpoints = list_endpoints(ai, endpoint_name(uc))

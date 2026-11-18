@@ -335,15 +335,21 @@ def cmd_deploy_model(args) -> int:
     from pipewright.models import deploy as deploy_model
 
     env = load_environment(Path(args.root), args.env)
-    uc = resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env)
     gcp = Gcp()
+    try:
+        uc = resolve_usecase(_selected(Path(args.root), [args.usecase])[args.usecase], env)
+    except ConfigError as e:
+        if not args.undeploy:
+            raise
+        # FR-136: taking a model down does not wait for a broken configuration to be fixed
+        uc = deploy_model.released_for_undeploy(env, args.usecase, gcp, e)
     if uc.model["serving"]["target"] == "kserve":
         from pipewright.models import kserve
 
         if args.undeploy:
             kserve.undeploy(uc, env, gcp)
             _remove_lookup_service(uc, env, gcp, args)
-            _health_sync(uc, env)
+            _after_undeploy_health(uc, env, capture=True)
             return 0
         if args.promote or args.undeploy_canary:
             raise ConfigError("model.serving.target kserve has no canary to promote or remove (KServe in Standard "
@@ -358,7 +364,7 @@ def cmd_deploy_model(args) -> int:
     if args.undeploy:
         deploy_model.undeploy(uc, env, creds)
         _remove_lookup_service(uc, env, gcp, args)
-        _health_sync(uc, env, capture=False)      # GA QA: an undeploy leaves capture alone (nothing serves)
+        _after_undeploy_health(uc, env, capture=False)      # GA QA: an undeploy leaves capture alone (nothing serves)
         return 0
     if args.promote or args.undeploy_canary:
         deploy_model.check_approval(uc, gcp.identity(), args.approve)
@@ -382,6 +388,16 @@ def cmd_deploy_model(args) -> int:
     _print_how_to_call(uc, env, gcp)
     _health_sync(uc, env)                  # 1.4.3 (FR-98): the deployed version's health policies
     return 0
+
+
+def _after_undeploy_health(uc, env, capture: bool) -> None:
+    """The health policies follow what is deployed. From a release's record only (FR-136) the use case's monitoring
+    settings are not all there, so the policies are left until the use case validates again, and the command says so."""
+    if getattr(uc, "released_only", False):
+        print("note: the use case's health policies, if any, are left as they are: they are brought in line with what "
+              "is deployed once the use case validates again (`pipewright alerts sync`)")
+        return
+    _health_sync(uc, env, capture=capture)
 
 
 def _remove_lookup_service(uc, env, gcp, args) -> None:
@@ -1708,7 +1724,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--usecase", required=True)
     sp.add_argument("--approve", action="store_true", help="confirm a manual deploy approval")
     sp.add_argument("--dry-run", action="store_true", help="show what would be deployed")
-    sp.add_argument("--undeploy", action="store_true", help="remove all models from the endpoint (stops cost)")
+    sp.add_argument("--undeploy", action="store_true", help="remove all models from the endpoint (stops cost); works from the live release when the use case does not validate (FR-136)")
     sp.add_argument("--keep-lookup-service", action="store_true",
                     help="with --undeploy: keep the use case's lookup service (by default the launcher removes it)")
     rollout = sp.add_mutually_exclusive_group()
