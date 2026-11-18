@@ -9,6 +9,18 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
 
 ### Added
 
+- **OpenTelemetry export from the launcher (FR-127), off by default.** With the manifest's `observability.otlp`
+  (an OTLP/HTTP endpoint, usually a Collector), the launcher exports six metrics (`pipewright.runs.started`,
+  `runs.refused`, `runs.deduplicated`, `trigger.latency`, `cases.open`, `tick.failures`) and traces: a span per
+  trigger and per run start, and, when a run ends, a span for the run and one per step from the orchestrator's own
+  times, parented to the trigger (the run carries its trace in the label `pipewright-trace`). The contract is
+  [docs/TELEMETRY.md](docs/TELEMETRY.md), generated from the code and stable within 1.x (STABILITY.md). Only
+  allowlisted attributes leave; never data, file names or personal data; a value outside its list is `other`, within
+  a budget of 5,000 series. A caller's `traceparent` is a link, never the parent. Bounded queues that drop, a 10 s
+  export timeout, a 5 s flush at shutdown, a log line a minute while exports fail: telemetry never fails a run or
+  blocks the launcher. `doctor` says whether it is on and refuses an invalid setting. The `otel` extra (OTLP over
+  HTTP, no gRPC) is in the launcher image; without the setting nothing is imported. Step spans are written for Agent
+  Platform runs; Kubeflow runs get their trigger and run-start spans.
 - **A team reads its own view of the event log (FR-134).** A manifest may name a tenant's own view of the event log
   (`tenants.<t>.events_view`, `project.dataset.view`; Pipewright Enterprise writes its `pipewright_events` view
   there). Commands run for that tenant's use cases (`deploy-model`, `promote`, the integrity checks, `lineage`) read
