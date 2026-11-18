@@ -16,9 +16,11 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   events. Found in the 1.4.4 GA QA: `deploy-model` from CI on Enterprise was refused ("the event log cannot be
   read"); until this release the workaround is the CI identity in `observability.evidence_readers`. The launcher
   reads the evidence dataset's table as before. Unset: as before.
-- **Who may write the Feature Store registry (FR-149):** the manifest's `policies.feature_registry`, `runners_write`
-  (the default, as before) or `runners_read`, written by the starter's and Enterprise's Terraform, which then leave
-  every Feature Store write out of the runner's role. Runs only read feature groups, so nothing a run does changes.
+- **Who may write the Feature Store registry (FR-149):** the manifest's `policies.feature_registry`, `runners_read`
+  or `runners_write`, written by the starter's and Enterprise's Terraform. Their default is now `runners_read`
+  (founder, 2026-11-18: a security fix, the one exception to off by default): every Feature Store write is left out
+  of the runner's role. Pipewright's own steps only read feature groups, so nothing a run does changes; a team
+  whose own components register groups from a run gets 403 and sets `runners_write`.
 
 ### Fixed
 

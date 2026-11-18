@@ -248,7 +248,7 @@
         },
         "feature_registry": {
           "enum": ["runners_write", "runners_read"],
-          "description": "FR-149: who may write the Feature Store registry (feature groups, features, online stores, views). runners_write (default, as before): every runner holds roles/aiplatform.user, which lets it change any team's groups. runners_read: the runner's role leaves out those writes (the platform's Terraform); runs still read them, and registering stays with people and producer identities"
+          "description": "FR-149: who may write the Feature Store registry (feature groups, features, online stores, views). runners_read (the starter's and Enterprise's default since phase 11): the runner's role leaves out those writes (the platform's Terraform); runs still read them, and registering stays with people and producer identities. runners_write: every runner holds roles/aiplatform.user, which lets it change any team's groups, as before"
         },
         "ab_test": {
           "type": "object",
