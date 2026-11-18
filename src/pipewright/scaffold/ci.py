@@ -175,6 +175,16 @@ def render(environments: list[str], labels: list[str] | None = None, promotions:
     return out
 
 
+def github_environments(environments: list[str], checks_environment: str | None = None) -> list[str]:
+    """FR-131: the GitHub environments the generated workflows act in with the CI identity: each environment
+    (release, operate, promote, model gates) and its -decisions environment. The checks environment is left out: it has
+    its own read-only identity. Without a separate checks environment, pull request checks run in the first."""
+    out = []
+    for env in environments:
+        out += [env, f"{env}-decisions"]
+    return out
+
+
 def promotions(root: Path, environments: list[str]) -> dict[str, str]:
     """{environment: promotion.from} from environments/<env>.yaml."""
     import yaml

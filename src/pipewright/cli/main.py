@@ -143,7 +143,7 @@ def cmd_doctor(args) -> int:
     root = Path(args.root)
     env = load_environment(root, args.env)
     usecases = [resolve_usecase(path, env) for path in _selected(root, args.usecase, args.env).values()]
-    report = doctor.run(env, usecases, compile_check=not args.no_compile)
+    report = doctor.run(env, usecases, compile_check=not args.no_compile, as_checks=getattr(args, "checks", False))
     print(report.render())
     return 1 if report.failed else 0
 
@@ -1451,8 +1451,14 @@ def cmd_ci_init(args) -> int:
           + "), with the same variables and no reviewers: pipewright-decisions runs there. A gate refuses until "
             "its environment has required reviewers (GitHub Team or Enterprise, or a public repository)")
     if checks and checks != environments[0]:
-        print(f"      and {checks}, with {environments[0]}'s variables and no reviewers: pull request checks run "
-              "there, so they start without waiting for a reviewer")
+        print(f"      and {checks}, with no reviewers: pull request checks run there, so they start without waiting "
+              "for a reviewer. Give it the read-only checks identity (FR-131: the starter's github_checks_variables "
+              f"output, Pipewright Enterprise's spec.ci.checks), or {environments[0]}'s variables")
+    # FR-131: the platform may bind the CI identity to these GitHub environments only (the starter's
+    # github.environments, Enterprise's spec.ci.environments), so no other job of the repository can act as it.
+    print("bind the CI identity to these GitHub environments only (FR-131, optional): "
+          + ", ".join(ci.github_environments(environments, checks))
+          + ", and each approver group's gate <environment>-<group>")
     return 0
 
 
@@ -1605,6 +1611,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("doctor", help="read-only checks against the live environment (needs the gcp extra)")
     common(sp)
     sp.add_argument("--no-compile", action="store_true", help="skip compiling the pipeline")
+    sp.add_argument("--checks", action="store_true",
+                    help="as pull request checks (FR-131): release permissions are not required, and an identity "
+                         "that can change things is a warning")
     sp.set_defaults(func=cmd_doctor)
 
     sp = sub.add_parser("tables", help="BigQuery tables owned by use cases")

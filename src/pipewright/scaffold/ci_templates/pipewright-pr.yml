@@ -85,7 +85,7 @@ jobs:
       - name: Doctor (live checks, compiles every pipeline)
         run: |
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          pipewright doctor --env "$ENV" --usecase "$UC" | tee -a "$GITHUB_STEP_SUMMARY"
+          pipewright doctor --env "$ENV" --usecase "$UC" --checks | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Planned changes (dry runs)
         run: |

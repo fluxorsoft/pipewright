@@ -429,7 +429,7 @@ def _check_renewer(env: Environment, gcp: Gcp, report: Report, s: str, pol: dict
 # ------------------------------------------------------------- use case --
 
 def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, compile_check: bool = True,
-                  as_agent: bool = False):
+                  as_agent: bool = False, as_checks: bool = False):
     s = f"Use case {uc.name} (tenant {uc.tenant})"
     platform = "ask the platform team"
     res = uc.resources
@@ -494,7 +494,7 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     _check_ml(uc, env, gcp, report)
     _check_synthetic(uc, env, gcp, report)
     _check_serving_1_4_2(uc, env, gcp, report)
-    _check_permissions(uc, env, gcp, report, as_agent=as_agent)
+    _check_permissions(uc, env, gcp, report, as_agent=as_agent, as_checks=as_checks)
 
 
 
@@ -1074,10 +1074,40 @@ def _agent_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: 
                                                     "person or CI does)"))
 
 
+CHECKS_WRITES = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload", "aiplatform.endpoints.deploy",
+                 "bigquery.tables.getData", "bigquery.tables.create", "bigquery.tables.updateData",
+                 "cloudscheduler.jobs.create", "monitoring.alertPolicies.create", "pubsub.topics.publish",
+                 "run.jobs.run"]
+
+
+def _checks_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report) -> None:
+    """FR-131: doctor in a pull request's checks (`doctor --checks`). The checks only read, and a branch's code runs in
+    that job, so the identity should not be able to change anything. Release permissions are not required here; an
+    identity that holds write permissions is a warning (not a failure), so checks still run on platforms without a
+    read-only identity."""
+    s = "Permissions of the pull request checks' identity (it should not be able to change anything)"
+    granted = _test_permissions(gcp, f"{CRM}/projects/{env.project}:testIamPermissions", CHECKS_WRITES)
+    bucket = _test_permissions(gcp, f"{GCS}/b/{env.artifacts_bucket}/iam/testPermissions",
+                               ["storage.objects.create", "storage.objects.delete"], False)
+    held = sorted(set(granted or []) | set(bucket or []))
+    if granted is None:
+        report.add(s, Result(WARN, "checks identity", "could not test"))
+    elif held:
+        report.add(s, Result(WARN, "the checks run as an identity that can change things", ", ".join(held),
+                             "give pull request checks a read-only identity (FR-131): the starter's "
+                             "github.checks_environment, Pipewright Enterprise's spec.ci.checks"))
+    else:
+        report.add(s, Result(OK, "checks identity", "read only: cannot release, run, publish, deploy or read table "
+                                                    "data"))
+
+
 def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report,
-                       as_agent: bool = False) -> None:
+                       as_agent: bool = False, as_checks: bool = False) -> None:
     if as_agent:
         _agent_permissions(uc, env, gcp, report)
+        return
+    if as_checks:
+        _checks_permissions(uc, env, gcp, report)
         return
     s = "Permissions of the identity running doctor (what `release` will need)"
     wanted = ["aiplatform.pipelineJobs.create", "aiplatform.models.upload"]
@@ -1126,11 +1156,11 @@ def _check_permissions(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: 
 
 
 def run(env: Environment, usecases: list[ResolvedUseCase], gcp: Gcp | None = None,
-        compile_check: bool = True, as_agent: bool = False) -> Report:
+        compile_check: bool = True, as_agent: bool = False, as_checks: bool = False) -> Report:
     gcp = gcp or Gcp()
     report = Report()
     check_environment(env, gcp, report)
     check_integrity(env, gcp, report)
     for uc in usecases:
-        check_usecase(uc, env, gcp, report, compile_check, as_agent=as_agent)
+        check_usecase(uc, env, gcp, report, compile_check, as_agent=as_agent, as_checks=as_checks)
     return report
