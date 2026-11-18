@@ -4,7 +4,7 @@
 human in the loop for every retrain decision.
 
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
-[Fluxor Software](https://www.fluxorsoft.com/pipewright.html).
+[Fluxor Software](https://www.getpipewright.dev).
 
 > **Status: 1.4.4, why a run failed.** When a run fails, Pipewright now records why and whose it is: the step, the
 > error, the line that raised it, the checks that failed, and whether the team or the platform team changes something
@@ -67,7 +67,7 @@ resources in each environment's project and describes them in the manifest
 keys and `container` for private GKE.
 
 **Setting up the platform side.** This repository does not include Terraform for the environment. If you would like
-help building one, or the Terraform we use, email [hello@fluxorsoft.com](mailto:hello@fluxorsoft.com) or open a
+help building one, or the Terraform we use, email [hello@getpipewright.dev](mailto:hello@getpipewright.dev) or open a
 [GitHub Discussion](https://github.com/fluxorsoft/pipewright/discussions): we are happy to share, and it helps us
 shape what comes next.
 
@@ -897,7 +897,7 @@ never by patching this package.
 | Fleet View: every environment, team and model in one read-only view | No | Yes |
 | Support, onboarding and platform build-outs | Community | Fluxor Software |
 
-Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pipewright.html).
+Enterprise enquiries: [getpipewright.dev/enterprise](https://www.getpipewright.dev/enterprise.html).
 
 ## Project status and roadmap
 
@@ -910,7 +910,15 @@ Enterprise enquiries: [fluxorsoft.com/pipewright](https://www.fluxorsoft.com/pip
 | Promotion of a release and its approved model between environments | Built and used end to end |
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
-| OpenTelemetry export | Planned |
+| OpenTelemetry export: the launcher's metrics and traces to any observability tool (FR-127) | Phase 11 |
+| A read-only CI identity for pull request checks (FR-131) | Phase 11 |
+| SmartNoise as a differentially private synthetic data engine (FR-137) | Phase 11 |
+| Vertex AI Model Monitoring v2 adapter (FR-138) | Phase 11 |
+| Read the team's own view of the event log, so deploys from CI work on Pipewright Enterprise (FR-134) | Planned (1.4.5) |
+| `deploy-model --undeploy` for a use case that no longer validates (FR-136) | Planned (1.4.5) |
+| A decision gate approved by a GitHub reviewer, run live (FR-135) | Planned: needs GitHub Team or a public repository |
+| Pipewright Assist next: the answer sent with the alert (FR-140), further kinds of question (FR-141), a chat in Enterprise Fleet View (FR-139) | Later |
+| Plain Kubernetes on premises (FR-145) | On demand |
 | A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner ([docs/AB_TESTING.md](docs/AB_TESTING.md)) | Released in 1.4.3; used end to end in the starter and on private GKE with KServe |
 | Serving health per deployed version, rollback proposals, request capture, quality on live traffic ([docs/SERVING.md](docs/SERVING.md)) | Released in 1.4.3; used end to end on Agent Platform endpoints and KServe |
 | Registration through the launcher (runners cannot write the registry; `release` refuses a component that does), scoring runs that wait for a person, pull request checks without a reviewer (`ci init --checks-environment`) | Released in 1.4.3; used end to end, with real GitHub reviewers |

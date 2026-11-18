@@ -87,7 +87,7 @@ perimeter, on Agent Platform and on private GKE.
 | OpenTelemetry export | Phase 11: to be reviewed and prioritised (user, 2026-11-05); was planned (FR-127) |
 | Releases since 1.0 | 1.1.0 (2026-10-26), 1.2.0 (10-31), 1.3.0 (11-01), 1.3.1 (11-04), 1.4.0 (11-06), 1.4.1 (11-07), 1.4.2 (11-09), 1.4.3 (11-13), 1.4.4 (2026-11-16) |
 | The cause recorded (FR-132) and Pipewright Assist, a preview (FR-133) | Released in 1.4.4; used end to end on Agent Platform and on Kubeflow in private GKE under an enforced perimeter |
-| Open: phase 11 (FR-127, FR-131, FR-137, FR-138; Enterprise FR-50), 1.4.5 candidates (FR-134, FR-136), FR-135, later (FR-139 to FR-141), on demand (FR-145) | Section 4.1 |
+| Open: phase 11 (FR-127, FR-131, FR-137, FR-138; Enterprise FR-50), 1.4.5 candidates (FR-134, FR-136), FR-135, later (FR-139 to FR-141), on demand (FR-145); Enterprise's own (FR-50, FR-142 to FR-144, FR-146 to FR-150) | Section 4.1 here; Enterprise CONTEXT section 4 |
 | Terraform for the platform side | In a separate starter repository, shared on request (R-20) |
 
 ---
