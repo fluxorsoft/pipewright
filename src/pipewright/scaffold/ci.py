@@ -123,8 +123,8 @@ def render(environments: list[str], labels: list[str] | None = None, promotions:
         if checks_environment in environments:
             raise ConfigError(f"--checks-environment {checks_environment}: a Pipewright environment's GitHub "
                               "environment carries its reviewers; give the checks one of their own")
-        checks_value = (f"{checks_environment}   # ci init --checks-environment: {environments[0]}'s variables, "
-                        "no reviewers")
+        checks_value = (f"{checks_environment}   # ci init --checks-environment: no reviewers; the read-only checks "
+                        f"identity (FR-131) or {environments[0]}'s variables")
     else:
         checks_value = environments[0]
     promotions = {e: s for e, s in (promotions or {}).items() if e in environments}
