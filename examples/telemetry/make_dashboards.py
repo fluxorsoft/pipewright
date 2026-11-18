@@ -103,7 +103,8 @@ def dashboard(uid, title, desc, panels, tags):
     return {"title": title, "uid": uid, "description": desc, "tags": ["pipewright", "opentelemetry", *tags],
             "timezone": "utc", "editable": True, "schemaVersion": 39, "version": 1, "refresh": "30s",
             "time": {"from": "now-1h", "to": "now"}, "graphTooltip": 1,
-            "links": [{"title": "Pipewright dashboards", "type": "dashboards", "tags": ["pipewright"], "asDropdown": True}],
+            "links": [{"title": "Pipewright dashboards", "type": "dashboards", "tags": ["pipewright"],
+                       "asDropdown": True}],
             "templating": {"list": [
                 {"name": "prometheus", "label": "Metrics", "type": "datasource", "query": "prometheus", "hide": 0},
                 {"name": "tempo", "label": "Traces", "type": "datasource", "query": "tempo", "hide": 0},
@@ -129,7 +130,8 @@ def pq(q, by="le"):
 RUNS = '{ resource.service.name = "pipewright-launcher" && name = "pipewright.run" }'
 SLOW = '{ resource.service.name = "pipewright-launcher" && name = "pipewright.run" && duration > 10m }'
 FAILED = '{ resource.service.name = "pipewright-launcher" && name = "pipewright.run" && status = error }'
-REFUSALS = '{ resource.service.name = "pipewright-launcher" && name = "pipewright.run.start" && span.pipewright.outcome =~ "refused|held|submit_failed" }'
+REFUSALS = ('{ resource.service.name = "pipewright-launcher" && name = "pipewright.run.start" && '
+            'span.pipewright.outcome =~ "refused|held|submit_failed" }')
 
 OVERVIEW = dashboard("pipewright-overview", "Pipewright: every model run, through one door",
     "The launcher starts every training, scoring and monitoring run, applies the platform's rules first, holds what "
@@ -165,7 +167,8 @@ SRE = dashboard("pipewright-sre", "Pipewright: SRE and platform",
     series("Refused share of triggers", [(f"sum(increase(pipewright_runs_refused_total{UC}[$__rate_interval])) / "
                                           f"(sum(increase(pipewright_runs_started_total{UC}[$__rate_interval])) + "
                                           f"sum(increase(pipewright_runs_refused_total{UC}[$__rate_interval])))",
-                                          "refused")], 0, 15, 8, unit="percentunit", stack=False, color=AMBER, maximum=1),
+                                          "refused")], 0, 15, 8, unit="percentunit", stack=False, color=AMBER,
+           maximum=1),
     series("Retries absorbed", [(f"sum by (trigger) (increase(pipewright_runs_deduplicated_total{UC}"
                                  "[$__rate_interval]))", "{{trigger}}")], 8, 15, 8, style="bars"),
     series("Failed scheduled checks, by check", [("sum by (check) (increase(pipewright_tick_failures_total"
@@ -201,12 +204,12 @@ GOVERNANCE = dashboard("pipewright-governance", "Pipewright: governance and risk
     text("### The rules at work\nEvery run goes through the launcher, which applies the platform's rules before "
          "anything runs: integrity, feature contracts, scoring that waits for a person. This shows what they held "
          "and refused. **The record of decisions stays the event log and the evidence packs.**", 0),
-    stat("Held for a person", f'sum(increase(pipewright_runs_refused_total{{usecase=~"$usecase",reason="held"}}'
+    stat("Held for a person", 'sum(increase(pipewright_runs_refused_total{usecase=~"$usecase",reason="held"}'
                               "[$__range]))", 0, 3, 6, AMBER),
-    stat("Refused: integrity", f'sum(increase(pipewright_runs_refused_total{{usecase=~"$usecase",reason="integrity"}}'
+    stat("Refused: integrity", 'sum(increase(pipewright_runs_refused_total{usecase=~"$usecase",reason="integrity"}'
                                "[$__range]))", 6, 3, 6, RED),
-    stat("Refused: feature contract", f'sum(increase(pipewright_runs_refused_total{{usecase=~"$usecase",'
-                                      f'reason="features"}}[$__range]))', 12, 3, 6, RED),
+    stat("Refused: feature contract", 'sum(increase(pipewright_runs_refused_total{usecase=~"$usecase",'
+                                      'reason="features"}[$__range]))', 12, 3, 6, RED),
     stat("Retrain decisions waiting", OPEN, 18, 3, 6, ORANGE, graph="none"),
     series("Held and refused, by reason", [(f"sum by (reason) (increase(pipewright_runs_refused_total{UC}"
                                             "[$__rate_interval]))", "{{reason}}")], 0, 8, 12, style="bars"),

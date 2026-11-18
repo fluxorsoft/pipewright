@@ -189,6 +189,7 @@ def create_app(registry: Registry | None = None) -> Flask:
         """FR-127: every run start, measured (off until telemetry is configured; never changes the outcome)."""
         kind = _trigger_kind(trigger)
         telemetry.know(contract.usecase, contract.tenant)
+        telemetry.prime(contract.usecase, contract.triggers)       # a release that went live after startup
         with telemetry.span("pipewright.run.start", usecase=contract.usecase, tenant=contract.tenant,
                             pipeline=pipeline, trigger=kind, release=contract.release_id, run_id=rid) as sp:
             try:
@@ -1190,6 +1191,7 @@ def _startup_app() -> Flask | None:
     telemetry.configure(registry.manifest, __version__, gcp=registry.gcp)      # FR-127: off unless the manifest asks
     for c in live:
         telemetry.know(c.usecase, c.tenant)
+        telemetry.prime(c.usecase, c.triggers)      # counters at 0, so dashboards see each kind's first refusal
     log.info("launcher for %s: %d live use case(s) %s, errors %s", registry.manifest["environment"], len(live),
              [c.usecase for c in live], registry.errors)
     return create_app(registry)

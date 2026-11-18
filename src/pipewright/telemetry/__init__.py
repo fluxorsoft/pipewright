@@ -54,6 +54,7 @@ class _State:
         self.failed_exports = 0
         self.last_diagnostic = 0.0
         self.cases = None               # a callable: {usecase: open cases}
+        self.primed: set[str] = set()   # use cases whose counters were created at 0
         self.lock = threading.Lock()
 
 
@@ -187,6 +188,10 @@ def _start(cfg: Settings, manifest: dict, version: str, span_exporter=None, metr
     _s.instruments = inst
     _s.providers = [tp, mp]
     _s.on = True
+    try:
+        _prime_checks()
+    except Exception:  # noqa: BLE001
+        log.debug("telemetry: checks not primed", exc_info=True)
     import atexit
 
     atexit.register(shutdown)
@@ -271,6 +276,59 @@ def know(usecase: str | None = None, tenant: str | None = None) -> None:
         _s.usecases.add(usecase)
     if tenant:
         _s.tenants.add(tenant)
+
+
+PRIME_SHARE = 0.5                   # priming may fill at most half the series budget; real traffic keeps the rest
+
+
+def _triggers_of(triggers: dict) -> list[tuple[str, str | None]]:
+    """(trigger, pipeline or None) pairs a use case's live release can produce."""
+    out = []
+    if triggers.get("landing_prefix"):
+        out.append(("landing", triggers.get("landing_pipeline") or "training"))
+    for sched in (triggers.get("schedules") or {}).values():
+        out.append(("schedule", (sched or {}).get("pipeline", "training")))
+    if triggers.get("api"):
+        out += [("api", None), ("request", None)]
+    return list(dict.fromkeys(out))
+
+
+def prime(usecase: str, triggers: dict | None) -> int:
+    """Create the counters a use case can increment at 0 (FR-127, found in the dashboards' live test): a backend's
+    increase() cannot see a new series' first sample, so without this the first refusal of each kind is lost.
+    Only the triggers the live release configures, with every refusal reason; once per use case; never past
+    PRIME_SHARE of the series budget. Returns the series created."""
+    if not _s.on or not usecase or usecase in _s.primed:
+        return 0
+    try:
+        _s.primed.add(usecase)
+        know(usecase)
+        pairs = _triggers_of(triggers or {})
+        kinds = list(dict.fromkeys(t for t, _ in pairs))
+        reasons = [r for r in catalogue.REASONS if r != "other"]
+        wanted = [("pipewright.runs.started", {"usecase": usecase, "pipeline": p, "trigger": t}) for t, p in pairs if p]
+        wanted += [("pipewright.runs.deduplicated", {"usecase": usecase, "trigger": t}) for t in kinds]
+        wanted += [("pipewright.runs.refused", {"usecase": usecase, "trigger": t, "reason": r})
+                   for t in kinds for r in reasons]
+        with _s.lock:
+            room = int(catalogue.SERIES_BUDGET * PRIME_SHARE) - len(_s.series)
+        if len(wanted) > room:
+            log.info("telemetry: %s not primed (%d series would pass the priming share of the budget)", usecase,
+                     len(wanted))
+            return 0
+        for name, values in wanted:
+            _s.instruments[name].add(0, _attrs(_metric(name), values))
+        return len(wanted)
+    except Exception:  # noqa: BLE001 - never fail the caller
+        log.debug("telemetry: %s not primed", usecase, exc_info=True)
+        return 0
+
+
+def _prime_checks() -> None:
+    m = _metric("pipewright.tick.failures")
+    for check in catalogue.CHECKS:
+        if check != "other":
+            _s.instruments[m.name].add(0, _attrs(m, {"check": check}))
 
 
 def _attrs(metric: catalogue.Metric, values: dict) -> dict:

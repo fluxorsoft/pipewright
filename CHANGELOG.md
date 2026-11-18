@@ -21,6 +21,10 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   blocks the launcher. `doctor` says whether it is on and refuses an invalid setting. The `otel` extra (OTLP over
   HTTP, no gRPC) is in the launcher image; without the setting nothing is imported. Step spans on Agent Platform and
   on Kubeflow (whose runs keep the trace in their description).
+  The counters a live release can increment start at 0 (its triggers, every refusal reason, the scheduled
+  checks), so a dashboard's `increase()` sees the first refusal of each kind; at most half the series budget.
+  Sample Grafana dashboards per persona (overview, SRE, ML team, governance) and a demo traffic generator are
+  in [examples/telemetry](examples/telemetry).
 - **A team reads its own view of the event log (FR-134).** A manifest may name a tenant's own view of the event log
   (`tenants.<t>.events_view`, `project.dataset.view`; Pipewright Enterprise writes its `pipewright_events` view
   there). Commands run for that tenant's use cases (`deploy-model`, `promote`, the integrity checks, `lineage`) read

@@ -228,9 +228,12 @@ def test_the_launcher_measures_without_changing_anything(otel, monkeypatch):
     first = client.post("/pubsub", json=_envelope("incoming/nimbus/jan.csv"))
     again = client.post("/pubsub", json=_envelope("incoming/nimbus/jan.csv"))
     assert first.json["results"][0]["status"] == "submitted" and again.json["results"][0]["status"] == "duplicate"
-    assert points(reader, "pipewright.runs.started") == [
+    def counted(name):                                                   # the primed series stay at 0
+        return [pt for pt in points(reader, name) if pt[1]]
+
+    assert counted("pipewright.runs.started") == [
         ({"usecase": "churn-nimbus", "pipeline": "training", "trigger": "landing"}, 1)]
-    assert points(reader, "pipewright.runs.deduplicated") == [({"usecase": "churn-nimbus", "trigger": "landing"}, 1)]
+    assert counted("pipewright.runs.deduplicated") == [({"usecase": "churn-nimbus", "trigger": "landing"}, 1)]
     (lat,) = points(reader, "pipewright.trigger.latency")
     assert lat[0] == {"trigger": "landing", "tenant": "nimbus"}
     label = calls[0][1]["pipewright-trace"]                              # the run carries its trigger's trace
@@ -354,3 +357,31 @@ def test_shutdown_is_bounded_even_when_the_backend_hangs():
     telemetry.shutdown(deadline_ms=1500)
     assert time.perf_counter() - t0 < 3 and not telemetry.is_on()
     telemetry.reset()
+
+
+def test_counters_start_at_zero_for_what_a_release_can_produce(otel, monkeypatch):
+    # FR-127, found in the dashboards' live test: increase() cannot see a new series' first sample, so the first
+    # refusal of each kind was lost; the launcher creates the series a live release can increment at 0
+    _, reader = otel
+    triggers = {"landing_prefix": "in/", "landing_pipeline": "inference", "schedules": {"nightly": {}}}
+    n = telemetry.prime("churn", triggers)
+    reasons = len([r for r in catalogue.REASONS if r != "other"])
+    assert n == 2 + 2 + 2 * reasons                      # started and retries per trigger, every refusal reason
+    assert telemetry.prime("churn", triggers) == 0       # once per use case
+    refused = points(reader, "pipewright.runs.refused")
+    assert {"usecase": "churn", "trigger": "landing", "reason": "integrity"} in [a for a, _ in refused]
+    assert all(v == 0 for _, v in refused) and not any(a["trigger"] == "api" for a, _ in refused)
+    started = {(a["pipeline"], a["trigger"]) for a, _ in points(reader, "pipewright.runs.started")}
+    assert started == {("inference", "landing"), ("training", "schedule")}
+    checks = {a["check"] for a, v in points(reader, "pipewright.tick.failures") if v == 0}
+    assert checks == set(catalogue.CHECKS) - {"other"}
+    monkeypatch.setattr(catalogue, "SERIES_BUDGET", 40)  # priming never takes more than half the budget
+    assert telemetry.prime("fraud", {"api": True}) == 0 and "fraud" in telemetry._s.usecases
+    telemetry.count("pipewright.runs.refused", usecase="churn", trigger="landing", reason="integrity")
+    assert ({"usecase": "churn", "trigger": "landing", "reason": "integrity"}, 1) in \
+        points(reader, "pipewright.runs.refused")
+
+
+def test_priming_is_a_no_op_when_telemetry_is_off():
+    telemetry.reset()
+    assert telemetry.prime("churn", {"api": True}) == 0
