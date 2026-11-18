@@ -96,10 +96,14 @@ def settings(manifest: dict, env: dict | None = None, secret=None) -> Settings |
     headers = {}
     if otlp.get("headers_secret"):
         text = secret(otlp["headers_secret"]) if secret else ""
-        for part in (text or "").split(","):
+        from urllib.parse import unquote
+
+        # the OpenTelemetry form (OTEL_EXPORTER_OTLP_HEADERS): key=value pairs, values URL-encoded, so a vendor's
+        # "Authorization=Basic%20..." is sent as "Basic ..." (found in the phase 11 round with Grafana Cloud's value)
+        for part in (text or "").strip().split(","):
             if "=" in part:
                 k, v = part.split("=", 1)
-                headers[k.strip()] = v.strip()
+                headers[unquote(k.strip())] = unquote(v.strip())
     ratio = float(otlp.get("sample_ratio", 1.0))
     if not 0 <= ratio <= 1:
         raise ValueError("observability.otlp.sample_ratio: between 0 and 1")

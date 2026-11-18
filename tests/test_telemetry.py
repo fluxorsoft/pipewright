@@ -84,6 +84,9 @@ def test_headers_come_from_a_secret_never_the_manifest():
                                     "headers_secret": "projects/p/secrets/otel/versions/1"}}}
     s = telemetry.settings(m, env={}, secret=lambda name: "Authorization=Bearer t0ken, X-Team=ml")
     assert s.headers == {"Authorization": "Bearer t0ken", "X-Team": "ml"}
+    grafana = telemetry.settings(m, env={}, secret=lambda name: "Authorization=Basic%20MTIzOnRvaw==
+")
+    assert grafana.headers == {"Authorization": "Basic MTIzOnRvaw=="}       # URL-encoded, as Grafana Cloud gives it
 
 
 def test_a_bad_setting_turns_telemetry_off_not_the_launcher():
