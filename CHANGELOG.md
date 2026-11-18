@@ -3,6 +3,31 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
+## [Unreleased]
+
+Phase 11, on branch `phase-11`. Additive: an environment or use case that sets nothing new behaves as in 1.4.4.
+
+### Added
+
+- **A team reads its own view of the event log (FR-134).** A manifest may name a tenant's own view of the event log
+  (`tenants.<t>.events_view`, `project.dataset.view`; Pipewright Enterprise writes its `pipewright_events` view
+  there). Commands run for that tenant's use cases (`deploy-model`, `promote`, the integrity checks, `lineage`) read
+  approvals and release contracts through it, so the team's identities, CI included, need no access to every team's
+  events. Found in the 1.4.4 GA QA: `deploy-model` from CI on Enterprise was refused ("the event log cannot be
+  read"); until this release the workaround is the CI identity in `observability.evidence_readers`. The launcher
+  reads the evidence dataset's table as before. Unset: as before.
+- **Who may write the Feature Store registry (FR-149):** the manifest's `policies.feature_registry`, `runners_write`
+  (the default, as before) or `runners_read`, written by the starter's and Enterprise's Terraform, which then leave
+  every Feature Store write out of the runner's role. Runs only read feature groups, so nothing a run does changes.
+
+### Fixed
+
+- **`deploy-model --undeploy` for a use case that no longer validates (FR-136).** Taking an endpoint down was refused
+  when the use case's YAML failed validation, so a broken configuration kept the endpoint, and its cost, running.
+  Undeploy now falls back to what the live release recorded (its name, team, model and where it serves) and says
+  so; health policies are left until the use case validates again. Every other `deploy-model` action still needs a
+  use case that validates.
+
 ## [1.4.4] - 2026-11-16
 
 Two things, both off until turned on: a use case or environment that sets neither releases and runs exactly as

@@ -255,6 +255,14 @@ busy model slows the others. `doctor` shows each model's share of its pool.
 KServe on private GKE calls a lookup service inside the cluster directly. The guideline and a tested manifest are in
 [examples/gke-lookup/](../examples/gke-lookup/).
 
+## Taking a model down when the use case does not validate (FR-136)
+
+`deploy-model --undeploy` needs nothing from the use case's configuration but its name, its team, the model and
+where it serves. When the YAML fails validation it takes them from the live release instead, says so, and removes
+what serves (Agent Platform endpoint or KServe InferenceService) and the lookup service. Health policies stay until
+the use case validates again and `pipewright alerts sync` runs. Every other `deploy-model` action still needs a use
+case that validates.
+
 ## Serving observability (1.4.3, FR-98)
 
 Pipewright does not run a monitoring engine of its own. It turns your YAML into Cloud Monitoring alert policies,
