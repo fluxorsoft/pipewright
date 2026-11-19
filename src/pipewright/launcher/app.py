@@ -92,10 +92,10 @@ def create_app(registry: Registry | None = None) -> Flask:
         return state["registry"]
 
     def _event(event_type: str, contract: ReleaseContract, rid: str | None, attributes: dict | None = None,
-               **data) -> None:
+               release: str | None = None, **data) -> None:
         topic = (reg().manifest.get("observability") or {}).get("events_topic")
         events.emit(events.event(event_type, contract.usecase, contract.environment, contract.tenant,
-                                 contract.release_id, rid, **data), topic, getattr(reg(), "gcp", None),
+                                 release or contract.release_id, rid, **data), topic, getattr(reg(), "gcp", None),
                     region=contract.region, attributes=attributes)
 
     def _held_store():
@@ -842,7 +842,9 @@ def create_app(registry: Registry | None = None) -> Flask:
         if not result.get("repeated"):
             ml = (contract.static_parameters or {}).get("ml_config") or {}
             primary = (ml.get("evaluation") or {}).get("primary_metric")
-            _event("model.registered", contract, rid, model=body.get("display_name"), version=result.get("version"),
+            # 1.4.5 GA QA (live): a release made while the run trained was named; the version's release is the run's
+            _event("model.registered", contract, rid, release=result.get("trained_by"),
+                   model=body.get("display_name"), version=result.get("version"),
                    default=result.get("default"), primary_metric=primary,
                    primary_value=(body.get("metrics") or {}).get(primary) if primary else None,
                    files=body.get("files"), registered_by="launcher")

@@ -328,9 +328,10 @@ def test_the_version_is_labelled_with_the_release_that_ran(store):
     # 1.4.3 GA QA (live): a same-commit re-release keeps the component image built for the earlier release, so the
     # step's label named that one and promotion refused the version; the run's own label names the release that ran
     gcp = FakeGcp(models=[{"name": "projects/p/locations/r/models/churn", "createTime": "1"}])
-    reg.Registrations(gcp, "acme-artifacts", dict, job(release="c9f57c514102-f0f6f3e0")).register(
+    result = reg.Registrations(gcp, "acme-artifacts", dict, job(release="c9f57c514102-f0f6f3e0")).register(
         contract("auto"), body(labels={"release": "c9f57c514102"}), RUNNER)
     assert gcp.uploads[0]["model"]["labels"]["release"] == "c9f57c514102-f0f6f3e0"
+    assert result["trained_by"] == "c9f57c514102-f0f6f3e0"        # 1.4.5: model.registered names it too
 
 
 class VersionsGcp(FakeGcp):

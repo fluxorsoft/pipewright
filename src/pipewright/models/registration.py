@@ -299,6 +299,8 @@ class Registrations:
             # the same commit) is the earlier release: promotion then refused the version as trained by another.
             body = {**body, "labels": {**(body.get("labels") or {}), "release": str(job["release"])[:63]}}
         result = self.register_bqml(contract, body, ml) if bqml else self.upload(contract, body, ml)
+        if job.get("release"):
+            result = {**result, "trained_by": str(job["release"])}   # model.registered names it (1.4.5 GA QA)
         answer = {"status": "registered", "run_id": run_id, "request": digest, **result}
         self.answer(contract, run_id, answer)
         return answer
