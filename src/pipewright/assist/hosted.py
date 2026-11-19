@@ -93,7 +93,9 @@ def _call(url: str, headers: dict, arguments: dict) -> dict:
         return {"ok": False, "refused": f"the tool server did not admit you ({status}): only the team's "
                                         "listed engineers may ask, with a Google ID token"}
     if status >= 400:
-        raise RuntimeError(f"the tool server answered {status}: {text[:200]}")
+        # 1.4.5 GA QA: from outside the network Cloud Run answers with an HTML 404 page; quote it only if it is not HTML
+        detail = "a web page, not the tool server" if text.lstrip().lower().startswith(("<html", "<!doctype")) else text[:200]
+        raise RuntimeError(f"the tool server answered {status}: {detail}")
     if "text/event-stream" in kind:                                    # the same answer, framed as one event
         text = next((line[5:].strip() for line in text.splitlines() if line.startswith("data:")), "")
     reply = json.loads(text)
