@@ -282,3 +282,35 @@ def test_an_overlapping_watch_run_skips_without_events(monkeypatch):
     registry.gcp = object()
     r = create_app(registry).test_client().post("/integrity/tick", json={})
     assert r.json["status"] == "skipped" and emitted == [] and ran == []
+
+
+def test_the_first_manifest_read_waits_for_credentials(monkeypatch):
+    # 1.4.5 GA QA (live, GKE): a new pod's first token request failed and the launcher exited three times
+    from google.auth.exceptions import RefreshError
+
+    from pipewright.launcher import registry as registry_module
+
+    calls = []
+
+    def read(self):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RefreshError("metadata server not ready")
+        return {"artifacts_bucket": "b"}
+
+    monkeypatch.setattr(registry_module.Registry, "_read_manifest", read)
+    monkeypatch.setattr(registry_module.time, "sleep", lambda s: None)
+    r = registry_module.Registry(None, "gs://b/pipewright/environment.json")
+    assert r.bucket == "b" and len(calls) == 3
+
+
+def test_a_missing_manifest_is_not_retried(monkeypatch):
+    from pipewright.errors import ConfigError
+    from pipewright.launcher import registry as registry_module
+
+    def read(self):
+        raise ConfigError("manifest not found")
+
+    monkeypatch.setattr(registry_module.Registry, "_read_manifest", read)
+    with pytest.raises(ConfigError):
+        registry_module.Registry(None, "gs://b/pipewright/environment.json")

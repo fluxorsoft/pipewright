@@ -23,13 +23,32 @@ class Registry:
         self.gcp = gcp
         self.ttl = ttl
         self.manifest_uri = manifest_uri
-        self.manifest = self._read_manifest()
+        self.manifest = self._first_manifest()
         self.bucket = self.manifest["artifacts_bucket"]
         self._contracts: dict[str, ReleaseContract] = {}      # object name -> contract (immutable)
         self._live: list[ReleaseContract] = []
         self._errors: dict[str, str] = {}
         self._loaded = 0.0
         self._lock = threading.Lock()
+
+    def _first_manifest(self, wait_seconds: float = 120, pause: float = 5) -> dict:
+        """The manifest at start. On GKE a new pod's credentials can fail for its first seconds, while Workload
+        Identity's metadata server gets ready (1.4.5 GA QA, live: the launcher exited three times before it came up);
+        credential and network errors are retried for up to two minutes, anything else stops at once."""
+        try:
+            from google.auth.exceptions import RefreshError, TransportError
+            transient: tuple = (RefreshError, TransportError, ConnectionError, TimeoutError)
+        except ImportError:                                           # pragma: no cover - the gcp extra is installed
+            transient = (ConnectionError, TimeoutError)
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                return self._read_manifest()
+            except transient as e:
+                if time.monotonic() >= deadline:
+                    raise
+                log.warning("manifest not readable yet (%s: %s); retrying", type(e).__name__, str(e)[:120])
+                time.sleep(pause)
 
     def _read_manifest(self) -> dict:
         bucket, _, name = self.manifest_uri.removeprefix("gs://").partition("/")
