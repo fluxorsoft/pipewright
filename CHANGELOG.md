@@ -52,6 +52,10 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   Agent Platform does not deploy onto a shared pool (FR-105) inside an enforced VPC Service Controls perimeter; the
   deploy failed only at the end. `validate`, and so `doctor` and `release`, now refuse `model.serving.pool` where the
   manifest's `security.perimeter_enforced` is true (Pipewright Enterprise 1.4.5 writes it). A dry run is not affected.
+- **"Blocked now": blocked until a success (found in the 1.4.5 GA QA, live; the founder's rule).** Assist reported a
+  pipeline as blocked although a run that started with the failed one succeeded after it; a run now unblocks when it
+  succeeds after the failure ended, and a re-run still going leaves the pipeline blocked. Pipewright Enterprise 1.4.5's
+  Fleet View uses the same rule.
 - **The online sync's missing-database hint names the setup job (found in the 1.4.5 GA QA).** It told starter users
   to run `pipewright features online-setup` from their machine, which cannot reach the private instance.
 - **`deploy-model --undeploy` for a use case that no longer validates (FR-136).** Taking an endpoint down was refused

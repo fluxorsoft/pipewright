@@ -87,8 +87,9 @@ pipewright assist ask "which use cases are blocked, and on whom?" --env test --p
 | `--tenant` | A member of the team | The team's use cases that have Assist on |
 | `--platform` | The platform team | The whole environment: failures of the last 7 days by owner, and what is blocked now |
 
-A use case is **blocked** when the latest run of one of its pipelines failed, or could not be submitted, and none has
-succeeded since. A run waiting for an approver is waiting, not blocked.
+A use case is **blocked** when the latest run of one of its pipelines to finish failed, or could not be submitted, and
+none has succeeded since: it stays blocked while a re-run is still going, and a run that succeeds after the failure
+ended unblocks it, whenever it started. Fleet View's "Blocked now" uses the same rule. A run waiting for an approver is waiting, not blocked.
 
 Assist answers incident questions only. Anything else gets one of three fixed replies: "not covered in the preview"
 (with the command that shows the facts today), "Assist never changes anything" (with the command a person runs), or

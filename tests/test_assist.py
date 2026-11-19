@@ -234,6 +234,24 @@ def test_a_pipeline_that_succeeded_since_is_not_blocked():
     assert "demand" not in [b["usecase"] for b in out["blocked_now"]] and len(out["blocked_now"]) == 3
 
 
+def test_an_overlapping_run_that_succeeded_after_the_failure_unblocks():
+    # 1.4.5 GA QA (live): both runs started together, the failed one ended first, the other succeeded after it
+    c = json.loads(json.dumps(case("platform-week")))
+    c["data"]["runs"]["demand"] = {"ok": True, "runs": [{"run_id": "r1", "pipeline": "training", "state": "succeeded",
+                                                         "created": "2026-11-12T01:00:00Z",
+                                                         "ended": "2026-11-12T03:00:00Z"}]}
+    out = Tools(FrozenSource(c["data"]), None, None, 8, platform=True).runs("")
+    assert "demand" not in [b["usecase"] for b in out["blocked_now"]]
+
+
+def test_a_re_run_still_going_leaves_the_pipeline_blocked():
+    c = json.loads(json.dumps(case("platform-week")))
+    c["data"]["runs"]["demand"] = {"ok": True, "runs": [{"run_id": "r1", "pipeline": "training", "state": "running",
+                                                         "created": "2026-11-13T02:00:00Z", "ended": None}]}
+    out = Tools(FrozenSource(c["data"]), None, None, 8, platform=True).runs("")
+    assert "demand" in [b["usecase"] for b in out["blocked_now"]]
+
+
 # ---------------------------------------------------------------------------------------- screening --
 class Armor:
     """Model Armor, replaced: matches any text containing 'jailbreak'."""
