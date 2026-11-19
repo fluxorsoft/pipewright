@@ -411,9 +411,10 @@ def connector(env, gcp, online: dict):
             if "3D000" not in str(e):
                 raise
             raise ConfigError(f"the online store's database {online.get('database', 'features')!r} does not exist yet: "
-                              "the platform team runs the online store setup once after building it (Enterprise: "
-                              "`gcloud run jobs execute <prefix>-online-setup --wait`; the starter: `pipewright "
-                              "features online-setup`)") from None
+                              "the platform team runs the online store setup once after building it, inside the "
+                              "environment's network: `gcloud run jobs execute <prefix>-online-setup --region "
+                              "<region> --wait` (the starter and Enterprise both make that job; it runs `pipewright "
+                              "features online-setup`, which cannot reach the instance from outside)") from None
         return conn
     return connect
 
