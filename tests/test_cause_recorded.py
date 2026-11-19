@@ -858,3 +858,12 @@ def test_a_refused_permission_on_a_source_table_stays_the_platforms():
                     [_bq_record("403 Access Denied: Table pw-ebook:pw_retail.t: Permission bigquery.tables.get denied",
                                 error_type="Forbidden")])
     assert (c["rule"], c["owner"]) == ("permission", "platform")
+
+
+def test_a_second_failed_step_with_a_missing_table_gets_the_same_rule():
+    c = cause.cause({"usecase": "x", "failed_steps": ["a", "b"], "state": "failed"},
+                    [{"step": "a", "kind": "exception", "error_type": "ValueError",
+                      "code": {"file": "f.py", "line": 1}},
+                     {**_bq_record("Not found: ... p-roj:ds.missing_table"), "step": "b"}])
+    assert c["rule"] == "team_code" and c["also"] == [{"step": "b", "rule": "data_source", "owner": "team",
+                                                        "summary": "b: Not found: ... p-roj:ds.missing_table"}]

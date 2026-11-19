@@ -273,6 +273,8 @@ def cause(detail: dict, found: list[dict], pod: dict | None = None) -> dict:
         if other is record or not other.get("step") or other.get("step") == step:
             continue
         o_rule, o_who, _ = owner(other, "")
+        if o_rule == "unclear" and missing_table(other, detail.get("usecase")):
+            o_rule, o_who = "data_source", TEAM          # the same rule as the main cause's (1.4.5)
         also.append({"step": other["step"], "rule": o_rule, "owner": o_who, "summary": _one_line(other)})
     if also:
         out["also"] = also[:5]
