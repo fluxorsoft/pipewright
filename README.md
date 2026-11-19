@@ -6,7 +6,10 @@ human in the loop for every retrain decision.
 Pipewright is open source under the [Apache License 2.0](https://github.com/fluxorsoft/pipewright/blob/main/LICENSE) and maintained by
 [Fluxor Software](https://www.getpipewright.dev).
 
-> **Status: 1.4.4, why a run failed.** When a run fails, Pipewright now records why and whose it is: the step, the
+> **Status: 1.4.5, telemetry and safer CI.** The launcher's metrics and traces go to your own observability tool over
+> OpenTelemetry, with names and counts only, never data ([docs/TELEMETRY.md](docs/TELEMETRY.md)). Pull request checks run as a
+> read-only identity, the CI identity acts only in its GitHub environments, and a decision gate can be approved by a
+> GitHub reviewer. Everything new is off until set. Since 1.4.4, when a run fails, Pipewright records why and whose it is: the step, the
 > error, the line that raised it, the checks that failed, and whether the team or the platform team changes something
 > ([docs/FAILURES.md](docs/FAILURES.md)). On top of it, a preview of **Pipewright Assist** answers incident questions
 > in plain words, reads no data and changes nothing ([docs/ASSIST.md](docs/ASSIST.md)). Both are off until set.
@@ -803,12 +806,12 @@ release live in test (and its approved model) to production without rebuilding a
 ### Install a release
 
 ```bash
-pip install "pipewright-mlops[gcp]==1.4.4"     # the command is `pipewright`
-pip install "pipewright-mlops[gcp,assist]==1.4.4"     # with Pipewright Assist (preview)
+pip install "pipewright-mlops[gcp]==1.4.5"     # the command is `pipewright`
+pip install "pipewright-mlops[gcp,assist]==1.4.5"     # with Pipewright Assist (preview)
 ```
 
 Each release is also on GitHub, with the wheel and sdist as release files
-(`gh release download v1.4.4 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
+(`gh release download v1.4.5 -R fluxorsoft/pipewright`). Pin the version everywhere, CI included, directly from
 PyPI or through your organisation's package index. The launcher image for platform teams is in GitHub Container Registry
 (`ghcr.io/fluxorsoft/pipewright-launcher`), with its digest in the release notes.
 
@@ -910,14 +913,14 @@ Enterprise enquiries: [getpipewright.dev/enterprise](https://www.getpipewright.d
 | Promotion of a release and its approved model between environments | Built and used end to end |
 | Kubeflow Pipelines on private GKE (`kfp` adapter), KubeRay, KServe, CronJob schedules, the launcher in the cluster, a read-only Kubeflow UI (`pipewright pipelines-ui`) | Built and used end to end, inside an enforced perimeter |
 | Per-tenant pipeline roots | Built |
-| OpenTelemetry export: the launcher's metrics and traces to any observability tool (FR-127) | Phase 11 |
-| A read-only CI identity for pull request checks (FR-131) | Phase 11 |
+| OpenTelemetry export: the launcher's metrics and traces to any observability tool, counters from 0, sample dashboards in `examples/telemetry` ([docs/TELEMETRY.md](docs/TELEMETRY.md), FR-127) | Released in 1.4.5; used end to end on the starter's sidecar and Pipewright Enterprise's gateway (Cloud Run and GKE) |
+| A read-only CI identity for pull request checks, and the CI identity bound to its GitHub environments (FR-131) | Released in 1.4.5; used end to end in both reference CI repositories |
 | SmartNoise as a differentially private synthetic data engine (FR-137) | Phase 12 |
 | Vertex AI Model Monitoring v2 adapter (FR-138) | Phase 12 |
-| Read the team's own view of the event log, so deploys from CI work on Pipewright Enterprise (FR-134) | Phase 11 |
-| Runners cannot edit feature groups, so one team cannot change another's (Enterprise FR-149; the starter too) | Phase 11 |
-| `deploy-model --undeploy` for a use case that no longer validates (FR-136) | Phase 11 |
-| A decision gate approved by a GitHub reviewer, run live (FR-135) | Phase 11: needs GitHub Team or a public repository |
+| Read the team's own view of the event log, so deploys and promotions from CI work on Pipewright Enterprise (FR-134) | Released in 1.4.5; used end to end |
+| Runners cannot edit feature groups, so one team cannot change another's (Enterprise FR-149; the starter too) | Released in 1.4.5 |
+| `deploy-model --undeploy` for a use case that no longer validates (FR-136) | Released in 1.4.5 |
+| A decision gate approved by a GitHub reviewer, run live (FR-135) | Released in 1.4.5; needs GitHub Team or a public repository for required reviewers |
 | Pipewright Assist next: the answer sent with the alert (FR-140), further kinds of question (FR-141), a chat in Enterprise Fleet View (FR-139) | Phase 12 |
 | Plain Kubernetes on premises (FR-145) | Phase 12, on demand |
 | A/B testing of models: sticky assignment by customer for batch and online, a business metric and guardrails fixed in advance, a person decides the winner ([docs/AB_TESTING.md](docs/AB_TESTING.md)) | Released in 1.4.3; used end to end in the starter and on private GKE with KServe |
@@ -926,7 +929,7 @@ Enterprise enquiries: [getpipewright.dev/enterprise](https://www.getpipewright.d
 | The cause recorded with every failed run, its owner and the next step; runs refused at submission recorded ([docs/FAILURES.md](docs/FAILURES.md)) | Released in 1.4.4; used end to end on Agent Platform and on Kubeflow in private GKE |
 | Pipewright Assist, a preview: incident questions answered from the recorded cause, screened by Model Armor ([docs/ASSIST.md](docs/ASSIST.md)) | Released in 1.4.4 as a preview; 66 of 66 test runs against the model |
 | 1.0.0 release on GitHub (package as release files, launcher image in GitHub Container Registry) | Released |
-| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2, 1.4.3, 1.4.4) |
+| PyPI release (`pipewright-mlops`) | Released (1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.3.1, 1.4.0, 1.4.1, 1.4.2, 1.4.3, 1.4.4, 1.4.5) |
 | Ray on Agent Platform or KubeRay, a cluster per Ray step of a run | Built |
 | Features from BigQuery feature tables, point in time, for training and batch scoring | Built |
 | Agent Platform Feature Store feature groups as a feature source | Built |

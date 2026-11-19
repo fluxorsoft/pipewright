@@ -5,7 +5,7 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
 
 ## [Unreleased]
 
-Phase 11, on branch `phase-11`. Additive: an environment or use case that sets nothing new behaves as in 1.4.4.
+1.4.5: phase 11 and the fixes of its GA QA (branch `qa-1.4.5`). Additive: an environment or use case that sets nothing new behaves as in 1.4.4. The date is set at release.
 
 ### Added
 
