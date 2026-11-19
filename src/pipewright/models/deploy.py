@@ -171,7 +171,13 @@ def plan(uc: ResolvedUseCase, env: Environment, creds) -> DeployPlan:
     from pipewright.gcp import Gcp
     from pipewright.models import gates
 
-    earlier = str(default.version_id).isdigit() and int(default.version_id) > 1
+    # 1.4.5 GA QA (live): the same rule as the listing and approval (FR-124): a version trained alongside the champion,
+    # with no champion when its run started, was refused at deploy for not comparing with it
+    from pipewright.models.registry import champion_expected
+
+    vid = str(default.version_id)
+    earlier = vid.isdigit() and int(vid) > 1 and champion_expected(
+        env, creds, default.resource_name, vid, [str(i) for i in range(1, int(vid) + 1)])
     from pipewright.models import integrity
     from pipewright.models.registry import pending_approval, record_location
 

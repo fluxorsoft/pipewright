@@ -143,7 +143,7 @@ def champion_expected(env: Environment, creds, resource: str, version: str, know
     if not earlier:
         return False
     try:
-        gcp = Gcp(creds)
+        gcp = creds if isinstance(creds, Gcp) else Gcp(creds)
         api = f"https://{env.region}-aiplatform.googleapis.com/v1"
         listed = gcp.get(f"{api}/{resource}:listVersions", pageSize=100)
         rows = {str(v.get("versionId")): v for v in ((listed.body or {}).get("models") or [])} if listed.ok else {}

@@ -52,6 +52,10 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
   Agent Platform does not deploy onto a shared pool (FR-105) inside an enforced VPC Service Controls perimeter; the
   deploy failed only at the end. `validate`, and so `doctor` and `release`, now refuse `model.serving.pool` where the
   manifest's `security.perimeter_enforced` is true (Pipewright Enterprise 1.4.5 writes it). A dry run is not affected.
+- **`deploy-model` judges a version trained alongside the champion as the listing does (found in the 1.4.5 GA QA,
+  live).** Two versions trained together had no champion when their runs started; the listing and approval knew
+  it (FR-124), but `deploy-model` (Agent Platform and KServe) still read "any lower version" as a champion and
+  refused the second for not comparing with the first. All now use the same rule.
 - **The closed retrain loop can reach production when production's overrides change a pipeline's shape (the
   founder's choice, from the 1.4.5 GA QA).** `loop advance --approve` stopped at the promotion's template check
   (production ran 2 parallel trials, test 3) with no way past it. `--accept-template-change` accepts the listed

@@ -102,3 +102,26 @@ def test_yml_environment_file_is_refused(repo):
     with pytest.raises(ConfigError, match=r"environments/dev.yml: Pipewright reads .yaml files; rename it to "
                                           r"environments/dev.yaml"):
         load_environment(repo.root, "dev")
+
+
+def test_a_version_trained_alongside_the_champion_needs_no_comparison():
+    # 1.4.5 GA QA (live): deploy-model judged "a champion existed" from the version number alone; v1 and v2 were
+    # trained together, v1 registered (19:35) after v2's run started (19:20), so v2 had nothing to compare with
+    from types import SimpleNamespace
+
+    from pipewright.gcp import Gcp
+    from pipewright.models.registry import champion_expected
+
+    class FakeGcp(Gcp):
+        def __init__(self):
+            pass
+
+        def get(self, url, **params):
+            if url.endswith(":listVersions"):
+                return SimpleNamespace(ok=True, body={"models": [
+                    {"versionId": "1", "versionCreateTime": "2026-11-19T19:35:15Z", "labels": {"run_id": "run-r1"}},
+                    {"versionId": "2", "versionCreateTime": "2026-11-19T19:37:22Z", "labels": {"run_id": "run-r2"}}]})
+            return SimpleNamespace(ok=True, body={"pipelineJobs": [{"createTime": "2026-11-19T19:20:02Z"}]})
+
+    env = SimpleNamespace(region="europe-west2", project="p", kubernetes=None)
+    assert champion_expected(env, FakeGcp(), "projects/p/locations/r/models/m", "2", ["1", "2"]) is False

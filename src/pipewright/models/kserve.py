@@ -366,7 +366,11 @@ def deploy(uc: ResolvedUseCase, env: Environment, gcp, canary: bool = False, dry
     k = KServe(uc, env, gcp)
     version = default_version(uc, env, gcp)
     vid = str(version["versionId"])
-    earlier = vid.isdigit() and int(vid) > 1
+    from pipewright.models.registry import champion_expected
+
+    # 1.4.5 GA QA: the listing's rule (FR-124), not "any lower version": see models/deploy.py
+    earlier = vid.isdigit() and int(vid) > 1 and champion_expected(
+        env, gcp, version["name"].split("@")[0], vid, [str(i) for i in range(1, int(vid) + 1)])
     labels = version.get("labels") or {}
     # Phase 6 (FR-96): the gates of the release that trained the version, not the working copy's.
     rules = integrity.released_rules(uc, env, gcp, integrity.release_of(gcp, version.get("artifactUri"), labels))
