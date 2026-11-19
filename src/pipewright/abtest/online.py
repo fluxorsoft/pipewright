@@ -73,6 +73,16 @@ class Arms:
                     (self.env.observability or {}).get("events_topic"), gcp, stream=io.StringIO(),
                     region=self.env.region)
 
+    def check_idle(self) -> None:
+        """FR-74 for the arm: one change to its endpoint at a time, checked before the test is recorded. 1.4.5 GA QA
+        (found live): a start whose CLI was killed during the arm's deploy left the deploy running; the next start's
+        deploy was refused half-way ('the traffic split has been changed after the operation starts')."""
+        from pipewright.models import deploy
+
+        endpoint, _ = self._endpoint(self._ai(), create=False)
+        if endpoint is not None:
+            deploy.refuse_if_busy(self.gcp, self.env, endpoint, arm_name(self.uc))
+
     def start(self, test: dict) -> dict:
         from pipewright.models import deploy
         from pipewright.serving import endpoints as tf_endpoints
@@ -130,12 +140,18 @@ class Arms:
         replicas = serving.get("replicas") or {}
         self.log(f"deploying the treatment v{version} to {arm_name(self.uc)} on {serving.get('machine')} "
                  "(takes about 10-20 minutes)")
-        model.deploy(endpoint=endpoint, deployed_model_display_name=name, machine_type=serving.get("machine"),
-                     min_replica_count=max(int(replicas.get("min", 1)), 1),
-                     max_replica_count=max(int(replicas.get("max", 1)), 1), traffic_percentage=100, sync=True,
-                     **({"service_account": identity} if identity else {}),
-                     **({"accelerator_type": accelerator["type"],
-                         "accelerator_count": int(accelerator.get("count", 1))} if accelerator else {}))
+        from google.api_core.exceptions import GoogleAPICallError
+
+        try:
+            model.deploy(endpoint=endpoint, deployed_model_display_name=name, machine_type=serving.get("machine"),
+                         min_replica_count=max(int(replicas.get("min", 1)), 1),
+                         max_replica_count=max(int(replicas.get("max", 1)), 1), traffic_percentage=100, sync=True,
+                         **({"service_account": identity} if identity else {}),
+                         **({"accelerator_type": accelerator["type"],
+                             "accelerator_count": int(accelerator.get("count", 1))} if accelerator else {}))
+        except GoogleAPICallError as e:               # 1.4.5 GA QA: named, not a traceback
+            raise ConfigError(f"deploying the treatment v{version} to {arm_name(self.uc)} failed: "
+                              f"{e.message or e}") from e
 
     def apply(self, test: dict) -> None:
         from pipewright.online import launcher as online_launcher

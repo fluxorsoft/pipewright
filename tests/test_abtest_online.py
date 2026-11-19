@@ -314,6 +314,63 @@ def test_a_failed_gateway_stops_the_test_and_removes_the_arm(monkeypatch):
     assert s.store.get("churn", "lapse-v7")["state"] == "stopped" and s.current() is None
 
 
+def test_a_busy_arm_refuses_the_start_before_anything_is_recorded(monkeypatch):
+    # 1.4.5 GA QA (found live): a deploy still running on the arm (its CLI was killed) made the next start's deploy
+    # fail half-way; FR-74's rule now applies to the arm, before the approval or the test is recorded
+    from pipewright.loop import driver
+    from pipewright.models import deploy, registry
+    from pipewright.retraining.store import CaseStore
+    from pipewright.runs import launch
+    from tests.test_abtest_service import _svc
+
+    monkeypatch.setattr(deploy, "check_approval", lambda *a: None)
+    monkeypatch.setattr(CaseStore, "current", lambda self, uc: None)
+    monkeypatch.setattr(driver, "finished", lambda loop: True)
+    monkeypatch.setattr(registry, "versions", lambda *a, **k: [SimpleNamespace(version_id="5", default=True)])
+    monkeypatch.setattr(launch, "live_release", lambda *a: "R1")
+    found =SimpleNamespace(resource_name="projects/1/locations/r/endpoints/5")
+    arms, ai = _arms(monkeypatch, endpoints=[found])
+    arms._ai = lambda: ai
+    monkeypatch.setattr(deploy, "operations_in_progress",
+                        lambda gcp, env, name: ["DeployModel started 2026-11-19 22:37:10 UTC"])
+    with pytest.raises(ConfigError, match="churn-x-ab-endpoint is busy: DeployModel started"):
+        arms.check_idle()
+    s = _svc(monkeypatch, ml={"ab_test": _section(arms={"control": "champion", "treatment": {"model_version": "7"}}),
+                              "inference": {"output_table": "preds"}})
+    s.gcp = SimpleNamespace(session=SimpleNamespace(credentials=None))
+    approved = []
+    monkeypatch.setattr(registry, "approve_for_test", lambda *a: approved.append(a) or {"files": []})
+    s.online = arms
+    with pytest.raises(ConfigError, match="is busy"):
+        s.start("a@example.com", True)
+    assert approved == [] and s.store.get("churn", "lapse-v7") is None
+    monkeypatch.setattr(deploy, "operations_in_progress", lambda gcp, env, name: [])
+    arms.check_idle()                                  # idle: nothing to say
+
+
+def test_a_failed_treatment_deploy_is_named(monkeypatch):
+    from google.api_core.exceptions import FailedPrecondition
+
+    arms, ai = _arms(monkeypatch)
+
+    class Model:
+        def __init__(self, model_name):
+            pass
+
+        @staticmethod
+        def list(filter=None):
+            return [SimpleNamespace(resource_name="projects/1/locations/r/models/9", create_time=1)]
+
+        def deploy(self, **kw):
+            raise FailedPrecondition("Fail to update the traffic split which has been changed after the operation "
+                                     "starts.")
+
+    ai.Model = Model
+    test = {"name": "lapse-v7"}
+    with pytest.raises(ConfigError, match="deploying the treatment v7 to churn-x-ab-endpoint failed: Fail to update"):
+        arms._deploy(ai, SimpleNamespace(resource_name="e"), test, "7")
+
+
 # -- KServe (private GKE) ------------------------------------------------------------------------------------------
 
 KSERVE_TEST = {"name": "lapse-k1", "usecase": "churn-x", "tenant": "churn", "unit": "customer_id", "mode": "ab",
