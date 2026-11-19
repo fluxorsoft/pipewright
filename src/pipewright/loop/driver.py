@@ -20,7 +20,7 @@ class Backend(Protocol):
     def job_state(self, env: str, job_id: str) -> str | None: ...
     def versions(self, env: str) -> list[dict]: ...                 # {version, default, labels}
     def monitoring(self, env: str, run_id: str) -> dict | None: ...  # the run's monitoring row, or None
-    def promote(self, version: str) -> dict: ...                     # test -> production, approved; {version}
+    def promote(self, version: str, accept_template_change: bool = False) -> dict: ...  # test -> production
     def approve(self, env: str, version: str) -> None: ...           # make it production's default
     def case(self) -> dict: ...
     def other_cases(self) -> list[dict]: ...                         # the use case's other cases in production
@@ -116,7 +116,7 @@ class Loop:
                                                                f"v{champion['production_version']})" if champion
                                                                else " (production has no model yet)"))
 
-    def advance(self, approve: bool = False) -> dict:
+    def advance(self, approve: bool = False, accept_template_change: bool = False) -> dict:
         """One step, when the current one is done."""
         loop = self.record()
         state = loop["state"]
@@ -133,7 +133,7 @@ class Loop:
                 self.log.append(f"{self.case_id}: validated in {self.test}; promoting it needs the production "
                                 "approval (`pipewright loop advance --approve`, or the CI gate)")
                 return loop
-            return self._promote(loop)
+            return self._promote(loop, accept_template_change)
         if state == "verifying":
             return self._after_verification(loop)
         if state == "canary":
@@ -241,7 +241,7 @@ class Loop:
             return loop
         return self._step("validated" if outcome == "ok" else "validation-failed", _note=note)
 
-    def _promote(self, loop: dict) -> dict:
+    def _promote(self, loop: dict, accept_template_change: bool = False) -> dict:
         """The production approval: promote the candidate, make it the default, then a scoring run to verify it, or
         (retraining.loop.canary) a canary on the endpoint, checked after its soak window."""
         # What production served when the loop started (GA QA: a retried approval read the default the failed try
@@ -252,7 +252,12 @@ class Loop:
         if canary:
             # Before anything changes in production: a canary needs the endpoint to serve the current version.
             self.backend.canary_ready()
-        promoted = self.backend.promote(loop["candidate"]["test_version"])
+        # 1.4.5 (founder, GA QA): production's own overrides can change a pipeline's shape (fewer parallel trials, a
+        # bigger machine); the approver accepts the listed differences, as with `pipewright promote`, and it is recorded
+        promoted = (self.backend.promote(loop["candidate"]["test_version"], accept_template_change=True)
+                    if accept_template_change else self.backend.promote(loop["candidate"]["test_version"]))
+        if accept_template_change:
+            promoted = {**promoted, "template_change_accepted": True}
         version = str(promoted["version"])
         self.backend.approve(self.production, version)
         if canary:
@@ -261,7 +266,9 @@ class Loop:
             started = self._now().replace(microsecond=0).isoformat()
             deployed = self.backend.deploy_canary(version, canary)
             return self._step("canary", promotion={"production_version": version, "previous_version": previous,
-                                                   "release_id": promoted.get("release_id")},
+                                                   "release_id": promoted.get("release_id"),
+                                                   **({"template_change_accepted": True}
+                                                      if promoted.get("template_change_accepted") else {})},
                               canary={**deployed, "started_at": started,
                                       "soak_minutes": canary["soak_minutes"]},
                               _note=f"production default v{previous} -> v{version}; canary at {canary['percent']}% "
@@ -271,7 +278,9 @@ class Loop:
         self.backend.submit(self.production, {"usecase": self.usecase, "pipeline": "inference",
                                               "source_uri": loop["source_uri"], "run_key": key, "loop": self.case_id})
         return self._step("verifying", promotion={"production_version": version, "previous_version": previous,
-                                                  "release_id": promoted.get("release_id")},
+                                                  "release_id": promoted.get("release_id"),
+                                                  **({"template_change_accepted": True}
+                                                     if promoted.get("template_change_accepted") else {})},
                           verification={"run_id": run_id, "job_id": job_id},
                           _note=f"production default v{previous} -> v{version}; verifying with a scoring run")
 

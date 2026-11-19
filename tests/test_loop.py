@@ -86,7 +86,8 @@ class FakeBackend:
     def monitoring(self, env, run_id):
         return self.rows.get((env, run_id))
 
-    def promote(self, version):
+    def promote(self, version, accept_template_change=False):
+        self.accepted = accept_template_change
         new = str(len(self.versions_of["prod"]) + 3)
         self.versions_of["prod"].append({"version": new, "default": False,
                                          "labels": {"promoted-from": "test", "source-version": version}})
@@ -334,3 +335,18 @@ def test_a_retried_production_approval_keeps_the_version_production_served_befor
     b.approve("prod", "4")                                   # the failed first try left the new version the default
     out = lp.advance(approve=True)
     assert out["promotion"]["previous_version"] == "3"
+
+
+def test_the_production_approval_may_accept_a_template_change():
+    # 1.4.5 (founder, GA QA, live): production's overrides changed the training pipeline's shape (2 parallel trials,
+    # not 3); the approver accepts the listed differences, as with promote, and the loop records it
+    b = FakeBackend()
+    lp = loop(b)
+    lp.start()
+    b.finish("test", "training", "rc-1", register="8")
+    lp.advance()
+    lp.advance()
+    b.finish("test", "inference", "rc-1-validate", alert=False)
+    assert lp.advance()["state"] == "validated"
+    out = lp.advance(approve=True, accept_template_change=True)
+    assert b.accepted is True and out["promotion"]["template_change_accepted"] is True

@@ -533,7 +533,7 @@ version it replaced. One loop runs at a time per use case, each step is recorded
 `loop.<state>`, and every run carries the case ID. The training and scoring pipelines take `champion_version` and
 `model_version` parameters for it (the example and the BigQuery ML pipelines declare them).
 `loop advance --approve` promotes, so run it from a clean checkout of the release live in test, as for
-`pipewright promote`.
+`pipewright promote`. When production's own overrides change a pipeline's shape (fewer parallel trials, a bigger machine), the promotion lists the differences and stops; `--accept-template-change` with `--approve` accepts them, recorded on the loop, as `pipewright promote --accept-template-change` does (1.4.5).
 
 Four settings under `retraining.loop` (new in 1.4.0; each off until set, in production's configuration):
 

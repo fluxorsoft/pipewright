@@ -1125,7 +1125,7 @@ def cmd_loop(args) -> int:
         record = loop.record()
         for _ in range(args.steps):          # --steps: as far as the loop can go now (CI runs it on a schedule)
             before = record.get("state")
-            record = loop.advance(approve=args.approve)
+            record = loop.advance(approve=args.approve, accept_template_change=args.accept_template_change)
             if record.get("state") == before or driver.finished(record):
                 break
     elif args.loop_command == "rollback":
@@ -1988,6 +1988,9 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--approve", action="store_true",
                             help="the production approval: promote the validated candidate and make it the default")
             sp.add_argument("--steps", type=int, default=1, help="steps to take at most (default 1)")
+            sp.add_argument("--accept-template-change", action="store_true",
+                            help="with --approve: promote although production's overrides change a pipeline's shape "
+                                 "(the differences are listed; the acceptance is recorded), as with promote")
         if action == "rollback":
             sp.add_argument("--reason", required=True, help="recorded with your name")
         sp.set_defaults(func=cmd_loop)

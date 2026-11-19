@@ -143,7 +143,7 @@ class GcpBackend:
                             "labels": v.get("labels") or {}})
         return out
 
-    def promote(self, version: str) -> dict:
+    def promote(self, version: str, accept_template_change: bool = False) -> dict:
         from pipewright.release import promote
 
         # The release that trained the candidate (its registry label), not test's live one: a team may release again
@@ -151,7 +151,8 @@ class GcpBackend:
         trained = next((v for v in self.versions(self.test.name) if str(v.get("version")) == str(version)), None)
         release = ((trained or {}).get("labels") or {}).get("release") or None
         result = promote.promote(self.path, self.test, self.production, gcp=self.gcp, model_version=version,
-                                 approve=True, loop_case=self.case_id, release_id=release)
+                                 approve=True, loop_case=self.case_id, release_id=release,
+                                 accept_template_change=accept_template_change)
         promoted = result.model_version
         if promoted is None:          # promoted already (the step is repeated): the version that came from it
             promoted = next((v["version"] for v in self.versions(self.production.name)

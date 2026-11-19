@@ -52,6 +52,10 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   Agent Platform does not deploy onto a shared pool (FR-105) inside an enforced VPC Service Controls perimeter; the
   deploy failed only at the end. `validate`, and so `doctor` and `release`, now refuse `model.serving.pool` where the
   manifest's `security.perimeter_enforced` is true (Pipewright Enterprise 1.4.5 writes it). A dry run is not affected.
+- **The closed retrain loop can reach production when production's overrides change a pipeline's shape (the
+  founder's choice, from the 1.4.5 GA QA).** `loop advance --approve` stopped at the promotion's template check
+  (production ran 2 parallel trials, test 3) with no way past it. `--accept-template-change` accepts the listed
+  differences, recorded on the loop's promotion, as with `pipewright promote`. Off by default.
 - **A missing source table is the team's (the founder's rule, from the 1.4.5 GA QA).** A run that failed because a
   BigQuery table it reads does not exist (BigQuery's "Not found" naming project, dataset and table, also in another
   location) recorded the owner as unclear. Now rule `data_source`, owner team, with what to check; Assist answers the
