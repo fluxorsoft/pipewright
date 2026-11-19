@@ -628,7 +628,20 @@ def create_app(registry: Registry | None = None) -> Flask:
                     out.append({"usecase": c.usecase, "error": str(e)[:300]})
                     continue
             if found:
-                _event(found.pop("event"), c, None, **found)
+                # 1.4.5 GA QA (live): a check forced or retried within the hour reported the same hour again (a
+                # duplicate alert); one marker per use case, event and hour, written only if absent, keeps it to one
+                name = found.pop("event")
+                hour = time.strftime("%Y%m%dT%H", time.gmtime())
+                try:
+                    from pipewright.gcp import PreconditionFailed, gcs_write
+
+                    gcs_write(gcp, m["artifacts_bucket"], f"runs/coverage/{c.usecase}/{name}/{hour}.json",
+                              json.dumps(found), if_generation_match=0)
+                except PreconditionFailed:
+                    continue                                    # this hour is reported already
+                except Exception:  # noqa: BLE001 - the marker is not written: the alert is sent anyway
+                    log.exception("coverage marker for %s not written", c.usecase)
+                _event(name, c, None, **found)
                 out.append({"usecase": c.usecase, **found})
         return out
 
