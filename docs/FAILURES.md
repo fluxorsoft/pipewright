@@ -32,6 +32,7 @@ next: an error in the use case's own code: see the file and line
 | The region cannot provide the machine you asked for | team | Google's error line |
 | A quota was reached | platform | Google's error line |
 | The step's image is missing | platform | Google's error line; on Kubeflow the pod's status |
+| A BigQuery table the run reads does not exist (BigQuery's "Not found" for a project.dataset.table, including one in another location; 1.4.5) | team | the step's failure record: check the name and location in the use case, or run the job that builds the table. A missing dataset, or one of Pipewright's own tables, stays unclear; a refused permission on the table is the platform's |
 | Pipewright refused the step because of the use case's settings or data (an entity table that already has a feature's column, a champion whose model is gone, a registration the launcher refused) | team | Pipewright's own message, which says what to change |
 | Pipewright refused the step because the environment is missing something (no launcher address, no ID token for the runner, a Ray cluster the launcher did not create) | platform | Pipewright's own message, which says what is missing |
 | Anything else | unclear | nothing names the cause: read the step's logs |

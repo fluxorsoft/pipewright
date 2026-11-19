@@ -66,7 +66,27 @@ RULES = (
      "the step's identity was refused a permission: the platform grants it, or the use case asks for less"),
 )
 RULE_NAMES = ("out_of_memory", "machine_shape", "quota", "missing_image", "perimeter", "permission", "checks",
-              "use_case_settings", "platform_settings", "team_code", "cancelled", "unclear")
+              "data_source", "use_case_settings", "platform_settings", "team_code", "cancelled", "unclear")
+
+# 1.4.5 (founder, GA QA): a BigQuery table the run reads does not exist (BigQuery's NotFound, naming project, dataset
+# and table): the team named it, or has not built it yet, or named another location. A missing DATASET stays unclear
+# (more often the environment changed), and so does a table Pipewright makes itself (<use case>_..., from tables sync).
+_MISSING_TABLE = re.compile(r"\bNot found\b.*?\b([a-z][a-z0-9-]{4,29})[:.]([A-Za-z_]\w*)\.([\w$]+)")
+DATA_SOURCE_HINT = ("a table the run reads does not exist: check its name and location in the use case, or run the "
+                    "job that builds it, then run again")
+
+
+def missing_table(record: dict | None, usecase: str | None = None) -> str | None:
+    """project.dataset.table of a missing source table the record names, or None (see _MISSING_TABLE)."""
+    if not record or record.get("error_type") not in ("NotFound", None):
+        return None
+    m = _MISSING_TABLE.search(str(record.get("message") or ""))
+    if not m:
+        return None
+    table = m.group(3)
+    if usecase and table.lower().startswith(usecase.lower().replace("-", "_") + "_"):
+        return None                                   # Pipewright's own table: tables sync, not the team's data
+    return f"{m.group(1)}.{m.group(2)}.{table}"
 
 
 def _text(value, limit: int = MAX_TEXT) -> str | None:
@@ -229,6 +249,8 @@ def cause(detail: dict, found: list[dict], pod: dict | None = None) -> dict:
     if pod and pod.get("reason"):
         line = f"{line} {pod['reason']} exit {pod.get('exit_code')}".strip()
     rule, who, hint = owner(record, line)
+    if rule == "unclear" and missing_table(record, detail.get("usecase")):
+        rule, who, hint = "data_source", TEAM, DATA_SOURCE_HINT
     step = (record or {}).get("step") or (pod or {}).get("step") or (steps[0] if steps else None)
     if record and rule not in ("out_of_memory", "machine_shape", "missing_image"):
         source = "failure_record"

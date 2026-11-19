@@ -14,6 +14,9 @@ OWNER_WORDS = {TEAM: "your team", PLATFORM: "the platform team", UNCLEAR: "uncle
 FIXES = {
     "checks": (TEAM, "The data broke the contract your use case declares. Correct the data at its source, or, if the "
                      "contract is what is wrong, change data.contract and release again.", "config/data.yaml"),
+    "data_source": (TEAM, "A table the run reads does not exist. Check its name and location in the use case, "
+                          "or run the job that builds it, then run again. Nothing is wrong with the platform.",
+                    "the source the run was given (source_uri, data.features_from)"),
     "use_case_settings": (TEAM, "Pipewright refused the step because of the use case's own settings or data. The "
                                 "cause's message says what to change; change it and release again.",
                           "the setting or table the message names"),

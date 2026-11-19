@@ -826,3 +826,35 @@ def test_the_runtime_marks_its_refusals():
     from pipewright.bqml.steps import bqml_runtime
 
     assert bqml_runtime.refused(ValueError("x"), "team").pipewright_owner == "team"
+
+
+# 1.4.5 (founder, GA QA, live): a missing source table is the team's (rule data_source); a missing dataset and a table
+# Pipewright makes itself stay unclear, and a refused permission on the same table stays the platform's.
+def _bq_record(message, error_type="NotFound"):
+    return {"step": "bqml-rows", "kind": "pipewright_error", "error_type": error_type, "message": message}
+
+
+def test_a_missing_source_table_is_the_teams():
+    c = cause.cause({"usecase": "customer-segments", "failed_steps": ["bqml-rows"], "state": "failed"},
+                    [_bq_record("Not found: ... pw-ebook:pw_retail.segment_customers")])
+    assert (c["rule"], c["owner"]) == ("data_source", "team") and "check its name and location" in c["next"]
+    c = cause.cause({"usecase": "demand-forecast", "failed_steps": ["bqml-rows"], "state": "failed"},
+                    [_bq_record("the run's rows failed (job 1): Not found: ... pw-ebook:pw_retail.weekly_product_units"
+                                " was not found in location europe-west2")])
+    assert c["rule"] == "data_source"
+
+
+def test_a_missing_dataset_or_pipewrights_own_table_stays_unclear():
+    c = cause.cause({"usecase": "x", "failed_steps": ["bqml-rows"], "state": "failed"},
+                    [_bq_record("Not found: Dataset pw-ebook:pw_retail")])
+    assert c["rule"] == "unclear"
+    c = cause.cause({"usecase": "ga-gates", "failed_steps": ["bqml-rows"], "state": "failed"},
+                    [_bq_record("Not found: Table pw-ebook:pw_retail.ga_gates_raw_customers")])
+    assert c["rule"] == "unclear"
+
+
+def test_a_refused_permission_on_a_source_table_stays_the_platforms():
+    c = cause.cause({"usecase": "x", "failed_steps": ["bqml-rows"], "state": "failed"},
+                    [_bq_record("403 Access Denied: Table pw-ebook:pw_retail.t: Permission bigquery.tables.get denied",
+                                error_type="Forbidden")])
+    assert (c["rule"], c["owner"]) == ("permission", "platform")

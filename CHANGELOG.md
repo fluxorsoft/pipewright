@@ -52,6 +52,10 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
   Agent Platform does not deploy onto a shared pool (FR-105) inside an enforced VPC Service Controls perimeter; the
   deploy failed only at the end. `validate`, and so `doctor` and `release`, now refuse `model.serving.pool` where the
   manifest's `security.perimeter_enforced` is true (Pipewright Enterprise 1.4.5 writes it). A dry run is not affected.
+- **A missing source table is the team's (the founder's rule, from the 1.4.5 GA QA).** A run that failed because a
+  BigQuery table it reads does not exist (BigQuery's "Not found" naming project, dataset and table, also in another
+  location) recorded the owner as unclear. Now rule `data_source`, owner team, with what to check; Assist answers the
+  same. A missing dataset and Pipewright's own tables stay unclear, a refused permission stays the platform's.
 - **"Blocked now": blocked until a success (found in the 1.4.5 GA QA, live; the founder's rule).** Assist reported a
   pipeline as blocked although a run that started with the failed one succeeded after it; a run now unblocks when it
   succeeds after the failure ended, and a re-run still going leaves the pipeline blocked. Pipewright Enterprise 1.4.5's
