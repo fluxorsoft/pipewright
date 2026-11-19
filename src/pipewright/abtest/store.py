@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
+from pipewright.errors import ConfigError
 from pipewright.gcp import Gcp, PreconditionFailed, gcs_list, gcs_read, gcs_write
 
 PREFIX = "ab-tests"
@@ -36,6 +37,11 @@ def test_name(usecase: str, name: str) -> str:
 def pointer_name(usecase: str) -> str:
     return f"{PREFIX}/{usecase}/current.json"
 
+
+
+class TestRefused(ConfigError, ValueError):
+    """A test that cannot start (a name used before, another test running): said as an error, not a traceback
+    (1.4.5 GA QA, live: `ab start` with a reused name printed a Python traceback)."""
 
 class TestStore:
     __test__ = False                       # not a pytest class
@@ -78,13 +84,13 @@ class TestStore:
             if pointer.get("running"):
                 running = self.get(usecase, pointer["running"]) or {}
                 if running.get("state") in ACTIVE:
-                    raise ValueError(f"{usecase} already has a test {pointer['running']} ({running.get('state')}): "
+                    raise TestRefused(f"{usecase} already has a test {pointer['running']} ({running.get('state')}): "
                                      "stop or conclude it first")
             try:
                 gcs_write(self.gcp, self.bucket, test_name(usecase, name), json.dumps(record, indent=2,
                           sort_keys=True), if_generation_match=0)
             except PreconditionFailed:
-                raise ValueError(f"a test named {name} already ran for {usecase}: a test's name is used once "
+                raise TestRefused(f"a test named {name} already ran for {usecase}: a test's name is used once "
                                  "(it salts the assignment); give the new test a new name") from None
             try:
                 gcs_write(self.gcp, self.bucket, pointer_name(usecase),
