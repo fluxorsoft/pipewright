@@ -84,6 +84,16 @@ def test_terraform_pools_are_refused_where_cmek_is_required(repo):
               manifest={"security": {"kms_key": "projects/p/locations/r/keyRings/k/cryptoKeys/a"}})()
 
 
+def test_a_pool_is_refused_inside_an_enforced_perimeter(repo):
+    # 1.4.5 GA QA (live): Agent Platform refuses deploys onto shared pools inside an enforced VPC-SC perimeter
+    with pytest.raises(ConfigError, match="enforced VPC Service Controls perimeter"):
+        setup(repo, {"pool": "shared"}, {"shared": pool()}, manifest={"security": {"perimeter_enforced": True}})()
+    uc = setup(repo, {"pool": "shared"}, {"shared": pool()}, manifest={"security": {"perimeter_enforced": False}})()
+    assert uc.ml_config()["serving"]["pool"] == "shared"      # a dry run: the pool works
+    uc = setup(repo, {}, {"shared": pool()}, manifest={"security": {"perimeter_enforced": True}})()
+    assert "pool" not in uc.model["serving"]                   # without a pool nothing is refused
+
+
 def test_image_kinds():
     assert pools.image_kind(TF) == "tensorflow" and pools.image_kind(TORCH) == "pytorch"
     assert pools.image_kind(TORCH.replace(":latest", "@sha256:" + "a" * 64)) == "pytorch"

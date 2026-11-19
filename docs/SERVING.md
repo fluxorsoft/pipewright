@@ -215,6 +215,7 @@ What Agent Platform allows, and what Pipewright checks for you:
 | A pool has at least one machine and does not scale to zero | `min_replicas` at least 1; the plan shows the standing cost |
 | The Terraform resource cannot set a pool's CMEK key or service account, and every change rebuilds it | `managed_by: ci` is the default; `terraform` is refused where CMEK is required (Enterprise) |
 | Every deploy, undeploy or resize restarts all the pool's machines, sometimes minutes after Google reports it done; the other models got about a minute of errors each time | see below |
+| Agent Platform does not deploy onto a shared pool inside an enforced VPC Service Controls perimeter ("VPC-SC is not yet supported in the model deployment with 'SHARED_RESOURCES'", 1.4.5 GA QA) | `validate` refuses `model.serving.pool` where the manifest says the perimeter is enforced (Enterprise `guardrails.vpc_sc.mode: enforce`); a dry run is fine |
 
 ### What a change to a pool does to its neighbours
 

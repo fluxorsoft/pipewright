@@ -48,6 +48,12 @@ Phase 11, on branch `phase-11`. Additive: an environment or use case that sets n
 
 ### Fixed
 
+- **A shared pool inside an enforced perimeter is refused by `validate` (found in the 1.4.5 GA QA, live).**
+  Agent Platform does not deploy onto a shared pool (FR-105) inside an enforced VPC Service Controls perimeter; the
+  deploy failed only at the end. `validate`, and so `doctor` and `release`, now refuse `model.serving.pool` where the
+  manifest's `security.perimeter_enforced` is true (Pipewright Enterprise 1.4.5 writes it). A dry run is not affected.
+- **The online sync's missing-database hint names the setup job (found in the 1.4.5 GA QA).** It told starter users
+  to run `pipewright features online-setup` from their machine, which cannot reach the private instance.
 - **`deploy-model --undeploy` for a use case that no longer validates (FR-136).** Taking an endpoint down was refused
   when the use case's YAML failed validation, so a broken configuration kept the endpoint, and its cost, running.
   Undeploy now falls back to what the live release recorded (its name, team, model and where it serves) and says

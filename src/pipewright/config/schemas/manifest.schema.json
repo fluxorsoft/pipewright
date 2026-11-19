@@ -907,6 +907,13 @@
           ],
           "description": "informational: the VPC Service Controls perimeter"
         },
+        "perimeter_enforced": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "1.4.5: the perimeter is enforced (not a dry run); shared serving pools cannot deploy inside it"
+        },
         "bigquery_kms_key": {
           "type": [
             "string",

@@ -178,6 +178,12 @@ def resolve_usecase(path: Path, env: Environment) -> ResolvedUseCase:
                             f"({env.blueprint})")
         if not resources.get("online_serving", False):
             problems.append(f"tenant {tenant!r} is not enabled for online serving in {env.name!r}")
+        if serving.get("pool") and (env.security or {}).get("perimeter_enforced"):
+            # 1.4.5 GA QA (live, ent): Agent Platform refuses every deploy onto a shared pool inside an enforced
+            # perimeter ("VPC-SC is not yet supported in the model deployment with 'SHARED_RESOURCES'")
+            problems.append(f"model.serving.pool {serving['pool']}: {env.name} has an enforced VPC Service Controls "
+                            "perimeter, and Agent Platform does not deploy onto shared pools inside one yet; leave "
+                            "model.serving.pool unset there (the use case gets its own machines)")
 
     approvals = deep_merge(_APPROVAL_DEFAULTS, eff.get("approvals", {}))
     for key, minimum in env.policies.items():
