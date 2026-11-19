@@ -75,7 +75,10 @@ class Engine:
         if screened:
             problem = self.screen.screen("question", question)
             if problem:
-                return Answer(f"Your question was not sent to the model: {problem}. Ask it in other words.",
+                # 1.4.5 GA QA (live): when screening itself could not run, rewording does not help: say who fixes it
+                then = ("The platform team checks the environment's Model Armor template; ask again once it works."
+                        if problem.startswith("screening could not run") else "Ask it in other words.")
+                return Answer(f"Your question was not sent to the model: {problem}. {then}",
                               "refused", screened=True, refused=problem)
         kind, usage = self.brain.classify(question)
         a = Answer("", kind if kind in replies.KINDS else replies.UNRELATED, screened=screened, **usage)

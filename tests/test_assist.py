@@ -306,6 +306,18 @@ def test_screening_that_cannot_run_is_said_not_skipped():
     assert "could not run" in Screen(TEMPLATE, Down()).screen("question", "why did it fail?")
 
 
+def test_a_question_refused_because_screening_cannot_run_says_who_fixes_it():
+    # 1.4.5 GA QA (live): "Ask it in other words" was wrong when Model Armor itself could not be used
+    class Down:
+        def post(self, url, body):
+            return SimpleNamespace(ok=False, status=400, body={})
+
+    c = CASES[0]
+    a = Engine(None, Tools(FrozenSource(c["data"]), "retail", None, 3), "test", Screen(TEMPLATE, Down()),
+               "churn").ask("why did it fail?")
+    assert a.kind == "refused" and "platform team checks" in a.text and "other words" not in a.text
+
+
 # -------------------------------------------------------------------------- outside incidents, record --
 @pytest.mark.parametrize("kind, must", [
     (replies.LATER, "Not covered in the preview"), (replies.ACTION, "never changes anything"),
