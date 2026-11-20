@@ -73,6 +73,23 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
   Fleet View uses the same rule.
 - **The online sync's missing-database hint names the setup job (found in the 1.4.5 GA QA).** It told starter users
   to run `pipewright features online-setup` from their machine, which cannot reach the private instance.
+- **`ab start` refuses while the arm's endpoint is busy (found in the 1.4.5 GA QA, live).** A start whose command
+  was stopped during the treatment's deploy left the deploy running; the next start deployed into the same endpoint
+  and Agent Platform refused it half-way ("the traffic split has been changed after the operation starts"). The
+  rule `deploy-model` follows (FR-74, one change to an endpoint at a time) now applies to the arm, checked before the
+  approval or the test is recorded, so a refused start leaves nothing behind. A failed treatment deploy is named, not
+  printed as a traceback, and so are a reused test name and a start while a test runs.
+- **Capture coverage is reported once per hour (found in the 1.4.5 GA QA, live).** A forced or retried check sent
+  the same hour's capture alert twice; each use case, event and hour is now reported once.
+- **`model.registered` names the release that trained the version (found in the 1.4.5 GA QA).** The event named the
+  release live when the version was registered, which differs when a release happens during training; the registry
+  label was already right.
+- **The launcher waits for credentials on its first manifest read (found in the 1.4.5 GA QA, live on GKE).** A new
+  pod read the manifest before its metadata server answered and restarted three times; the first read now retries
+  for up to two minutes.
+- **Assist names an HTML error page and a screening outage (found in the 1.4.5 GA QA).** An HTML 404 from outside
+  the network was quoted as the answer; it is named now. A question refused because Model Armor screening cannot run
+  says the platform team checks the environment's template, not "ask it in other words".
 - **`deploy-model --undeploy` for a use case that no longer validates (FR-136).** Taking an endpoint down was refused
   when the use case's YAML failed validation, so a broken configuration kept the endpoint, and its cost, running.
   Undeploy now falls back to what the live release recorded (its name, team, model and where it serves) and says

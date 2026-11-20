@@ -33,6 +33,9 @@ the request path. A log sink copies those lines into the tenant's dataset (table
 (found in the battle test: about 4% of lines, the same `insertId`), which the analysis does not mind, as it keeps
 each unit's first exposure. Count distinct `insertId` values if you count lines yourself. A use case
 whose callers send features gets a router-only gateway during the test: callers post `instances` with their `units`.
+A pause, a lower allocation or a stop reaches this router as a new revision of the gateway, so calls in the next
+minute or two may still follow the old setting (in the 1.4.5 GA QA, every unit went to the control within 97 seconds
+of a pause).
 
 **Online on KServe (private GKE).** With `model.serving.target: kserve`, the treatment is a second
 InferenceService, `<service>-ab`, serving its approved copy (the pods check every file before they start, as
