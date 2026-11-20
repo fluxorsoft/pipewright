@@ -133,7 +133,8 @@ approved at deploy and promote, and the watch names who moved it, but the defaul
 Turn it on after every use case is released with 1.4.3 or later: an older register step uploads directly and fails
 with 403. `pipewright validate` and `pipewright release` refuse a use case whose components write the registry
 themselves, naming each file, so an older step is caught before it runs; `pipewright doctor` fails while a runner can
-still upload. The check reads the component files as text: a file that only mentions an upload (a comment, a help
+still upload, and names each live release made before registration was on (its training would end with 403:
+release it again). The check reads the component files as text: a file that only mentions an upload (a comment, a help
 text) can carry the line `# pipewright: not-a-registry-write <reason>`, and `validate` then lists it as a warning with
 the reason. The marker changes nothing at run time: the runner still cannot write the registry. Cost: none (one
 request to the launcher per training run).

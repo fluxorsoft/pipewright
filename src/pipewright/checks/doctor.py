@@ -454,6 +454,7 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     res = uc.resources
     _check_failure_records(uc, report, s)
     _check_assist(uc, env, report, s)
+    _check_release_registration(uc, env, gcp, report, s)
 
     _exists(gcp, report, s, "runner service account", f"{IAM}/projects/-/serviceAccounts/"
             f"{res['runner_service_account']}", platform, lambda b: b.get("email", ""))
@@ -515,6 +516,47 @@ def check_usecase(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Repor
     _check_serving_1_4_2(uc, env, gcp, report)
     _check_permissions(uc, env, gcp, report, as_agent=as_agent, as_checks=as_checks)
 
+
+
+def _release_registration(contract) -> str | None:
+    """The registration a release was made for: ml_config.platform.registration of its training pipeline (written only
+    when the environment had policies.registration: launcher), else None."""
+    import json
+
+    target = (contract.pipelines or {}).get("training") or {}
+    params = target.get("static_parameters") or contract.static_parameters or {}
+    ml = params.get(ML_CONFIG_PARAMETER) or {}
+    if isinstance(ml, str):
+        try:
+            ml = json.loads(ml)
+        except ValueError:
+            ml = {}
+    return ((ml.get("platform") or {}) if isinstance(ml, dict) else {}).get("registration")
+
+
+def _check_release_registration(uc: ResolvedUseCase, env: Environment, gcp: Gcp, report: Report, s: str) -> None:
+    """1.4.5 GA QA (found live, T2.10): with policies.registration: launcher, a live release made before it was on
+    still runs a register step that uploads the model itself, which fails with 403 at the end of every training run.
+    Its contract does not say launcher: name it, so the team releases again before the next training run."""
+    if (env.policies or {}).get("registration") != "launcher" or "training" not in (uc.pipelines or {}):
+        return
+    from pipewright.release import service
+
+    try:
+        pointer, _ = service.read_pointer(gcp, env, uc.name)
+        if pointer is None:
+            return
+        contract = service.read_contract(gcp, env, pointer.contract)
+    except Exception as e:  # noqa: BLE001 - reported, not raised
+        report.add(s, Result(WARN, "live release: registration", f"the live release cannot be read ({e})"[:300]))
+        return
+    if _release_registration(contract) == "launcher":
+        report.add(s, Result(OK, "live release: registration", f"{pointer.release_id} registers through the launcher"))
+        return
+    report.add(s, Result(FAIL, "live release: registration",
+                         f"{pointer.release_id} was released before policies.registration: launcher was on: its "
+                         "register step uploads the model itself and fails with 403 at the end of training",
+                         f"release again (pipewright release --env {env.name} --usecase {uc.name})"))
 
 
 def _check_assist(uc: ResolvedUseCase, env: Environment, report: Report, s: str) -> None:

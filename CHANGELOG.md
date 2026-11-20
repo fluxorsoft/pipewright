@@ -81,6 +81,9 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
   champion serves nothing is refused the same way, as on KServe (found live: every call through the router failed).
   A failed treatment deploy is named, not
   printed as a traceback, and so are a reused test name and a start while a test runs.
+- **`doctor` names a live release made before registration was on (found in the 1.4.5 GA QA, live).** With
+  `policies.registration: launcher`, a release made before it still uploads its model itself and fails with 403
+  at the end of training; doctor now fails on it and says to release again.
 - **Capture coverage is reported once per hour (found in the 1.4.5 GA QA, live).** A forced or retried check sent
   the same hour's capture alert twice; each use case, event and hour is now reported once.
 - **`model.registered` names the release that trained the version (found in the 1.4.5 GA QA).** The event named the

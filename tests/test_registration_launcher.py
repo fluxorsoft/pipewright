@@ -288,6 +288,45 @@ def test_doctor_says_whether_runners_can_still_upload():
         assert result.status == getattr(doctor, level), (bindings, result)
 
 
+def test_doctor_names_a_live_release_made_before_registration_was_on(monkeypatch):
+    # 1.4.5 GA QA (T2.10, found live): the release made under registration runner still ran its own upload, which
+    # failed with 403 at the end of training; doctor said nothing about it
+    from pipewright.checks import doctor
+    from pipewright.release import service
+
+    contracts = {
+        "old": SimpleNamespace(pipelines={"training": {"static_parameters": {"ml_config": {"registry": {}}}}},
+                               static_parameters={}),
+        "new": SimpleNamespace(pipelines={"training": {"static_parameters": {
+            "ml_config": {"platform": {"registration": "launcher"}}}}}, static_parameters={}),
+        "flat": SimpleNamespace(pipelines={}, static_parameters={
+            "ml_config": json.dumps({"platform": {"registration": "launcher"}})}),
+    }
+    live = {}
+    monkeypatch.setattr(service, "read_pointer", lambda gcp, env, uc: (
+        SimpleNamespace(release_id=live["id"], contract=live["id"]) if live else None, 1))
+    monkeypatch.setattr(service, "read_contract", lambda gcp, env, name: contracts[name])
+    uc = SimpleNamespace(name="churn", pipelines={"training": 1, "inference": 1})
+    env = SimpleNamespace(name="test", policies={"registration": "launcher"})
+
+    def check(env=env, uc=uc):
+        report = doctor.Report()
+        doctor._check_release_registration(uc, env, None, report, "s")
+        return report.sections.get("s", [])
+
+    assert check() == []                                     # nothing released yet
+    for release, level in (("old", "FAIL"), ("new", "OK"), ("flat", "OK")):
+        live["id"] = release
+        [result] = check()
+        assert result.status == level, (release, result)
+    live["id"] = "old"
+    [result] = check()
+    assert "released before policies.registration: launcher was on" in result.detail
+    assert result.hint == "release again (pipewright release --env test --usecase churn)"
+    assert check(env=SimpleNamespace(name="test", policies={})) == []          # runner: nothing to say
+    assert check(uc=SimpleNamespace(name="churn", pipelines={"inference": 1})) == []   # no training here
+
+
 def test_the_answer_names_its_request_the_same_way_the_step_does():
     # GA QA: a run that sent a refused request and then a good one must take the answer to the good one only
     import hashlib
