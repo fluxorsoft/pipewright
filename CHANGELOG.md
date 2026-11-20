@@ -77,7 +77,9 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
   was stopped during the treatment's deploy left the deploy running; the next start deployed into the same endpoint
   and Agent Platform refused it half-way ("the traffic split has been changed after the operation starts"). The
   rule `deploy-model` follows (FR-74, one change to an endpoint at a time) now applies to the arm, checked before the
-  approval or the test is recorded, so a refused start leaves nothing behind. A failed treatment deploy is named, not
+  approval or the test is recorded, so a refused start leaves nothing behind. An online test on Agent Platform whose
+  champion serves nothing is refused the same way, as on KServe (found live: every call through the router failed).
+  A failed treatment deploy is named, not
   printed as a traceback, and so are a reused test name and a start while a test runs.
 - **Capture coverage is reported once per hour (found in the 1.4.5 GA QA, live).** A forced or retried check sent
   the same hour's capture alert twice; each use case, event and hour is now reported once.
