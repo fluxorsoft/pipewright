@@ -540,8 +540,10 @@ def render_test(t: dict) -> str:
     if d.get("required"):
         got = ", ".join(f"{a['group']} ({a['winner']})" for a in d.get("approvals") or []) or "none yet"
         lines.append(f"  approvals needed: {', '.join(d['required'])}; recorded: {got}")
-    if d.get("winner"):
+    if d.get("winner") and d.get("by"):
         lines.append(f"  decided: {d['winner']} ({d.get('at')}, {d.get('by')}): {d.get('reason')}")
+    elif d.get("winner"):                          # every required group agreed (1.4.5 GA QA: it printed None)
+        lines.append(f"  decided: {d['winner']} by the approver groups ({d.get('decided_at')}); a person concludes")
     if t.get("breaker"):
         lines.append(f"  the gateway's breaker tripped at {t['breaker'].get('tripped_at')}: "
                      f"{t['breaker'].get('error_rate')} errors on the treatment")

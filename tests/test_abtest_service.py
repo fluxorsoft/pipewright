@@ -399,3 +399,14 @@ def test_a_shadow_test_takes_no_layer():
     t["layer"] = {"name": "customers", "share_bp": 2000}
     abc.check({"ab_test": t, "task": "binary"}, set(), "churned", lambda *a: None, problems)
     assert any("a shadow test exposes no unit" in p for p in problems)
+
+
+def test_status_names_who_decided():
+    # 1.4.5 GA QA (live): a winner the approver groups agreed on printed "decided: treatment (None, None): None"
+    t = decide.record(_test(decision={"required": ["ml-leads"], "approvals": []}), "ml-leads", "a@example.com",
+                      "treatment", "lift is real", "t1")
+    text = svc.render_test(t)
+    [line] = [x for x in text.splitlines() if "decided:" in x]
+    assert line == "  decided: treatment by the approver groups (t1); a person concludes"
+    t["decision"].update({"at": "t2", "by": "b@example.com", "reason": "done"})
+    assert "decided: treatment (t2, b@example.com): done" in svc.render_test(t)
