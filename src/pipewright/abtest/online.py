@@ -73,13 +73,21 @@ class Arms:
                     (self.env.observability or {}).get("events_topic"), gcp, stream=io.StringIO(),
                     region=self.env.region)
 
-    def check_idle(self) -> None:
-        """FR-74 for the arm: one change to its endpoint at a time, checked before the test is recorded. 1.4.5 GA QA
-        (found live): a start whose CLI was killed during the arm's deploy left the deploy running; the next start's
-        deploy was refused half-way ('the traffic split has been changed after the operation starts')."""
+    def check_ready(self) -> None:
+        """Checked before the test is recorded (1.4.5 GA QA, both found live). The control serves: a start with
+        nothing on the champion's endpoint made every call through the router fail (the KServe arm already refused
+        it). FR-74 for the arm: one change to its endpoint at a time; a start whose CLI was killed during the arm's
+        deploy left the deploy running, and the next start's deploy was refused half-way ('the traffic split has been
+        changed after the operation starts')."""
         from pipewright.models import deploy
 
-        endpoint, _ = self._endpoint(self._ai(), create=False)
+        ai = self._ai()
+        champion = deploy.list_endpoints(ai, deploy.endpoint_name(self.uc))
+        if not champion or not champion[0].list_models():
+            raise ConfigError(f"{self.uc.name} serves nothing on {deploy.endpoint_name(self.uc)} yet: deploy the "
+                              f"champion first (pipewright deploy-model --env {self.env.name} --usecase "
+                              f"{self.uc.name}); the control answers the test's other units")
+        endpoint, _ = self._endpoint(ai, create=False)
         if endpoint is not None:
             deploy.refuse_if_busy(self.gcp, self.env, endpoint, arm_name(self.uc))
 

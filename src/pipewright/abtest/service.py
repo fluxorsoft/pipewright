@@ -141,9 +141,9 @@ class ABTests:
         release = launch.live_release(self.env, self.uc.name, self.gcp)
         # FR-123: the layer's range before the approval, so a full layer refuses before anything is recorded (found
         # in the QA battle test: the treatment's approval for the test was recorded, then the start was refused)
-        check_idle = getattr(self.online, "check_idle", None)
-        if check_idle:                                # before anything is recorded (1.4.5 GA QA)
-            check_idle()
+        check_ready = getattr(self.online, "check_ready", None)
+        if check_ready:                               # before anything is recorded (1.4.5 GA QA)
+            check_ready()
         layer = self._claim(section) if section.get("layer") else None
         try:
             record = registry.approve_for_test(self.uc, self.env, creds, treatment, section["name"], identity,

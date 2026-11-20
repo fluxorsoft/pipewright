@@ -328,13 +328,13 @@ def test_a_busy_arm_refuses_the_start_before_anything_is_recorded(monkeypatch):
     monkeypatch.setattr(driver, "finished", lambda loop: True)
     monkeypatch.setattr(registry, "versions", lambda *a, **k: [SimpleNamespace(version_id="5", default=True)])
     monkeypatch.setattr(launch, "live_release", lambda *a: "R1")
-    found =SimpleNamespace(resource_name="projects/1/locations/r/endpoints/5")
+    found = SimpleNamespace(resource_name="projects/1/locations/r/endpoints/5", list_models=lambda: ["v5"])
     arms, ai = _arms(monkeypatch, endpoints=[found])
     arms._ai = lambda: ai
     monkeypatch.setattr(deploy, "operations_in_progress",
                         lambda gcp, env, name: ["DeployModel started 2026-11-19 22:37:10 UTC"])
     with pytest.raises(ConfigError, match="churn-x-ab-endpoint is busy: DeployModel started"):
-        arms.check_idle()
+        arms.check_ready()
     s = _svc(monkeypatch, ml={"ab_test": _section(arms={"control": "champion", "treatment": {"model_version": "7"}}),
                               "inference": {"output_table": "preds"}})
     s.gcp = SimpleNamespace(session=SimpleNamespace(credentials=None))
@@ -345,7 +345,18 @@ def test_a_busy_arm_refuses_the_start_before_anything_is_recorded(monkeypatch):
         s.start("a@example.com", True)
     assert approved == [] and s.store.get("churn", "lapse-v7") is None
     monkeypatch.setattr(deploy, "operations_in_progress", lambda gcp, env, name: [])
-    arms.check_idle()                                  # idle: nothing to say
+    arms.check_ready()                                 # idle: nothing to say
+
+
+def test_an_online_test_needs_a_champion_that_serves(monkeypatch):
+    # 1.4.5 GA QA (found live): nothing on the champion's endpoint, the start went ahead and every call through the
+    # router failed; the KServe arm already refused it
+    empty = SimpleNamespace(resource_name="projects/1/locations/r/endpoints/5", list_models=lambda: [])
+    for endpoints in ([], [empty]):
+        arms, ai = _arms(monkeypatch, endpoints=endpoints)
+        arms._ai, arms.env = (lambda ai=ai: ai), SimpleNamespace(security={}, name="test")
+        with pytest.raises(ConfigError, match="churn-x serves nothing on churn-x-endpoint yet: deploy the champion"):
+            arms.check_ready()
 
 
 def test_a_failed_treatment_deploy_is_named(monkeypatch):
