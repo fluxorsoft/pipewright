@@ -195,6 +195,20 @@ def test_an_analysis_that_says_continue_is_not_evidence(monkeypatch):
     assert s.conclude("control", "keep the champion", "a@example.com", True)["decision"]["winner"] == "control"
 
 
+def test_the_groups_agreeing_is_not_evidence(monkeypatch):
+    """1.4.5 GA QA (live, production): every approver group chose the treatment a minute into a test with min_days 1;
+    concluding made it the default. The treatment wins only on evidence, with groups as without."""
+    early = {"at": "2026-11-20T04:21:00+00:00", "status": "continue", "diff": None, "ci": None}
+    agreed = {"required": ["ml-leads"], "approvals": [{"group": "ml-leads", "winner": "treatment"}],
+              "winner": "treatment", "decided_at": "2026-11-20T04:21:22+00:00"}
+    s = _svc(monkeypatch, _test(decision=agreed, analysis=early))
+    with pytest.raises(ConfigError, match="says: continue.*only on evidence"):
+        s.conclude(None, "the group chose", "a@example.com", True)
+    s = _svc(monkeypatch, _test(decision=agreed))
+    with pytest.raises(ConfigError, match="no decision-ready analysis"):
+        s.conclude(None, "the group chose", "a@example.com", True)
+
+
 def test_plan_sizes_the_test_and_warns_when_it_cannot_finish(monkeypatch):
     s = _svc(monkeypatch)
     assert "give --baseline" in s.plan()["note"]
