@@ -154,8 +154,10 @@ GitHub environments or a person.
 
 `ab conclude` with the treatment as winner makes it the default through the normal approval (the released gates, its
 files checked against its approval), removes its arm and returns routing to the use case's endpoint. Deploy the new
-default there as usual (`deploy-model`). Any other outcome removes the treatment. The treatment can win only on
-evidence: a decision-ready analysis without blocked share checks.
+default there as usual (`deploy-model`). Any other outcome removes the treatment. Without approver groups, the
+treatment can win only on evidence: a decision-ready analysis without blocked share checks. With them, the groups'
+choice stands without waiting for the planned sample, but never before `min_days` (the test's, at least the
+platform's `policies.ab_test.min_days`). Keeping the control is allowed at any time.
 
 ## The record
 

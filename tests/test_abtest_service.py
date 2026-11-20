@@ -195,18 +195,36 @@ def test_an_analysis_that_says_continue_is_not_evidence(monkeypatch):
     assert s.conclude("control", "keep the champion", "a@example.com", True)["decision"]["winner"] == "control"
 
 
-def test_the_groups_agreeing_is_not_evidence(monkeypatch):
-    """1.4.5 GA QA (live, production): every approver group chose the treatment a minute into a test with min_days 1;
-    concluding made it the default. The treatment wins only on evidence, with groups as without."""
+def test_the_groups_may_decide_but_not_before_min_days(monkeypatch):
+    """1.4.5 GA QA (live, production): every approver group chose the treatment a minute into a test and concluding made
+    it the default. The founder's rule: the groups may decide without the planned sample, never before min_days."""
+    from datetime import datetime, timedelta, timezone
+
     early = {"at": "2026-11-20T04:21:00+00:00", "status": "continue", "diff": None, "ci": None}
     agreed = {"required": ["ml-leads"], "approvals": [{"group": "ml-leads", "winner": "treatment"}],
               "winner": "treatment", "decided_at": "2026-11-20T04:21:22+00:00"}
-    s = _svc(monkeypatch, _test(decision=agreed, analysis=early))
-    with pytest.raises(ConfigError, match="says: continue.*only on evidence"):
+    monkeypatch.setattr("pipewright.models.registry.approve", lambda *a, **k: None)
+    now = datetime.now(timezone.utc)
+    minutes_in = (now - timedelta(minutes=1)).isoformat()
+    s = _svc(monkeypatch, _test(decision=dict(agreed), analysis=early, started_at=minutes_in))
+    with pytest.raises(ConfigError, match=r"run 0\.0 of its 14 minimum day\(s\).*even when the approver groups"):
         s.conclude(None, "the group chose", "a@example.com", True)
-    s = _svc(monkeypatch, _test(decision=agreed))
-    with pytest.raises(ConfigError, match="no decision-ready analysis"):
+    # the platform's floor counts when it is higher than the test's own
+    s = _svc(monkeypatch, _test(decision=dict(agreed), analysis=early,
+                                started_at=(now - timedelta(days=15)).isoformat()))
+    s.env.policies = {"ab_test": {"min_days": 20}}
+    with pytest.raises(ConfigError, match="of its 20 minimum day"):
         s.conclude(None, "the group chose", "a@example.com", True)
+    # after min_days the groups' choice stands, with no decision-ready analysis needed (as in 1.4.4)
+    s = _svc(monkeypatch, _test(decision=dict(agreed), analysis=early,
+                                started_at=(now - timedelta(days=15)).isoformat()))
+    s.gcp = SimpleNamespace(session=SimpleNamespace(credentials=None))
+    assert s.conclude(None, "the group chose", "a@example.com", True)["decision"]["winner"] == "treatment"
+    # keeping the control is allowed at any time
+    kept = {**agreed, "approvals": [{"group": "ml-leads", "winner": "control"}], "winner": "control"}
+    s = _svc(monkeypatch, _test(decision=kept, analysis=early, started_at=minutes_in))
+    s.gcp = SimpleNamespace(session=SimpleNamespace(credentials=None))
+    assert s.conclude(None, "keep it", "a@example.com", True)["decision"]["winner"] == "control"
 
 
 def test_plan_sizes_the_test_and_warns_when_it_cannot_finish(monkeypatch):

@@ -73,11 +73,12 @@ follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) 
   Fleet View uses the same rule.
 - **The online sync's missing-database hint names the setup job (found in the 1.4.5 GA QA).** It told starter users
   to run `pipewright features online-setup` from their machine, which cannot reach the private instance.
-- **The treatment wins only on evidence, with approver groups too (found in the 1.4.5 GA QA, live in production).**
-  With `decision.approvals.required`, `ab conclude` skipped the evidence check: every group choosing the treatment
-  a minute into a test with `min_days: 1` made it the default. The rule docs/AB_TESTING.md states now holds with
-  groups as without: a decision-ready analysis (after `min_days`), without blocked share checks. Keeping the
-  control is allowed at any time. `ab status` names a winner the groups agreed on (it printed `None`).
+- **Approver groups cannot make the treatment win before `min_days` (found in the 1.4.5 GA QA, live in
+  production).** With `decision.approvals.required`, every group choosing the treatment a minute into a test made it
+  the default, though the platform's `policies.ab_test.min_days` was 1 and the test's 14. The groups' choice still
+  stands without waiting for the planned sample, as in 1.4.4, but `ab conclude` now refuses it before `min_days`
+  (the test's, at least the platform's). Keeping the control is allowed at any time. `ab status` names a winner
+  the groups agreed on (it printed `None`).
 - **`ab start` refuses while the arm's endpoint is busy (found in the 1.4.5 GA QA, live).** A start whose command
   was stopped during the treatment's deploy left the deploy running; the next start deployed into the same endpoint
   and Agent Platform refused it half-way ("the traffic split has been changed after the operation starts"). The

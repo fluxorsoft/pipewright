@@ -460,11 +460,24 @@ class ABTests:
             raise ConfigError(SHADOW)
         if not (reason or "").strip():
             raise ConfigError("give --reason: it is recorded with your name")
-        if winner == "treatment" and t["state"] != "decision_required":
+        if winner == "treatment" and t["state"] != "decision_required" and t["decision"]["required"]:
+            # 1.4.5 GA QA (live, production): the approver groups chose the treatment a minute into a test and it
+            # became the default. The founder's rule (2026-11-20): the groups may decide without waiting for the
+            # planned sample (as in 1.4.4), never before min_days (the test's, at least the platform's).
+            floor = max(int((section_of(self.uc).get("duration") or {}).get("min_days") or 14),
+                        int(((self.env.policies or {}).get("ab_test") or {}).get("min_days") or 0))
+            started = datetime.fromisoformat(t["started_at"])
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - started).total_seconds() / 86400
+            if age < floor:
+                raise ConfigError(f"test {t['name']} has run {age:.1f} of its {floor} minimum day(s) (min_days): the "
+                                  "treatment cannot win before then, even when the approver groups chose it; stop "
+                                  "the test to keep the control")
+        if winner == "treatment" and t["state"] != "decision_required" and not t["decision"]["required"]:
             # 1.4.4 GA QA (live): an analysis that said "continue" (minutes into the test, no outcome matured, days
             # short of min_days) let the treatment win. Decision-ready means the analysis itself says a decision is
-            # due: the planned sample after min_days, a conclusive sequential test, or max_days. 1.4.5 GA QA (live,
-            # production): the rule holds with approver groups too; their agreement let the treatment win a minute in.
+            # due: the planned sample after min_days, a conclusive sequential test, or max_days.
             res = t.get("analysis") or {}
             if not res or res.get("blocked") or res.get("status") != "decision_required":
                 said = (" (its newest analysis says: continue)" if res.get("status") == "continue" else "")
