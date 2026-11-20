@@ -3,9 +3,9 @@
 All notable changes to Pipewright. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 follow [semantic versioning](https://semver.org/); [STABILITY.md](STABILITY.md) says what it covers.
 
-## [Unreleased]
+## [1.4.5] - 2026-11-20
 
-1.4.5: phase 11 and the fixes of its GA QA (branch `qa-1.4.5`). Additive: an environment or use case that sets nothing new behaves as in 1.4.4. The date is set at release.
+Telemetry export and safer CI and team boundaries (phase 11), with the fixes of its GA QA. Additive: an environment or use case that sets nothing new behaves as in 1.4.4, except that runners now only read the Feature Store registry (FR-149).
 
 ### Added
 
